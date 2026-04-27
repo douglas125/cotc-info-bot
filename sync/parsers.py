@@ -52,6 +52,27 @@ def _cell_text(cell: dict[str, Any]) -> str:
     return (cell.get("formattedValue") or "").strip()
 
 
+_IMAGE_FORMULA_RE = re.compile(
+    r"""=IMAGE\s*\(\s*["']([^"']+)["']""", re.IGNORECASE,
+)
+
+
+def _image_url_from_cell(cell: dict[str, Any]) -> str | None:
+    """Pull an image URL out of a cell's `=IMAGE("url")` formula, if any.
+
+    The Sheets v4 API exposes inline-image artwork only via this formula
+    path; floating drawings and Insert>Image>In-cell artwork are not
+    accessible through `spreadsheets.get`.
+    """
+    uev = cell.get("userEnteredValue") or {}
+    formula = uev.get("formulaValue")
+    if formula:
+        m = _IMAGE_FORMULA_RE.search(formula)
+        if m:
+            return m.group(1)
+    return None
+
+
 # --- hyperlink parsing ------------------------------------------------------
 
 _RANGE_RE = re.compile(r"^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$")
@@ -383,7 +404,9 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
             })
 
     # Profile column: take the longest non-empty text seen as self_buffs_text;
-    # if a cell looks like a URL, treat it as splash art.
+    # if a cell looks like a URL, treat it as splash art. Also pick up image
+    # URLs from =IMAGE() formulas and inline cell-image fields anywhere in
+    # the block, since the sheet may anchor artwork outside the profile col.
     profile_texts: list[str] = []
     for r in block_rows:
         for c in range(_COL_PROFILE, min(_COL_PROFILE + 3, len(r))):
@@ -394,6 +417,15 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
                 block.splash_art_url = block.splash_art_url or txt
             else:
                 profile_texts.append(txt)
+    if not block.splash_art_url:
+        for r in block_rows:
+            for cell in r:
+                url = _image_url_from_cell(cell)
+                if url:
+                    block.splash_art_url = url
+                    break
+            if block.splash_art_url:
+                break
     if profile_texts:
         # de-dup while preserving order
         seen: set[str] = set()

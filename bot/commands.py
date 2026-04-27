@@ -154,14 +154,14 @@ def register(tree: app_commands.CommandTree) -> None:
                 ephemeral=True,
             )
             return
-        embed = embeds.form_to_embed(conn, form_id)
-        if embed is None:
+        built = embeds.form_to_embed(conn, form_id)
+        if built is None:
             await interaction.response.send_message(
                 "That form was removed by a recent refresh — try again.",
                 ephemeral=True,
             )
             return
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embeds=built)
 
     @character_cmd.autocomplete("name")
     async def _character_ac(interaction: discord.Interaction, current: str):

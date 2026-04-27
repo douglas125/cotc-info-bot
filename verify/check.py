@@ -382,6 +382,24 @@ def check_fts_searchable(conn) -> list[tuple[bool, str]]:
     return out
 
 
+def check_splash_art_coverage(conn) -> list[tuple[bool, str]]:
+    """Report what fraction of forms have a captured splash_art_url.
+
+    Soft check — emits WARN, never FAIL — because the source sheet may
+    legitimately have no artwork for some characters. Useful for spotting
+    parser regressions where the count drops to 0 unexpectedly.
+    """
+    total = conn.execute(
+        "SELECT COUNT(*) FROM character_forms"
+    ).fetchone()[0]
+    with_art = conn.execute(
+        "SELECT COUNT(*) FROM character_profile "
+        "WHERE splash_art_url IS NOT NULL AND splash_art_url != ''"
+    ).fetchone()[0]
+    pct = (100.0 * with_art / total) if total else 0.0
+    return [(True, f"{with_art}/{total} forms have splash_art_url ({pct:.0f}%)")]
+
+
 def check_spot_characters(payload: dict, conn) -> list[tuple[bool, str]]:
     """Spot-check N specific characters: skill text and equipment from snapshot
     must appear in DB for that character."""
@@ -427,6 +445,7 @@ def run_all() -> int:
         ("Rarity distribution",      check_rarity_distribution(conn)),
         ("SEA/GL kit precedence",    check_sea_kit_precedence(payload, conn)),
         ("FTS searchable",           check_fts_searchable(conn)),
+        ("Splash-art coverage",      check_splash_art_coverage(conn)),
         ("Spot-check characters",    check_spot_characters(payload, conn)),
     ]
 
