@@ -195,11 +195,7 @@ def _format_skill_table(
 
     for s in skills:
         fixed = [_pad(_cell(c, s), widths[c]) for c in columns]
-        # Collapse newlines + runs of whitespace so wrapped lines don't
-        # carry over the source-cell's indentation as visible gaps.
         desc = " ".join((s["description"] or "").split())
-        # If the row has a skill name (rare in the live DB, common in
-        # seeded tests), prepend it to the description.
         name = s["name"] or ""
         if name and desc:
             desc = f"{name} — {desc}"
@@ -241,11 +237,10 @@ def _collapse_ultimates(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     """Fold consecutive ultimate rows that differ only by tier_level.
 
     Returns a list of synthesized records, each with:
-      "headline"  — the Lv1 (or first) row's description, scaling tags stripped
-      "tiers"     — list of (tier_level, description) for each level present
-    Solo rows (no tiering) are returned with tiers = [(None, description)].
-    Adjacency-based — `name` is NULL across the board in the live DB so we
-    can't group by name.
+      "headline" — the lowest-tier (or only) row's description
+      "tiers"    — list of (tier_level, description) for each level present
+    Adjacency-based — `name` is NULL across the live DB so we can't group
+    by name. Untiered rows form their own single-tier group.
     """
     out: list[dict[str, Any]] = []
     bucket: list[sqlite3.Row] = []
@@ -253,31 +248,24 @@ def _collapse_ultimates(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     def _flush() -> None:
         if not bucket:
             return
-        # Sort by tier_level (Nones last) so Lv1 / Lv10 / Lv20 come out in order.
         ordered = sorted(
             bucket,
             key=lambda r: (r["tier_level"] is None, r["tier_level"] or 0),
         )
-        headline = (ordered[0]["description"] or "").strip()
         tiers = [
             (r["tier_level"], (r["description"] or "").strip())
             for r in ordered
         ]
-        out.append({"headline": headline, "tiers": tiers, "rows": ordered})
+        out.append({"headline": tiers[0][1], "tiers": tiers})
 
     for r in rows:
-        # Group rows that share kind=='ultimate' and have a tier_level set.
         if r["tier_level"] is not None:
             bucket.append(r)
             continue
-        # Untiered ultimate row breaks the run — flush prior bucket, emit solo.
         _flush()
         bucket = []
-        out.append({
-            "headline": (r["description"] or "").strip(),
-            "tiers": [(None, (r["description"] or "").strip())],
-            "rows": [r],
-        })
+        desc = (r["description"] or "").strip()
+        out.append({"headline": desc, "tiers": [(None, desc)]})
     _flush()
     return out
 
@@ -418,7 +406,6 @@ def _build_gear_embed(
     form: sqlite3.Row,
     equipment: list[sqlite3.Row],
     profile: sqlite3.Row | None,
-    last_sync: sqlite3.Row | None,
 ) -> discord.Embed | None:
     has_equip = bool(equipment)
     has_profile = bool(profile and profile["self_buffs_text"])
@@ -447,10 +434,6 @@ def _build_gear_embed(
             value=_truncate(profile["self_buffs_text"], FIELD_VALUE_LIMIT),
             inline=False,
         )
-
-    if last_sync:
-        ts = last_sync["finished_at"] or last_sync["started_at"]
-        embed.set_footer(text=f"synced {ts} · status: {last_sync['status']}")
 
     return embed
 
@@ -488,12 +471,11 @@ def form_to_embed(
     if skills_embed is not None:
         out.append(skills_embed)
 
-    gear_embed = _build_gear_embed(form, equipment, profile, last_sync)
+    gear_embed = _build_gear_embed(form, equipment, profile)
     if gear_embed is not None:
         out.append(gear_embed)
-    elif last_sync is not None:
-        # No gear/profile section but we still want the sync footer
-        # somewhere — attach it to the last embed in the list.
+
+    if last_sync is not None:
         ts = last_sync["finished_at"] or last_sync["started_at"]
         out[-1].set_footer(text=f"synced {ts} · status: {last_sync['status']}")
 

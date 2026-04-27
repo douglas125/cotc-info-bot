@@ -404,28 +404,22 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
             })
 
     # Profile column: take the longest non-empty text seen as self_buffs_text;
-    # if a cell looks like a URL, treat it as splash art. Also pick up image
-    # URLs from =IMAGE() formulas and inline cell-image fields anywhere in
-    # the block, since the sheet may anchor artwork outside the profile col.
+    # if a cell looks like a URL or `=IMAGE("url")` formula, treat it as
+    # splash art. Scoped to the profile column range so per-sync overhead
+    # stays linear in block count, not block area.
     profile_texts: list[str] = []
     for r in block_rows:
         for c in range(_COL_PROFILE, min(_COL_PROFILE + 3, len(r))):
-            txt = _cell_text(r[c])
-            if not txt:
-                continue
+            cell = r[c]
+            txt = _cell_text(cell)
             if txt.lower().startswith("http"):
                 block.splash_art_url = block.splash_art_url or txt
-            else:
+            elif txt:
                 profile_texts.append(txt)
-    if not block.splash_art_url:
-        for r in block_rows:
-            for cell in r:
+            if not block.splash_art_url:
                 url = _image_url_from_cell(cell)
                 if url:
                     block.splash_art_url = url
-                    break
-            if block.splash_art_url:
-                break
     if profile_texts:
         # de-dup while preserving order
         seen: set[str] = set()
