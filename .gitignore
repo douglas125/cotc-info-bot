@@ -1,0 +1,41 @@
+# --- Local data (regenerable from sync) ---------------------------------
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# --- Secrets / per-user state -------------------------------------------
+# The app already stores the API key under ~/.cotc-search/config.toml so
+# nothing should land in the project tree, but be defensive.
+.env
+.env.*
+secrets.toml
+.streamlit/secrets.toml
+
+# --- Python -------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Conda / virtualenvs (env lives outside the project) ----------------
+.venv/
+venv/
+env/
+
+# --- IDEs / OS junk -----------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Runtime logs / temp ------------------------------------------------
+*.log
+.streamlit/logs/

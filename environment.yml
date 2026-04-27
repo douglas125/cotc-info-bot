@@ -1,0 +1,13 @@
+name: cotc-search
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - streamlit>=1.30
+      - google-api-python-client>=2.100
+      - google-auth>=2.20
+      - tenacity>=8.2
+      - pillow>=10.0
+      - pytest>=8.0
