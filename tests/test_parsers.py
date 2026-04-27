@@ -8,6 +8,7 @@ from sync.parsers import (
     Anchor,
     _color_dict_to_hex,
     _classify_skill_kind,
+    _image_url_from_cell,
     _parse_skill_description,
     parse_anchor,
     parse_index,
@@ -493,3 +494,43 @@ def test_parse_index_extracts_role_columns_and_rarity() -> None:
     tressa = next(e for e in entries if e.canonical_name == "Tressa")
     assert tressa.role == "merchant"
     assert tressa.rarity == "free35"  # green → free 3→5★
+
+
+# --- image extraction ------------------------------------------------------
+
+def test_image_url_from_cell_extracts_from_image_formula() -> None:
+    cell = {"userEnteredValue": {"formulaValue": '=IMAGE("https://example.com/cyrus.png")'}}
+    assert _image_url_from_cell(cell) == "https://example.com/cyrus.png"
+
+
+def test_image_url_from_cell_image_formula_with_single_quotes() -> None:
+    cell = {"userEnteredValue": {"formulaValue": "=image('https://x/y.png')"}}
+    assert _image_url_from_cell(cell) == "https://x/y.png"
+
+
+def test_image_url_from_cell_returns_none_for_plain_cell() -> None:
+    assert _image_url_from_cell({"formattedValue": "Cyrus"}) is None
+    assert _image_url_from_cell({}) is None
+
+
+def test_parse_role_tab_picks_up_image_formula_in_block() -> None:
+    """An =IMAGE() formula anywhere in the block should populate splash_art_url."""
+    rows = []
+    rows.append([
+        _cell("Cyrus"),
+        _cell(), _cell(), _cell(), _cell(), _cell(),
+        _cell("SP"), _cell("Active"),
+    ] + [_cell()] * 13 + [
+        _cell("Cyrus's Tome"), _cell(), _cell(), _cell(),
+        _cell("Splash Art"),
+    ])
+    # Skill row with an =IMAGE() formula in col 26 (profile area).
+    skill_row = [_cell()] * 5 + [_cell(), _cell("18"), _cell("1x Fire")]
+    skill_row += [_cell()] * 18
+    skill_row.append({"userEnteredValue": {"formulaValue": '=IMAGE("https://example.com/cyrus.png")'}})
+    rows.append(skill_row)
+
+    sheet = _make_role_sheet(rows)
+    blocks = parse_role_tab(sheet, gid=999)
+    assert len(blocks) == 1
+    assert blocks[0].splash_art_url == "https://example.com/cyrus.png"

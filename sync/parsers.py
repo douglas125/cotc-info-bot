@@ -52,6 +52,27 @@ def _cell_text(cell: dict[str, Any]) -> str:
     return (cell.get("formattedValue") or "").strip()
 
 
+_IMAGE_FORMULA_RE = re.compile(
+    r"""=IMAGE\s*\(\s*["']([^"']+)["']""", re.IGNORECASE,
+)
+
+
+def _image_url_from_cell(cell: dict[str, Any]) -> str | None:
+    """Pull an image URL out of a cell's `=IMAGE("url")` formula, if any.
+
+    The Sheets v4 API exposes inline-image artwork only via this formula
+    path; floating drawings and Insert>Image>In-cell artwork are not
+    accessible through `spreadsheets.get`.
+    """
+    uev = cell.get("userEnteredValue") or {}
+    formula = uev.get("formulaValue")
+    if formula:
+        m = _IMAGE_FORMULA_RE.search(formula)
+        if m:
+            return m.group(1)
+    return None
+
+
 # --- hyperlink parsing ------------------------------------------------------
 
 _RANGE_RE = re.compile(r"^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$")
@@ -383,17 +404,22 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
             })
 
     # Profile column: take the longest non-empty text seen as self_buffs_text;
-    # if a cell looks like a URL, treat it as splash art.
+    # if a cell looks like a URL or `=IMAGE("url")` formula, treat it as
+    # splash art. Scoped to the profile column range so per-sync overhead
+    # stays linear in block count, not block area.
     profile_texts: list[str] = []
     for r in block_rows:
         for c in range(_COL_PROFILE, min(_COL_PROFILE + 3, len(r))):
-            txt = _cell_text(r[c])
-            if not txt:
-                continue
+            cell = r[c]
+            txt = _cell_text(cell)
             if txt.lower().startswith("http"):
                 block.splash_art_url = block.splash_art_url or txt
-            else:
+            elif txt:
                 profile_texts.append(txt)
+            if not block.splash_art_url:
+                url = _image_url_from_cell(cell)
+                if url:
+                    block.splash_art_url = url
     if profile_texts:
         # de-dup while preserving order
         seen: set[str] = set()

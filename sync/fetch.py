@@ -15,6 +15,10 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from config import SPREADSHEET_ID
 
 # Field mask: pull only the cell properties the parsers actually consume.
+# `userEnteredValue` (already covered) carries `=IMAGE("url")` formulas via
+# its `formulaValue` slot — the only image-capture path the Sheets v4 API
+# actually exposes through `spreadsheets.get`. Floating drawings and
+# "image in cell" inserts are not API-accessible.
 _FIELDS = (
     "spreadsheetId,"
     "properties.title,"
