@@ -23,7 +23,7 @@ from sync.runner import _levenshtein
 from config import NAME_ALIASES, ROLE_TABS, TABS, TABS_BY_GID, canonicalize_name
 from db import repo
 from sync.fetch import sheet_by_gid
-from sync.parsers import _cell_text
+from sync.parsers import SEA_GID, _cell_text, parse_sea_kits
 
 
 # UTF-8 stdout for Windows consoles (tab names contain ⭐).
@@ -251,11 +251,78 @@ def check_rarity_distribution(conn) -> list[tuple[bool, str]]:
     return out
 
 
-def check_sea_variants_present(conn) -> list[tuple[bool, str]]:
-    n = conn.execute(
+def check_sea_kit_precedence(payload: dict, conn) -> list[tuple[bool, str]]:
+    """Characters listed in the SEA/GL Unique Kits tab should be populated
+    from that tab — one form per character, no server='sea' duplicates.
+
+    Matching is exact + NAME_ALIASES only. Levenshtein fuzzy isn't used here
+    because the SEA tab spans all roles (no role/band scoping to constrain
+    the search), so fuzzy produces false positives like 'Molu' → 'Lolo'.
+    Unmatched SEA names (e.g. 'Molu', 'Tithi') are reported as a warning —
+    they're typically SEA-only characters with no Index entry yet.
+    """
+    out: list[tuple[bool, str]] = []
+    n_sea = conn.execute(
         "SELECT COUNT(*) FROM character_forms WHERE server='sea'"
     ).fetchone()[0]
-    return [(n > 0, f"server='sea' forms: {n}")]
+    out.append((n_sea == 0,
+                f"no server='sea' duplicate forms: {n_sea}"
+                + (" (run sync to clear stale rows from a previous version)"
+                   if n_sea > 0 else "")))
+
+    sea_sheet = sheet_by_gid(payload, SEA_GID)
+    if sea_sheet is None:
+        out.append((False, "SEA/GL Unique Kits sheet missing from snapshot"))
+        return out
+    blocks = parse_sea_kits(sea_sheet)
+    out.append((len(blocks) > 0,
+                f"SEA/GL Unique Kits parsed blocks: {len(blocks)}"))
+
+    canon_set = {r[0] for r in conn.execute(
+        "SELECT canonical_name FROM characters"
+    )}
+
+    matched = 0
+    alias_used: list[tuple[str, str]] = []
+    unmatched: list[str] = []
+    for block in blocks:
+        name = block.display_name
+        target: str | None = None
+        if name in canon_set:
+            target = name
+        else:
+            canon = canonicalize_name(name)
+            if canon != name and canon in canon_set:
+                target = canon
+                alias_used.append((name, canon))
+        if target is None:
+            unmatched.append(name)
+            continue
+        row = conn.execute(
+            "SELECT cf.id FROM character_forms cf "
+            "JOIN characters c ON c.id = cf.character_id "
+            "WHERE c.canonical_name = ? AND cf.server = 'global'",
+            (target,),
+        ).fetchone()
+        sk = conn.execute(
+            "SELECT COUNT(*) FROM skills WHERE form_id = ?", (row[0],)
+        ).fetchone()[0] if row else 0
+        if sk > 0:
+            matched += 1
+        else:
+            unmatched.append(name)
+    msg = f"SEA-listed characters resolved to Index: {matched}/{len(blocks)}"
+    if alias_used:
+        msg += (f" (alias: {alias_used[:3]}"
+                f"{'…' if len(alias_used) > 3 else ''})")
+    if unmatched:
+        msg = f"{WARN} " + msg + (f" (unmatched: {unmatched[:5]}"
+                                  f"{'…' if len(unmatched) > 5 else ''})")
+    # Pass criterion: at least 80% of SEA blocks resolve. Below that,
+    # something is structurally wrong with the parser or alias map.
+    threshold_ok = matched >= 0.8 * len(blocks) if blocks else False
+    out.append((threshold_ok, msg))
+    return out
 
 
 def check_fts_searchable(conn) -> list[tuple[bool, str]]:
@@ -317,7 +384,7 @@ def run_all() -> int:
         ("Role-tab blocks vs DB",    check_role_tab_blocks(payload, conn)),
         ("Skill counts per form",    check_skill_counts_per_form(conn)),
         ("Rarity distribution",      check_rarity_distribution(conn)),
-        ("SEA variants",             check_sea_variants_present(conn)),
+        ("SEA/GL kit precedence",    check_sea_kit_precedence(payload, conn)),
         ("FTS searchable",           check_fts_searchable(conn)),
         ("Spot-check characters",    check_spot_characters(payload, conn)),
     ]

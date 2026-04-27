@@ -11,10 +11,11 @@ from sync.fetch import fetch_spreadsheet, sheet_by_gid
 from sync.parsers import (
     Anchor,
     IndexEntry,
+    SEA_GID,
     parse_anchor,
     parse_index,
     parse_role_tab,
-    parse_sea_unique,
+    parse_sea_kits,
 )
 
 
@@ -91,9 +92,17 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             progress(f"  {tab.name}: {len(blocks)} character blocks")
 
         progress("Parsing SEA/GL Unique Kits...")
-        sea_sheet = sheet_by_gid(payload, 291065169)
-        sea_names = set(parse_sea_unique(sea_sheet)) if sea_sheet else set()
-        progress(f"  Flagged {len(sea_names)} characters for SEA variants (best-effort).")
+        sea_sheet = sheet_by_gid(payload, SEA_GID)
+        sea_blocks = parse_sea_kits(sea_sheet) if sea_sheet else []
+        # Index SEA blocks under both raw display name and canonicalized name
+        # so alias-mapped role-tab spellings (e.g. 'Krauser'→'Clauser') resolve.
+        sea_blocks_by_name: dict[str, Any] = {}
+        for b in sea_blocks:
+            sea_blocks_by_name[b.display_name] = b
+            canon = canonicalize_name(b.display_name)
+            if canon != b.display_name:
+                sea_blocks_by_name.setdefault(canon, b)
+        progress(f"  Parsed {len(sea_blocks)} SEA/GL kit blocks.")
 
         progress("Writing into SQLite (transactional)...")
         with repo.transaction(conn):
@@ -115,10 +124,13 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                     name_color_hex=entry.color_hex,
                     hyperlink_url=entry.hyperlink_url,
                 )
-                # role-tab data: pick the block whose tab matches the entry's
-                # role; if multiple, prefer the rarity-matching one (⭐5 vs 3&4).
-                candidates = blocks_by_name.get(entry.canonical_name, [])
-                block = _select_block_for(entry, candidates, blocks_by_tab)
+                # SEA/GL Unique Kits takes precedence: if the character has a
+                # block in that tab, use it instead of the role-tab block.
+                # Otherwise fall back to the role-tab block (rarity-band aware).
+                block = sea_blocks_by_name.get(entry.canonical_name)
+                if block is None:
+                    candidates = blocks_by_name.get(entry.canonical_name, [])
+                    block = _select_block_for(entry, candidates, blocks_by_tab)
                 if block is not None:
                     if block.level_cap is not None:
                         conn.execute(
@@ -133,20 +145,6 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                             splash_art_url=block.splash_art_url,
                             self_buffs_text=block.self_buffs_text,
                         )
-                # SEA flag
-                if entry.canonical_name in sea_names:
-                    repo.insert_form(
-                        conn,
-                        character_id=ch_id,
-                        display_name=entry.canonical_name,
-                        rarity=entry.rarity,
-                        variant_kind=_variant_kind_for(entry.canonical_name),
-                        server="sea",
-                        sheet_gid=entry.sheet_gid,
-                        source_row=entry.source_row,
-                        name_color_hex=entry.color_hex,
-                        hyperlink_url=entry.hyperlink_url,
-                    )
             progress("Rebuilding FTS index...")
             repo.rebuild_fts(conn)
 

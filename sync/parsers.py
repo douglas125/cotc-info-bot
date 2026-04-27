@@ -387,22 +387,15 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
 
 # --- SEA/GL Unique Kits parser ---------------------------------------------
 
-def parse_sea_unique(sheet: dict[str, Any]) -> list[str]:
-    """Return a list of canonical-character names that have SEA-only kit variants.
+SEA_GID = 291065169
 
-    Best-effort: scan the first column for character-like names. We don't
-    attempt to model the full SEA kit yet — Phase 1 just flags affected forms.
+
+def parse_sea_kits(sheet: dict[str, Any]) -> list[FormBlock]:
+    """Parse the SEA/GL Unique Kits tab into per-character FormBlocks.
+
+    The tab uses the same layout as a role tab (name in col 0, "SP" in col 6,
+    "Active" in col 7 mark a block start), so we delegate to parse_role_tab.
+    Characters listed here have a kit that supersedes the role-tab kit; the
+    runner uses these blocks in preference to the role-tab block.
     """
-    names: list[str] = []
-    seen: set[str] = set()
-    for grid in sheet.get("data", []):
-        for r in grid.get("rowData", []):
-            row = r.get("values", []) or []
-            if not row:
-                continue
-            txt = _cell_text(row[0]) if row else ""
-            if 2 <= len(txt) <= 40 and " " not in txt and txt[0].isalpha():
-                if txt not in seen:
-                    seen.add(txt)
-                    names.append(txt)
-    return names
+    return parse_role_tab(sheet, gid=SEA_GID)
