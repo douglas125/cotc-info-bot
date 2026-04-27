@@ -236,6 +236,46 @@ def check_skill_counts_per_form(conn) -> list[tuple[bool, str]]:
     return out
 
 
+def check_skill_uniqueness_per_form(conn) -> list[tuple[bool, str]]:
+    """Each form has at most one TP/divine, one EX, one latent power, and
+    either 0 or 3 ultimate-tier rows (the 3 Lv1/Lv10/Lv20 tiers of the same
+    Special skill). Anything else means the parser is over-classifying —
+    historically 'N*' board markers were mis-tagged as ultimates, producing
+    many 'ultimate' rows per form.
+    """
+    out: list[tuple[bool, str]] = []
+    rows = conn.execute(
+        "SELECT cf.display_name, s.kind, COUNT(*) AS n "
+        "FROM character_forms cf JOIN skills s ON s.form_id = cf.id "
+        "WHERE cf.server = 'global' AND s.kind IN ('ex','divine','latent','ultimate') "
+        "GROUP BY cf.id, s.kind"
+    ).fetchall()
+    by_form: dict[str, dict[str, int]] = defaultdict(dict)
+    for r in rows:
+        by_form[r["display_name"]][r["kind"]] = r["n"]
+    bad: list[tuple[str, str]] = []
+    bad_forms: set[str] = set()
+    for name, counts in by_form.items():
+        for kind in ("ex", "divine", "latent"):
+            n = counts.get(kind, 0)
+            if n > 1:
+                bad.append((name, f"{n} {kind} skills (expected ≤1)"))
+                bad_forms.add(name)
+        n_ult = counts.get("ultimate", 0)
+        if n_ult not in (0, 3):
+            bad.append((name, f"{n_ult} ultimate-tier rows (expected 0 or 3)"))
+            bad_forms.add(name)
+    total_forms = conn.execute(
+        "SELECT COUNT(*) FROM character_forms WHERE server='global'"
+    ).fetchone()[0]
+    out.append((not bad,
+                f"skill-kind uniqueness: {total_forms - len(bad_forms)}/{total_forms} forms ok, "
+                f"{len(bad_forms)} forms with {len(bad)} violations"))
+    if bad:
+        out.append((False, f"  offenders (sample): {bad[:5]}"))
+    return out
+
+
 def check_rarity_distribution(conn) -> list[tuple[bool, str]]:
     """Rarity should map to all four buckets and be reasonably distributed."""
     counts = dict(conn.execute(
@@ -383,6 +423,7 @@ def run_all() -> int:
         ("Index roster vs DB",       check_index_roster_matches_db(payload, conn)),
         ("Role-tab blocks vs DB",    check_role_tab_blocks(payload, conn)),
         ("Skill counts per form",    check_skill_counts_per_form(conn)),
+        ("Skill kind uniqueness",    check_skill_uniqueness_per_form(conn)),
         ("Rarity distribution",      check_rarity_distribution(conn)),
         ("SEA/GL kit precedence",    check_sea_kit_precedence(payload, conn)),
         ("FTS searchable",           check_fts_searchable(conn)),

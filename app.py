@@ -197,21 +197,36 @@ with right:
             skills = repo.get_skills(conn, sel_id)
             if skills:
                 st.write("**Skills**")
-                rows = [{
-                    "#": s["slot_order"], "SP": s["sp_cost"], "Kind": s["kind"] or "",
-                    "Boost": (f"{s['boost_level']}*" if s["boost_level"] else ""),
-                    "Description": s["description"] or "",
-                    "Hits": s["hits"], "Min": s["power_min"], "Max": s["power_max"],
-                } for s in skills]
+                rows = []
+                for s in skills:
+                    desc = s["description"] or ""
+                    if s["kind"] == "latent" and (s["initial_use"] or s["cooldown"]):
+                        prefix_bits = []
+                        if s["initial_use"]:
+                            prefix_bits.append(f"init {s['initial_use']}t")
+                        if s["cooldown"]:
+                            prefix_bits.append(f"cd {s['cooldown']}t")
+                        desc = f"[{' / '.join(prefix_bits)}] {desc}"
+                    rows.append({
+                        "#": s["slot_order"], "SP": s["sp_cost"], "Kind": s["kind"] or "",
+                        "Board": (f"{s['learn_board']}*" if s["learn_board"] else ""),
+                        "Tier":  (f"Lv{s['tier_level']}" if s["tier_level"] else ""),
+                        "Description": desc,
+                        "Hits": s["hits"], "Min": s["power_min"], "Max": s["power_max"],
+                    })
                 st.dataframe(rows, hide_index=True, width="stretch")
             else:
                 st.write("_No skills parsed for this form._")
 
             equipment = repo.get_equipment(conn, sel_id)
             if equipment:
-                st.write("**Equipment**")
+                st.write("**A4 Accessories**")
                 for e in equipment:
-                    st.write(f"- {e['name']}" + (f" — {e['description']}" if e["description"] else ""))
+                    badge = " *(exclusive)*" if e["is_exclusive"] else ""
+                    line = f"- **{e['name']}**{badge}"
+                    if e["description"]:
+                        line += f" — {e['description']}"
+                    st.write(line)
 
             profile = repo.get_profile(conn, sel_id)
             if profile and (profile["splash_art_url"] or profile["self_buffs_text"]):

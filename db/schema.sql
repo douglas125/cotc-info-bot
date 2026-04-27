@@ -45,8 +45,11 @@ CREATE TABLE IF NOT EXISTS skills (
     slot_order      INTEGER NOT NULL,
     name            TEXT,
     sp_cost         INTEGER,
-    kind            TEXT,
-    boost_level     INTEGER,
+    kind            TEXT,            -- 'active'|'passive'|'divine'|'ex'|'ultimate'|'latent'
+    learn_board     INTEGER,         -- prestige board (1..6) for active/passive rows
+    tier_level      INTEGER,         -- upgrade tier (1, 10, 20) for ultimate rows
+    initial_use     INTEGER,         -- latent: turns before first trigger
+    cooldown        INTEGER,         -- latent: turns between uses
     description     TEXT,
     power_min       INTEGER,
     power_max       INTEGER,
@@ -59,7 +62,8 @@ CREATE TABLE IF NOT EXISTS equipment (
     form_id         INTEGER NOT NULL REFERENCES character_forms(id) ON DELETE CASCADE,
     slot            TEXT,
     name            TEXT,
-    description     TEXT
+    description     TEXT,
+    is_exclusive    INTEGER NOT NULL DEFAULT 0  -- 1 = character-exclusive A4 accessory
 );
 CREATE INDEX IF NOT EXISTS ix_equipment_form ON equipment(form_id);
 
