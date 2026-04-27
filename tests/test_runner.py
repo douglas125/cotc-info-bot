@@ -1,10 +1,15 @@
 """Tests for the runner: Levenshtein, block selection, alias preference."""
 from __future__ import annotations
 
+import sqlite3
+from pathlib import Path
+
 import pytest
 
+from config import TABS
+from sync import runner as runner_mod
+from sync.parsers import FormBlock, IndexEntry, SEA_GID, parse_sea_kits
 from sync.runner import _levenshtein, _select_block_for, _variant_kind_for
-from sync.parsers import FormBlock, IndexEntry
 
 
 # --- Levenshtein ------------------------------------------------------------
@@ -100,3 +105,177 @@ def test_select_block_prefers_correct_rarity_band() -> None:
         {},
     )
     assert chosen is block5
+
+
+# --- parse_sea_kits ---------------------------------------------------------
+
+def _cell(text: str = "") -> dict:
+    return {"formattedValue": text} if text else {}
+
+
+def _sea_synthetic_sheet(name: str, skill_desc: str) -> dict:
+    """Single-block SEA tab in the same column layout as a role tab."""
+    rows = [
+        [_cell()] * 8,  # filler
+        # block start: name in col 0, 'SP' in col 6, 'Active' in col 7
+        [_cell(name)] + [_cell()] * 5 + [_cell("SP"), _cell("Active")],
+        # one skill row: SP=integer in col 6, description in col 7
+        [_cell()] * 6 + [_cell("18"), _cell(skill_desc)],
+    ]
+    return {"data": [{"rowData": [{"values": r} for r in rows]}]}
+
+
+def test_parse_sea_kits_returns_form_blocks_not_just_names() -> None:
+    """parse_sea_kits replaces the old name-only parser; it must yield full blocks."""
+    sheet = _sea_synthetic_sheet("Castti", "SEA-only kit description")
+    blocks = parse_sea_kits(sheet)
+    assert len(blocks) == 1
+    assert isinstance(blocks[0], FormBlock)
+    assert blocks[0].display_name == "Castti"
+    assert blocks[0].sheet_gid == SEA_GID
+    assert len(blocks[0].skills) == 1
+    assert blocks[0].skills[0]["description"] == "SEA-only kit description"
+
+
+# --- end-to-end SEA precedence ---------------------------------------------
+
+INDEX_GID = 1917707422
+APOTH_5_GID = 1672823319
+WARRIORS_5_GID = 519845584
+
+
+def _idx_cell(text: str = "", *, color: dict | None = None,
+              hyperlink: str | None = None) -> dict:
+    out: dict = {}
+    if text:
+        out["formattedValue"] = text
+    if color:
+        out["effectiveFormat"] = {"textFormat": {"foregroundColor": color}}
+    if hyperlink:
+        out["hyperlink"] = hyperlink
+    return out
+
+
+def _sheet(gid: int, title: str, rows: list[list[dict]]) -> dict:
+    return {
+        "properties": {"sheetId": gid, "title": title},
+        "data": [{"rowData": [{"values": r} for r in rows]}],
+    }
+
+
+def _block_rows(name: str, skill_desc: str) -> list[list[dict]]:
+    return [
+        [_idx_cell()] * 8,
+        [_idx_cell(name)] + [_idx_cell()] * 5
+            + [_idx_cell("SP"), _idx_cell("Active")],
+        [_idx_cell()] * 6 + [_idx_cell("18"), _idx_cell(skill_desc)],
+    ]
+
+
+def _index_sheet_with(*characters: tuple[str, str]) -> dict:
+    """Build an Index sheet with given characters slotted into role columns.
+
+    Each (name, role) tuple is placed in the role's column. Roles supported:
+    'apothecary', 'warrior'. Both 5★ (red).
+    """
+    role_names = ["Warrior (Sword)", "Merchant (Spear)", "Thief (Dagger)",
+                  "Apothecary (Axe)", "Hunter (Bow)", "Cleric (Staff)",
+                  "Scholar (Tome)", "Dancer (Fan)"]
+    width = len(role_names) * 11
+    header = [_idx_cell()] * width
+    for i, label in enumerate(role_names):
+        header[i * 11 + 1] = _idx_cell(label)
+    cols_by_role = {
+        "warrior":    0 * 11 + 1,
+        "apothecary": 3 * 11 + 1,
+    }
+    char_row = [_idx_cell()] * width
+    for name, role in characters:
+        col = cols_by_role[role]
+        char_row[col] = _idx_cell(
+            name, color={"red": 0.8},
+            hyperlink=f"http://example/{name.lower()}",
+        )
+    return _sheet(INDEX_GID, "Characters Index", [header, char_row])
+
+
+def _build_payload_with_overlap() -> dict:
+    """Castti is in BOTH the apothecary role tab AND the SEA/GL Unique Kits tab.
+    Therion is only in the warrior role tab (no SEA entry)."""
+    sheets = [
+        _index_sheet_with(("Castti", "apothecary"), ("Therion", "warrior")),
+        _sheet(APOTH_5_GID, "Apothecaries 5",
+               _block_rows("Castti", "ROLE_TAB_KIT_DESCRIPTION")),
+        _sheet(SEA_GID, "SEA/GL Unique Kits",
+               _block_rows("Castti", "SEA_KIT_DESCRIPTION")),
+        _sheet(WARRIORS_5_GID, "Warriors 5",
+               _block_rows("Therion", "WARRIOR_ROLE_TAB_KIT")),
+    ]
+    # Pad with empty placeholder sheets for every other tab so
+    # sheet_by_gid never returns None during the run.
+    used = {s["properties"]["sheetId"] for s in sheets}
+    for tab in TABS:
+        if tab.gid not in used:
+            sheets.append(_sheet(tab.gid, tab.name, [[_idx_cell()]]))
+    return {"sheets": sheets}
+
+
+def test_run_sync_sea_kit_takes_precedence_and_emits_one_form(
+    tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for the 'duplicated Castti / Nephti' bug.
+
+    Castti appears in both the Apothecary role tab and the SEA/GL Unique
+    Kits tab. After sync we expect exactly one form per character and the
+    SEA tab's skills (not the role tab's) to win.
+    """
+    payload = _build_payload_with_overlap()
+    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key: payload)
+    monkeypatch.setattr("db.repo.DB_PATH", tmp_db_path)
+
+    summary = runner_mod.run_sync("dummy-key")
+    assert summary["status"] == "ok"
+
+    conn = sqlite3.connect(tmp_db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        # 1. ONE info set per character — no duplicate forms for Castti.
+        cid = conn.execute(
+            "SELECT id FROM characters WHERE canonical_name = 'Castti'"
+        ).fetchone()["id"]
+        forms = conn.execute(
+            "SELECT id, server FROM character_forms WHERE character_id = ?",
+            (cid,),
+        ).fetchall()
+        assert len(forms) == 1, \
+            f"expected 1 Castti form, got {len(forms)}: {[dict(r) for r in forms]}"
+        assert forms[0]["server"] == "global"
+
+        # 2. No 'sea' duplicates anywhere in the DB.
+        n_sea = conn.execute(
+            "SELECT COUNT(*) FROM character_forms WHERE server = 'sea'"
+        ).fetchone()[0]
+        assert n_sea == 0, f"unexpected server='sea' rows: {n_sea}"
+
+        # 3. SEA tab takes precedence: Castti's skills come from the SEA block.
+        descs = [r["description"] for r in conn.execute(
+            "SELECT description FROM skills WHERE form_id = ? ORDER BY slot_order",
+            (forms[0]["id"],),
+        )]
+        assert any("SEA_KIT_DESCRIPTION" in (d or "") for d in descs), \
+            f"expected SEA_KIT_DESCRIPTION; got {descs!r}"
+        assert not any("ROLE_TAB_KIT_DESCRIPTION" in (d or "") for d in descs), \
+            f"role-tab kit leaked through despite SEA override: {descs!r}"
+
+        # 4. Therion (no SEA entry) still gets the role-tab kit — fallback path
+        #    is intact for characters not in the SEA tab.
+        therion_descs = [r["description"] for r in conn.execute(
+            "SELECT s.description FROM skills s "
+            "JOIN character_forms cf ON cf.id = s.form_id "
+            "JOIN characters c ON c.id = cf.character_id "
+            "WHERE c.canonical_name = 'Therion'"
+        )]
+        assert any("WARRIOR_ROLE_TAB_KIT" in (d or "") for d in therion_descs), \
+            f"non-SEA character lost role-tab kit: {therion_descs!r}"
+    finally:
+        conn.close()
