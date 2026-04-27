@@ -10,4 +10,5 @@ dependencies:
       - google-auth>=2.20
       - tenacity>=8.2
       - pillow>=10.0
+      - discord.py>=2.7
       - pytest>=8.0

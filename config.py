@@ -1,15 +1,69 @@
 """Project configuration: sheet identity, tab map, color → rarity map, paths."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_ROOT / "data"
-DB_PATH = DATA_DIR / "cotc.sqlite"
+# DB path is overridable so a Railway deploy can point at a mounted volume
+# (e.g. COTC_DB_PATH=/data/cotc.sqlite) while local dev keeps data/cotc.sqlite.
+DB_PATH = Path(os.environ["COTC_DB_PATH"]) if os.environ.get("COTC_DB_PATH") else DATA_DIR / "cotc.sqlite"
 SCHEMA_PATH = PROJECT_ROOT / "db" / "schema.sql"
 USER_CONFIG_DIR = Path.home() / ".cotc-search"
 USER_CONFIG_PATH = USER_CONFIG_DIR / "config.toml"
+
+
+def _read_user_config() -> dict[str, str]:
+    """Parse the simple `key = "value"` lines in ~/.cotc-search/config.toml."""
+    out: dict[str, str] = {}
+    if not USER_CONFIG_PATH.exists():
+        return out
+    try:
+        for line in USER_CONFIG_PATH.read_text(encoding="utf-8").splitlines():
+            key, sep, val = line.partition("=")
+            if not sep:
+                continue
+            out[key.strip()] = val.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return out
+
+
+def get_setting(env_name: str, toml_key: str, default: str | None = None) -> str | None:
+    """Look up a setting: env var first, then ~/.cotc-search/config.toml, then default.
+
+    Lets the same code run on Railway (env-only) and locally (toml-backed)
+    without forking. Empty strings are treated as 'unset'.
+    """
+    val = os.environ.get(env_name)
+    if val:
+        return val
+    val = _read_user_config().get(toml_key)
+    if val:
+        return val
+    return default
+
+
+def parse_admin_ids(raw: str | None) -> set[int]:
+    """Parse a comma-separated list of Discord user IDs into a set of ints.
+
+    Bad/empty entries are silently dropped — invalid IDs just mean fewer
+    admins, never a crash on startup.
+    """
+    if not raw:
+        return set()
+    out: set[int] = set()
+    for piece in raw.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        try:
+            out.add(int(piece))
+        except ValueError:
+            continue
+    return out
 
 SPREADSHEET_ID = "1LF2NbjnMsq8Jo2TSpocu6NN-o9dsUlmd8xCMZpKUHNw"
 SPREADSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
