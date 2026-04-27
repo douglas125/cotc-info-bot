@@ -52,8 +52,18 @@ conda env update -f environment.yml --prune   # after editing the yml
 ```
 character_sheet/
 ├── environment.yml              # conda env definition
-├── config.py                    # sheet ID, tab map, color→rarity, paths
+├── requirements.txt             # pip-only deps for Railway / Docker
+├── Dockerfile                   # python:3.11-slim image, runs the bot
+├── railway.json                 # Railway build/deploy config
+├── config.py                    # sheet ID, tab map, color→rarity, paths,
+│                                # env-var-aware get_setting helper
 ├── app.py                       # Streamlit UI (entry point)
+├── bot/                         # Discord bot (`python -m bot`)
+│   ├── __main__.py              # entrypoint; cold-start sync if DB empty
+│   ├── client.py                # discord.Client + CommandTree wiring
+│   ├── commands.py              # /character, /search, /affinities, /refresh
+│   ├── embeds.py                # pure embed builders (testable, no runtime)
+│   └── db.py                    # per-call connection (mirrors app.py)
 ├── sync/
 │   ├── fetch.py                 # one Sheets API v4 call, all tabs
 │   ├── parsers.py               # Index parser + role-tab parser + SEA/GL
@@ -70,6 +80,9 @@ character_sheet/
 User-level state (so it stays out of the project directory):
 
 - API key:        `~/.cotc-search/config.toml`  (`api_key = "..."`)
+- Discord token:  same file, `discord_token = "..."` (or env `DISCORD_BOT_TOKEN`)
+- Admin user IDs: same file, `bot_admin_user_ids = "12345,67890"` (or env
+  `BOT_ADMIN_USER_IDS`) — only listed Discord user IDs can run `/refresh`
 
 ## Running
 
@@ -89,6 +102,52 @@ streamlit run app.py
 ```
 
 The Refresh button in the UI sidebar performs the same sync as the CLI.
+
+## Discord bot
+
+Same SQLite mirror, surfaced through Discord slash commands. Code lives
+in `bot/`; entry point is `python -m bot`.
+
+**Commands:**
+- `/character name:<autocomplete>` — full embed (kit, affinities, A4
+  accessories, profile, sync footer).
+- `/search role weapon rarity weakness text` — top-10 list, all params
+  optional, all autocompletes pull from the live DB.
+- `/affinities name:<autocomplete>` — quick weakness check.
+- `/refresh` — admin-gated; re-runs `sync.runner.run_sync` off the event
+  loop. Refuses if a refresh is already in flight.
+
+**One-time Discord setup:**
+1. Create an app at https://discord.com/developers/applications.
+2. Bot tab → reset token. Either set `DISCORD_BOT_TOKEN` env var, or add
+   `discord_token = "..."` to `~/.cotc-search/config.toml`.
+3. OAuth2 → URL Generator → scopes `bot` + `applications.commands`,
+   permissions `Send Messages` + `Embed Links` → invite to your guild.
+4. For instant command propagation while iterating, set
+   `DISCORD_TEST_GUILD_ID=<your guild id>` (commands are mirrored to that
+   guild on startup; global sync also runs and propagates within ~1 h).
+5. To allow `/refresh`, set `BOT_ADMIN_USER_IDS=12345,67890` (comma list of
+   Discord user IDs).
+
+**Local run:**
+```bash
+conda activate cotc-search
+python -m bot
+```
+
+**Railway deploy (the host this repo targets):**
+- Connect the repo; Railway auto-detects `Dockerfile` (or reads
+  `railway.json`).
+- Add a Volume mounted at `/data`.
+- Env vars: `DISCORD_BOT_TOKEN`, `GOOGLE_API_KEY`, `BOT_ADMIN_USER_IDS`,
+  `COTC_DB_PATH=/data/cotc.sqlite`. Optional:
+  `DISCORD_TEST_GUILD_ID`.
+- First boot runs a cold-start sync if `character_forms` is empty;
+  thereafter only `/refresh` mutates the DB.
+- Logs: stdout via `logging` (already configured in `bot/__main__.py`).
+
+The bot is **read-only** to SQLite for everything except `/refresh`. It does
+not keep per-guild state, so install count doesn't bloat storage.
 
 ## Schema notes (read before adding queries)
 
