@@ -16,6 +16,21 @@ weapon, and free-text against skills/equipment.
   (weakness/weapon/element), and hyperlinks to encode information that is fast
   to read but painful to filter or cross-reference inside Sheets.
 
+## Git workflow (mandatory)
+
+Repo: `douglas125/cotc-character-search` (private, default branch `main`).
+
+For every change, follow this flow:
+
+1. **Branch from main** — `git checkout main && git pull && git checkout -b <branch>`. Never work directly on `main`.
+2. **Do the work** — edit / add / test.
+3. **Commit and push** — `git commit` then `git push -u origin <branch>`.
+4. **Open a PR** — `gh pr create` with a clear summary and test plan.
+5. **WAIT for the user's confirmation.** Do not merge on your own initiative even if CI is green and tests pass. Pause and report the PR URL.
+6. **Merge only after explicit confirmation** — `gh pr merge --squash --delete-branch` (or as the user specifies).
+
+Treat `main` as protected. Never push directly to it, never merge without confirmation, never force-push to it.
+
 ## Conda environment
 
 **Always activate before running anything in this project:**
