@@ -26,9 +26,32 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 
 
 def bootstrap(conn: sqlite3.Connection) -> None:
-    """Apply schema.sql idempotently."""
+    """Apply schema.sql idempotently, then run any column-shape migrations."""
     sql = SCHEMA_PATH.read_text(encoding="utf-8")
     conn.executescript(sql)
+    _migrate_skills_columns(conn)
+
+
+def _migrate_skills_columns(conn: sqlite3.Connection) -> None:
+    """In-place upgrade for older DBs whose `skills` table predates the
+    learn_board / tier_level / initial_use / cooldown columns."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(skills)")}
+    if cols:
+        if "boost_level" in cols and "learn_board" not in cols:
+            conn.execute("ALTER TABLE skills RENAME COLUMN boost_level TO learn_board")
+            cols = (cols - {"boost_level"}) | {"learn_board"}
+        for col, decl in (
+            ("learn_board", "INTEGER"),
+            ("tier_level",  "INTEGER"),
+            ("initial_use", "INTEGER"),
+            ("cooldown",    "INTEGER"),
+        ):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE skills ADD COLUMN {col} {decl}")
+
+    eq_cols = {row[1] for row in conn.execute("PRAGMA table_info(equipment)")}
+    if eq_cols and "is_exclusive" not in eq_cols:
+        conn.execute("ALTER TABLE equipment ADD COLUMN is_exclusive INTEGER NOT NULL DEFAULT 0")
 
 
 @contextmanager
@@ -152,11 +175,14 @@ def insert_skills(conn: sqlite3.Connection, form_id: int, skills: list[dict]) ->
     if not skills:
         return
     conn.executemany(
-        "INSERT INTO skills(form_id, slot_order, name, sp_cost, kind, boost_level, "
-        "description, power_min, power_max, hits) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO skills("
+        "form_id, slot_order, name, sp_cost, kind, learn_board, tier_level, "
+        "initial_use, cooldown, description, power_min, power_max, hits"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             (form_id, s.get("slot_order"), s.get("name"), s.get("sp_cost"),
-             s.get("kind"), s.get("boost_level"), s.get("description"),
+             s.get("kind"), s.get("learn_board"), s.get("tier_level"),
+             s.get("initial_use"), s.get("cooldown"), s.get("description"),
              s.get("power_min"), s.get("power_max"), s.get("hits"))
             for s in skills
         ],
@@ -167,8 +193,10 @@ def insert_equipment(conn: sqlite3.Connection, form_id: int, items: list[dict]) 
     if not items:
         return
     conn.executemany(
-        "INSERT INTO equipment(form_id, slot, name, description) VALUES (?, ?, ?, ?)",
-        [(form_id, e.get("slot"), e.get("name"), e.get("description")) for e in items],
+        "INSERT INTO equipment(form_id, slot, name, description, is_exclusive) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [(form_id, e.get("slot"), e.get("name"), e.get("description"),
+          1 if e.get("is_exclusive") else 0) for e in items],
     )
 
 

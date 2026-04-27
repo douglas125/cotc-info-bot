@@ -42,10 +42,14 @@ def _seed(conn) -> int:
     )
     repo.insert_skills(conn, form_id, [
         {"slot_order": 1, "name": None, "sp_cost": 18, "kind": "active",
-         "boost_level": None, "description": "1x single-target Fire (1x 200 Power)",
+         "learn_board": None, "tier_level": None,
+         "initial_use": None, "cooldown": None,
+         "description": "1x single-target Fire (1x 200 Power)",
          "power_min": 200, "power_max": 200, "hits": 1},
-        {"slot_order": 2, "name": None, "sp_cost": 30, "kind": "ultimate",
-         "boost_level": 1, "description": "AoE Fire damage",
+        {"slot_order": 2, "name": None, "sp_cost": 30, "kind": "active",
+         "learn_board": 2, "tier_level": None,
+         "initial_use": None, "cooldown": None,
+         "description": "AoE Fire damage",
          "power_min": None, "power_max": None, "hits": None},
     ])
     repo.insert_equipment(conn, form_id, [
@@ -142,4 +146,44 @@ def test_counts(tmp_db_path: Path) -> None:
     assert c["skills"] == 2
     assert c["equipment"] == 1
     assert c["character_affinities"] == 2
+    conn.close()
+
+
+def test_bootstrap_migrates_legacy_skills_columns(tmp_path: Path) -> None:
+    """A DB that was bootstrapped under the old schema (boost_level column,
+    no tier_level/initial_use/cooldown) must transparently upgrade when
+    repo.bootstrap runs against it — and existing data must survive."""
+    import sqlite3
+    legacy_db = tmp_path / "legacy.sqlite"
+    raw = sqlite3.connect(legacy_db)
+    # Pre-seed only the skills table in its old shape (boost_level, no
+    # tier_level/initial_use/cooldown). The rest of the schema is created by
+    # bootstrap below; CREATE TABLE IF NOT EXISTS leaves the legacy `skills`
+    # table alone so the migration path can rename + add columns on it.
+    raw.executescript("""
+        CREATE TABLE skills (
+            id INTEGER PRIMARY KEY,
+            form_id INTEGER NOT NULL,
+            slot_order INTEGER NOT NULL,
+            name TEXT, sp_cost INTEGER, kind TEXT,
+            boost_level INTEGER, description TEXT,
+            power_min INTEGER, power_max INTEGER, hits INTEGER
+        );
+        INSERT INTO skills(form_id, slot_order, kind, boost_level, description)
+        VALUES (1, 1, 'active', 2, 'legacy row');
+    """)
+    raw.commit()
+    raw.close()
+
+    conn = repo.connect(legacy_db)
+    repo.bootstrap(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(skills)")}
+    assert "boost_level" not in cols, "legacy column should have been renamed"
+    assert {"learn_board", "tier_level", "initial_use", "cooldown"} <= cols
+
+    row = conn.execute(
+        "SELECT learn_board, description FROM skills WHERE id=1"
+    ).fetchone()
+    assert row["learn_board"] == 2
+    assert row["description"] == "legacy row"
     conn.close()

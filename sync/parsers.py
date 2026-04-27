@@ -204,16 +204,39 @@ class FormBlock:
 
 _LV_RE = re.compile(r"Lv\s*(\d+)", re.IGNORECASE)
 _POWER_RE = re.compile(r"\((\d+)x\s*(\d+)~?(\d+)?\s*Power", re.IGNORECASE)
-_BOOST_RE = re.compile(r"^\s*(\d)\*\s*$")
+_BOARD_RE = re.compile(r"^\s*(\d)\*\s*$")  # prestige-board indicator (1*..6*)
 
-# Column 5 labels we recognize on role tabs and how they map to skill.kind.
+# Column-5 labels we recognize on role tabs and how they map to skill.kind.
+# The sheet calls the unit's ultimate skill "Special" — they're the same
+# concept, so both labels collapse to "ultimate". TP rows are the unit's
+# divine skill (still consumes SP, kept distinct from ultimate).
 _KIND_LABEL_MAP = {
     "passive": "passive",
-    "tp":      "divine",        # divine skill
-    "ex":      "ex",            # EX skill
-    "special": "special",       # special technique (ultimate)
+    "tp":      "divine",
+    "ex":      "ex",
+    "special": "ultimate",
     "ult":     "ultimate",
 }
+
+# Section divider markers — these appear in the desc-col (col 7) of role-tab
+# rows and visually split the kit into its sections. Used by _parse_block to
+# disambiguate ambiguous rows (notably bare "N*" board markers, which mean
+# different things in active vs passive sections).
+_SECTION_MARKERS = {
+    "active":       "active",
+    "actives":      "active",
+    "special":      "special",
+    "latent power": "latent",
+    "passive":      "passive",
+    "passives":     "passive",
+}
+
+# When emitting a latent-power skill row, also pull two integer counters
+# from the same row's "icon strip" — the cells between desc_col and the
+# equipment column. Visible in the screenshot as `[3]` / `[6]`: turns
+# before first use and turns between uses.
+_LATENT_ICON_COL_START = 14
+_LATENT_ICON_COL_END = 22  # inclusive
 
 
 def _parse_skill_description(desc: str) -> dict:
@@ -229,23 +252,35 @@ def _parse_skill_description(desc: str) -> dict:
     return out
 
 
-def _classify_skill_kind(col5_label: str | None) -> tuple[str, int | None]:
-    """Map a column-5 label to (kind, boost_level)."""
+def _classify_skill_kind(
+    col5_label: str | None,
+) -> tuple[str | None, int | None, int | None]:
+    """Map a column-5 label to (kind, learn_board, tier_level).
+
+    Returns a kind of None when the label alone is insufficient — currently
+    only the bare board indicator "N*". The caller resolves it from row
+    context (an active-section row with numeric SP becomes 'active',
+    a passive-section row becomes 'passive').
+
+    The board indicator is the prestige-board number where the unit learns
+    that skill (1..6); it is NOT a skill kind. The tier level is the upgrade
+    tier of the unit's single Special/Ultimate skill (Lv1/Lv10/Lv20 rows).
+    """
     if not col5_label:
-        return "active", None
-    s = col5_label.strip().lower()
-    bm = _BOOST_RE.match(col5_label.strip())
+        return "active", None, None
+    raw = col5_label.strip()
+    s = raw.lower()
+    bm = _BOARD_RE.match(raw)
     if bm:
-        return "ultimate", int(bm.group(1))
+        return None, int(bm.group(1)), None
     if s in _KIND_LABEL_MAP:
-        return _KIND_LABEL_MAP[s], None
+        return _KIND_LABEL_MAP[s], None, None
     if s.startswith("lv"):
-        # Special-technique level rows like "Lv1", "Lv10", "Lv20".
         try:
-            return "special", int(s[2:])
+            return "ultimate", None, int(s[2:])
         except ValueError:
-            return "special", None
-    return s or "active", None
+            return "ultimate", None, None
+    return s or "active", None, None
 
 
 def parse_role_tab(sheet: dict[str, Any], gid: int,
@@ -310,18 +345,61 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
     other_col_start = 21
     profile_col_start = 25
 
-    # Equipment lives in the "Other Info" zone of the header row.
+    # A4 accessories: the role-tab "Other Info" zone holds the unit's
+    # equippable accessories (community jargon: "A4 accessories"). The
+    # block-header row's col 21 is the unit's primary A4 accessory NAME;
+    # the row immediately below carries that accessory's effect text in
+    # col 23. Some characters additionally have CHARACTER-EXCLUSIVE
+    # accessories or "Unique Effects", marked by a label in col 20 — the
+    # next row's col 23 (or col 21 fallback if it's non-numeric text)
+    # holds the effect description. Pure-numeric col 21 cells are stat
+    # values, not accessory entries — skip them.
     if other_col_start is not None and other_col_start < len(header_row):
-        eq_text = _cell_text(header_row[other_col_start])
-        if eq_text:
-            block.equipment.append({"slot": None, "name": eq_text, "description": None})
-        # additional equipment rows (sub-rows after the header within this block)
-        for r in block_rows[1:]:
-            if other_col_start < len(r):
-                txt = _cell_text(r[other_col_start])
-                if txt and txt.lower() != "other info":
-                    if not any(e["name"] == txt for e in block.equipment):
-                        block.equipment.append({"slot": None, "name": txt, "description": None})
+        primary_name = _cell_text(header_row[other_col_start])
+        primary_effect: str | None = None
+        if len(block_rows) > 1:
+            below = block_rows[1]
+            if 23 < len(below):
+                eff = _cell_text(below[23])
+                if eff:
+                    primary_effect = eff
+        if primary_name and primary_name.lower() != "other info":
+            block.equipment.append({
+                "slot": None,
+                "name": primary_name,
+                "description": primary_effect,
+                "is_exclusive": False,
+            })
+        # Walk the rest of the block looking for "Exclusive Accessory N"
+        # or "Unique Effects" markers in col 20.
+        for ridx, r in enumerate(block_rows):
+            if 20 >= len(r):
+                continue
+            label = _cell_text(r[20]).strip()
+            if not label:
+                continue
+            label_lower = label.lower()
+            is_excl = label_lower.startswith("exclusive accessory")
+            is_unique = label_lower == "unique effects"
+            if not (is_excl or is_unique):
+                continue
+            # Effect description: prefer c23 of the next row; fall back to
+            # c21 of the next row if c21 is non-numeric (Cardona pattern).
+            eff = ""
+            if ridx + 1 < len(block_rows):
+                nr = block_rows[ridx + 1]
+                if 23 < len(nr):
+                    eff = _cell_text(nr[23])
+                if not eff and 21 < len(nr):
+                    v = _cell_text(nr[21])
+                    if v and not v.lstrip("-").isdigit():
+                        eff = v
+            block.equipment.append({
+                "slot": None,
+                "name": label,
+                "description": eff or None,
+                "is_exclusive": is_excl,
+            })
 
     # Profile column: take the longest non-empty text seen as self_buffs_text;
     # if a cell looks like a URL, treat it as splash art.
@@ -347,42 +425,171 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
         if kept:
             block.self_buffs_text = "\n".join(kept)
 
-    # Skills: rows where sp_col has an integer value, OR rows where col 5 has
-    # a recognized non-numeric label (Passive/TP/EX/Special/Lv1/etc.) — those
-    # rows describe a skill even if SP is blank.
+    # Skills are extracted with awareness of the section the row belongs to:
+    # Active / Special (= ultimate) / Latent Power / Passive. The role-tab
+    # layout is irregular per-section:
+    #   - Active / EX / TP-as-divine:    SP in col 6 (numeric), desc in col 7
+    #   - Special tiers (Lv1/Lv10/Lv20): desc in col 7, BUT some entries
+    #     (older / SEA-only chars) put the desc in col 6 instead — fall back.
+    #   - Passive:                       desc in col 6, col 7 empty
+    #   - Latent Power:                  multi-line text in col 5,
+    #                                    [init]/[cooldown] integers in cols 17/19
+    # Section dividers are rows where col 5 is "Special" / "Latent Power" /
+    # "Passive" with cols 6 and 7 empty. Some role-tab blocks are missing
+    # the "Passive" divider entirely (e.g. role-tab Yugo) so the parser
+    # also recognises a passive-shaped row (label in col 5, non-numeric
+    # text in col 6, col 7 empty) and switches sections implicitly.
+    current_section = "active"  # block opens with the "Active" header row
+    latent_lines: list[str] = []
+    latent_initial_use: int | None = None
+    latent_cooldown: int | None = None
+    skills: list[dict] = []
     slot = 0
+
     for r in block_rows:
         sp_text = _cell_text(r[sp_col]) if sp_col < len(r) else ""
         kind_label = _cell_text(r[kind_col]) if kind_col < len(r) else ""
+        c7_text = _cell_text(r[desc_col]) if desc_col < len(r) else ""
+
+        # Explicit section divider in col 5 (cols 6/7 empty).
+        marker = _SECTION_MARKERS.get(kind_label.strip().lower())
+        if marker and not sp_text and not c7_text:
+            current_section = marker
+            continue
+
+        # Latent section: text in col 5 (multi-line), counters in cols 14..22.
+        if current_section == "latent":
+            latent_text = kind_label.strip()
+            if latent_text:
+                latent_lines.append(latent_text)
+                init_use, cooldown = _scan_latent_counters(r)
+                if latent_initial_use is None and init_use is not None:
+                    latent_initial_use = init_use
+                if latent_cooldown is None and cooldown is not None:
+                    latent_cooldown = cooldown
+            continue
+
         is_numeric_sp = sp_text.isdigit()
         is_known_label = bool(kind_label) and (
             kind_label.lower() in _KIND_LABEL_MAP
-            or _BOOST_RE.match(kind_label) is not None
+            or _BOARD_RE.match(kind_label) is not None
             or kind_label.lower().startswith("lv")
         )
         if not is_numeric_sp and not is_known_label:
             continue
-        # Header rows carry "SP"/"Active" — skip them
-        if sp_text.upper() == "SP":
+        if sp_text.upper() == "SP":  # block-header marker
             continue
-        sp = int(sp_text) if is_numeric_sp else None
-        desc = _cell_text(r[desc_col]) if desc_col < len(r) else ""
-        kind, boost_level = _classify_skill_kind(kind_label or None)
+
+        # Recognise a passive-shaped row even when the explicit "Passive"
+        # divider is missing: a known col-5 label, non-numeric text in col 6,
+        # and col 7 empty. Once seen, lock current_section to passive — the
+        # rest of the block belongs to it.
+        looks_passive = (
+            is_known_label and not is_numeric_sp
+            and bool(sp_text) and not c7_text
+        )
+        if looks_passive and current_section != "passive":
+            current_section = "passive"
+
+        # Resolve the description column per section:
+        #   - passive: col 6 (which we won't treat as SP)
+        #   - everything else: col 7, falling back to col 6 if col 7 is empty
+        #     and col 6 isn't a numeric SP value (handles older Special tiers
+        #     that put the description in col 6).
+        if current_section == "passive":
+            desc = sp_text
+        elif c7_text:
+            desc = c7_text
+        elif sp_text and not is_numeric_sp:
+            desc = sp_text
+        else:
+            desc = ""
+
+        kind, learn_board, tier_level = _classify_skill_kind(kind_label or None)
+
+        # Section overrides:
+        #   1. Passive section: every row is a passive, even if col 5 says
+        #      "TP" (some units have a 'TP-passive' row like role-tab Cyrus
+        #      +20 / Yugo +17 which the sheet labels "TP" but is functionally
+        #      a passive ability).
+        #   2. Bare "N*" outside the passive section is a board indicator
+        #      on an active skill (the classifier returns kind=None to let
+        #      us decide).
+        if current_section == "passive":
+            kind = "passive"
+        elif kind is None:
+            if is_numeric_sp:
+                kind = "active"
+            else:
+                # "N*" in the active/special section with no SP is not a
+                # skill — skip rather than fabricate one.
+                continue
+
+        # SP cost only applies to active and divine skills. For passive,
+        # ex, ultimate, and latent (latent is handled separately) the
+        # number in col 6 is either spurious (passive desc moved into c6)
+        # or doesn't represent SP per the user's clarification.
+        sp: int | None
+        if current_section == "passive" or kind in ("ex", "ultimate"):
+            sp = None
+        else:
+            sp = int(sp_text) if is_numeric_sp else None
+
         slot += 1
         parsed = _parse_skill_description(desc)
-        block.skills.append({
+        skills.append({
             "slot_order": slot,
             "name": None,
             "sp_cost": sp,
             "kind": kind,
-            "boost_level": boost_level,
+            "learn_board": learn_board,
+            "tier_level": tier_level,
+            "initial_use": None,
+            "cooldown": None,
             "description": desc,
             "power_min": parsed.get("power_min"),
             "power_max": parsed.get("power_max"),
             "hits": parsed.get("hits"),
         })
 
+    if latent_lines:
+        slot += 1
+        skills.append({
+            "slot_order": slot,
+            "name": None,
+            "sp_cost": None,
+            "kind": "latent",
+            "learn_board": None,
+            "tier_level": None,
+            "initial_use": latent_initial_use,
+            "cooldown": latent_cooldown,
+            "description": "\n".join(latent_lines),
+            "power_min": None,
+            "power_max": None,
+            "hits": None,
+        })
+
+    block.skills = skills
     return block
+
+
+def _scan_latent_counters(
+    row: list[dict[str, Any]],
+) -> tuple[int | None, int | None]:
+    """Return (initial_use, cooldown) from a latent-section row's icon strip.
+    Two integer cells in cols 14..22 (between desc_col and the equipment
+    column) hold those counters when present. Either may be None."""
+    found: list[int] = []
+    end = min(_LATENT_ICON_COL_END + 1, len(row))
+    for c in range(_LATENT_ICON_COL_START, end):
+        txt = _cell_text(row[c])
+        if txt.isdigit():
+            found.append(int(txt))
+            if len(found) >= 2:
+                break
+    initial_use = found[0] if len(found) >= 1 else None
+    cooldown = found[1] if len(found) >= 2 else None
+    return initial_use, cooldown
 
 
 # --- SEA/GL Unique Kits parser ---------------------------------------------
