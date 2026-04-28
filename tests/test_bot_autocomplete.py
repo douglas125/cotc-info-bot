@@ -153,7 +153,6 @@ def test_resolve_form_id_swaps_ex_position(tmp_db_path: Path) -> None:
 
 
 def _seed_alias_target(conn) -> int:
-    """Seed Clauser (canonical Index spelling for the alias 'Krauser')."""
     ch = repo.upsert_character(conn, canonical_name="Clauser",
                                 base_role="merchant", base_weapon="spear")
     return repo.insert_form(conn, character_id=ch, display_name="Clauser", rarity="5*")
@@ -162,7 +161,6 @@ def _seed_alias_target(conn) -> int:
 def test_resolve_form_id_via_alias(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     fid = _seed_alias_target(conn)
-    # Krauser is an alias for the canonical Clauser; should resolve to it.
     assert bot_commands._resolve_form_id(conn, "Krauser") == fid
     conn.close()
 
@@ -178,7 +176,6 @@ def test_resolve_form_id_via_alias_case_insensitive(tmp_db_path: Path) -> None:
 def test_autocomplete_surfaces_alias(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     fid = _seed_alias_target(conn)
-    # Typing the alias prefix should surface Clauser with an annotated label.
     choices = bot_commands._autocomplete_forms(conn, current="Krau")
     conn.close()
     matches = [c for c in choices if int(c.value) == fid]
