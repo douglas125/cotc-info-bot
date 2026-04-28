@@ -18,6 +18,7 @@ def test_bootstrap_creates_all_tables(tmp_db_path: Path) -> None:
         "skills", "equipment", "character_profile",
         "sync_runs", "raw_snapshots",
         "feedback_submissions",
+        "command_usage_daily",
     }
     missing = expected - names
     conn.close()
@@ -290,3 +291,64 @@ def test_feedback_accepts_2000_char_body(tmp_db_path: Path) -> None:
     ).fetchone()
     assert len(row["feedback_text"]) == 2000
     conn.close()
+
+
+# --- command usage telemetry ------------------------------------------------
+
+def test_increment_command_usage_inserts_first_call(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    repo.increment_command_usage(conn, "character", usage_date="2026-04-28")
+    rows = list(conn.execute(
+        "SELECT command_name, usage_date, count FROM command_usage_daily"
+    ))
+    conn.close()
+    assert len(rows) == 1
+    assert rows[0]["command_name"] == "character"
+    assert rows[0]["usage_date"] == "2026-04-28"
+    assert rows[0]["count"] == 1
+
+
+def test_increment_command_usage_increments_same_day(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    for _ in range(3):
+        repo.increment_command_usage(conn, "enemy", usage_date="2026-04-28")
+    rows = list(conn.execute(
+        "SELECT command_name, count FROM command_usage_daily"
+    ))
+    conn.close()
+    assert len(rows) == 1
+    assert rows[0]["command_name"] == "enemy"
+    assert rows[0]["count"] == 3
+
+
+def test_increment_command_usage_separates_by_command_and_date(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    repo.increment_command_usage(conn, "character", usage_date="2026-04-28")
+    repo.increment_command_usage(conn, "enemy",     usage_date="2026-04-28")
+    repo.increment_command_usage(conn, "character", usage_date="2026-04-29")
+    rows = sorted(
+        conn.execute(
+            "SELECT command_name, usage_date, count FROM command_usage_daily"
+        ),
+        key=lambda r: (r["command_name"], r["usage_date"]),
+    )
+    conn.close()
+    assert [(r["command_name"], r["usage_date"], r["count"]) for r in rows] == [
+        ("character", "2026-04-28", 1),
+        ("character", "2026-04-29", 1),
+        ("enemy",     "2026-04-28", 1),
+    ]
+
+
+def test_clear_tables_preserves_command_usage(tmp_db_path: Path) -> None:
+    """The whole point of this table — counts must survive /refresh."""
+    conn = repo.connect(tmp_db_path)
+    repo.increment_command_usage(conn, "character", usage_date="2026-04-28")
+    repo.increment_command_usage(conn, "enemy",     usage_date="2026-04-28")
+    repo.clear_character_tables(conn)
+    repo.clear_enemy_tables(conn)
+    n = conn.execute("SELECT COUNT(*) FROM command_usage_daily").fetchone()[0]
+    total = conn.execute("SELECT SUM(count) FROM command_usage_daily").fetchone()[0]
+    conn.close()
+    assert n == 2
+    assert total == 2

@@ -226,6 +226,32 @@ decision, not a maintenance chore.
 - `feedback_submissions` — community-submitted corrections (`/feedback`).
   Wiping it would silently delete user reports on every re-sync. Cleared
   explicitly via the admin-only `/feedback_clear` slash command.
+- `command_usage_daily` — per-day counter of `/character` and `/enemy`
+  invocations. Wiping it would erase usage history that no other source
+  can reconstruct. No admin-clear command yet — drop manually if needed.
+
+### Reading usage stats
+
+There is no slash command for this; query SQLite directly. On Railway, run
+`sqlite3 /data/cotc.sqlite ...`; locally, `data/cotc.sqlite`. All counters
+are keyed UTC.
+
+```bash
+# Grand total invocations across all time and commands
+sqlite3 data/cotc.sqlite "SELECT SUM(count) AS total FROM command_usage_daily;"
+
+# Totals per command
+sqlite3 data/cotc.sqlite \
+  "SELECT command_name, SUM(count) AS total
+     FROM command_usage_daily
+    GROUP BY command_name;"
+
+# Daily breakdown, newest first
+sqlite3 -header -column data/cotc.sqlite \
+  "SELECT usage_date, command_name, count
+     FROM command_usage_daily
+    ORDER BY usage_date DESC, command_name;"
+```
 
 When you add a new table that holds user/community state (anything not
 derivable from a sheet), default to *not* listing it in either wipe loop,
