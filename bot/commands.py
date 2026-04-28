@@ -16,6 +16,7 @@ from discord import app_commands
 import config
 from bot import db as bot_db
 from bot import embeds
+from bot.views import CharacterView
 from db import repo
 
 logger = logging.getLogger(__name__)
@@ -154,14 +155,15 @@ def register(tree: app_commands.CommandTree) -> None:
                 ephemeral=True,
             )
             return
-        built = embeds.form_to_embed(conn, form_id)
-        if built is None:
+        embed = embeds.build_section_embed(conn, form_id, embeds.DEFAULT_SECTION)
+        if embed is None:
             await interaction.response.send_message(
                 "That form was removed by a recent refresh — try again.",
                 ephemeral=True,
             )
             return
-        await interaction.response.send_message(embeds=built)
+        view = CharacterView(form_id=form_id)
+        await interaction.response.send_message(embed=embed, view=view)
 
     @character_cmd.autocomplete("name")
     async def _character_ac(interaction: discord.Interaction, current: str):

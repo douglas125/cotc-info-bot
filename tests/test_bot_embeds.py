@@ -51,7 +51,7 @@ def _seed(conn) -> int:
         ("weapon", "Tome", None),
     ])
     repo.upsert_profile(conn, form_id,
-                        splash_art_url="https://example.com/cyrus.png",
+                        splash_art_url=None,
                         self_buffs_text="A scholar who studies fire magic.")
     return form_id
 
@@ -67,7 +67,6 @@ def _seed_full_kit(conn) -> int:
         hyperlink_url="https://docs.google.com/spreadsheets/d/abc#gid=999&range=A5",
     )
     rows = []
-    # 9 actives
     for i in range(1, 10):
         rows.append({
             "slot_order": i, "name": None, "sp_cost": 30 + i, "kind": "active",
@@ -76,7 +75,6 @@ def _seed_full_kit(conn) -> int:
             "description": f"Active skill {i} description text",
             "power_min": None, "power_max": None, "hits": None,
         })
-    # divine, EX
     rows.append({
         "slot_order": 10, "name": None, "sp_cost": 40, "kind": "divine",
         "learn_board": None, "tier_level": None, "initial_use": None, "cooldown": None,
@@ -89,7 +87,6 @@ def _seed_full_kit(conn) -> int:
         "description": "All allies +15% Atk Up for 5t",
         "power_min": None, "power_max": None, "hits": None,
     })
-    # 3-tier ultimate
     for tl, hs in [(1, 50), (10, 100), (20, 150)]:
         rows.append({
             "slot_order": 11 + tl, "name": None, "sp_cost": None, "kind": "ultimate",
@@ -97,7 +94,6 @@ def _seed_full_kit(conn) -> int:
             "description": f"All Allies Heal + Recover {hs} SP",
             "power_min": None, "power_max": None, "hits": None,
         })
-    # passive, latent
     rows.append({
         "slot_order": 32, "name": None, "sp_cost": None, "kind": "passive",
         "learn_board": 1, "tier_level": None, "initial_use": None, "cooldown": None,
@@ -120,84 +116,100 @@ def _seed_full_kit(conn) -> int:
     ])
     repo.upsert_profile(
         conn, form_id,
-        splash_art_url="https://example.com/castti.png",
+        splash_art_url=None,
         self_buffs_text="A travelling apothecary.",
     )
     return form_id
 
 
-def test_form_to_embed_basic_shape(tmp_db_path: Path) -> None:
+def test_section_keys_and_labels_are_consistent() -> None:
+    assert embeds.SECTIONS == ("skills", "a4", "info")
+    assert set(embeds.SECTION_LABELS.keys()) == set(embeds.SECTIONS)
+    assert set(embeds.SECTION_DESCRIPTIONS.keys()) == set(embeds.SECTIONS)
+    assert embeds.DEFAULT_SECTION == "skills"
+
+
+def test_build_section_skills_basic_shape(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     form_id = _seed(conn)
-    built = embeds.form_to_embed(conn, form_id)
+    embed = embeds.build_section_embed(conn, form_id, "skills")
     conn.close()
 
-    assert built is not None
-    assert isinstance(built, list)
-    assert len(built) >= 1
-    header = built[0]
-    assert "Cyrus" in header.title
-    assert "★★★★★" in header.title
-    # 5* color was seeded as #CC0000
-    assert header.color is not None and header.color.value == 0xCC0000
-    assert header.url is not None and header.url.startswith("https://")
-    assert header.thumbnail.url == "https://example.com/cyrus.png"
-    assert header.image.url == "https://example.com/cyrus.png"
+    assert embed is not None
+    assert "Cyrus" in embed.title
+    assert "★★★★★" in embed.title
+    assert embed.color is not None and embed.color.value == 0xCC0000
+    assert embed.url is not None and embed.url.startswith("https://")
+    # No artwork: the image-source code path was removed.
+    assert embed.thumbnail.url is None
+    assert embed.image.url is None
 
-
-def test_form_to_embed_has_skill_and_affinity_fields(tmp_db_path: Path) -> None:
-    conn = repo.connect(tmp_db_path)
-    form_id = _seed(conn)
-    built = embeds.form_to_embed(conn, form_id)
-    conn.close()
-
-    # Header embed: affinities only.
-    header_field_names = [f.name for f in built[0].fields]
-    assert "Weakness" in header_field_names
-    assert "Element" in header_field_names
-    assert "Weapon" in header_field_names
-
-    # Skills embed: actives in description (code-block table), latent as field.
-    skills_embed = next(
-        (e for e in built if e.title and e.title.startswith("Skills")), None,
-    )
-    assert skills_embed is not None
-    assert skills_embed.description is not None
-    assert "```" in skills_embed.description
-    assert "Fireball" in skills_embed.description
-    assert "Hellfire" in skills_embed.description
-
-    skills_field_names = [f.name for f in skills_embed.fields]
-    assert "Latent" in skills_field_names
-    latent_field = next(f for f in skills_embed.fields if f.name == "Latent")
+    field_names = [f.name for f in embed.fields]
+    assert "Active" in field_names
+    assert "Latent" in field_names
+    active_field = next(f for f in embed.fields if f.name == "Active")
+    assert "Fireball" in active_field.value
+    assert "Hellfire" in active_field.value
+    latent_field = next(f for f in embed.fields if f.name == "Latent")
     assert "init 2t" in latent_field.value
     assert "cd 3t" in latent_field.value
 
-    # Gear embed: A4 accessories + profile.
-    gear_embed = built[-1]
-    gear_field_names = [f.name for f in gear_embed.fields]
-    assert "A4 Accessories" in gear_field_names
-    assert "Profile" in gear_field_names
-    eq_field = next(f for f in gear_embed.fields if f.name == "A4 Accessories")
-    assert "Scholar's Tome" in eq_field.value
-    assert "exclusive" in eq_field.value
 
-
-def test_form_to_embed_returns_none_for_missing_form(tmp_db_path: Path) -> None:
+def test_build_section_a4_basic_shape(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
-    built = embeds.form_to_embed(conn, form_id=99999)
+    form_id = _seed(conn)
+    embed = embeds.build_section_embed(conn, form_id, "a4")
     conn.close()
-    assert built is None
+
+    assert embed is not None
+    assert "Cyrus" in embed.title
+    field_names = [f.name for f in embed.fields]
+    assert "A4 Accessory" in field_names
+    assert "Active" not in field_names
+    a4_field = next(f for f in embed.fields if f.name == "A4 Accessory")
+    assert "Scholar's Tome" in a4_field.value
+    assert "exclusive" in a4_field.value
 
 
-def test_form_to_embed_fields_respect_discord_limits(tmp_db_path: Path) -> None:
-    """Field values must stay <= 1024 chars, names <= 256, descriptions <= 4096."""
+def test_build_section_a4_handles_no_equipment(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
-    ch_id = repo.upsert_character(conn, canonical_name="LongDude",
-                                   base_role="scholar", base_weapon="tome")
-    form_id = repo.insert_form(
-        conn, character_id=ch_id, display_name="LongDude", rarity="5*",
-    )
+    ch = repo.upsert_character(conn, canonical_name="NoGear", base_role="r", base_weapon="w")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="NoGear", rarity="3*")
+    embed = embeds.build_section_embed(conn, form_id, "a4")
+    conn.close()
+    a4_field = next(f for f in embed.fields if f.name == "A4 Accessory")
+    assert "no a4 accessory" in a4_field.value.lower()
+
+
+def test_build_section_info_basic_shape(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed(conn)
+    embed = embeds.build_section_embed(conn, form_id, "info")
+    conn.close()
+
+    assert embed is not None
+    assert "Cyrus" in embed.title
+    field_names = [f.name for f in embed.fields]
+    assert "Weakness" in field_names
+    assert "Element" in field_names
+    assert "Weapon" in field_names
+    assert "Profile" in field_names
+    assert "Character Art" in field_names
+    art_field = next(f for f in embed.fields if f.name == "Character Art")
+    assert "spreadsheet" in art_field.value.lower()
+
+
+def test_build_section_returns_none_for_missing_form(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    embed = embeds.build_section_embed(conn, form_id=99999, section="skills")
+    conn.close()
+    assert embed is None
+
+
+def test_build_section_skills_respects_field_limits(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="LongDude", base_role="r", base_weapon="w")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="LongDude", rarity="5*")
     long_desc = "very long fire damage description " * 30
     repo.insert_skills(conn, form_id, [
         {"slot_order": i, "name": f"Skill{i}", "sp_cost": 10, "kind": "active",
@@ -207,116 +219,28 @@ def test_form_to_embed_fields_respect_discord_limits(tmp_db_path: Path) -> None:
          "power_min": None, "power_max": None, "hits": None}
         for i in range(1, 31)
     ])
-    built = embeds.form_to_embed(conn, form_id)
+    embed = embeds.build_section_embed(conn, form_id, "skills")
     conn.close()
-    assert built is not None
-    total_chars = 0
-    for e in built:
-        for f in e.fields:
-            assert len(f.value) <= embeds.FIELD_VALUE_LIMIT, \
-                f"field {f.name!r} value too long: {len(f.value)}"
-            assert len(f.name) <= embeds.FIELD_NAME_LIMIT
-            total_chars += len(f.name) + len(f.value)
-        if e.description:
-            assert len(e.description) <= embeds.EMBED_DESCRIPTION_LIMIT
-            total_chars += len(e.description)
-        if e.title:
-            total_chars += len(e.title)
-    assert total_chars <= embeds.TOTAL_CHARS_PER_MESSAGE
+    for f in embed.fields:
+        assert len(f.value) <= embeds.FIELD_VALUE_LIMIT
+        assert len(f.name) <= embeds.FIELD_NAME_LIMIT
 
 
-def test_form_to_embed_three_embeds_for_full_kit(tmp_db_path: Path) -> None:
-    """A character with skills + gear + profile should produce 3 embeds."""
+def test_build_section_skills_folds_ultimates(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     form_id = _seed_full_kit(conn)
-    built = embeds.form_to_embed(conn, form_id)
+    embed = embeds.build_section_embed(conn, form_id, "skills")
     conn.close()
-    assert built is not None
-    assert len(built) == 3
-
-
-def test_gear_embed_omitted_when_empty(tmp_db_path: Path) -> None:
-    """No gear and no self_buffs_text → no third embed; footer goes on skills embed."""
-    conn = repo.connect(tmp_db_path)
-    ch_id = repo.upsert_character(conn, canonical_name="Bare", base_role="r", base_weapon="w")
-    form_id = repo.insert_form(
-        conn, character_id=ch_id, display_name="Bare", rarity="3*",
-    )
-    repo.insert_skills(conn, form_id, [
-        {"slot_order": 1, "name": None, "sp_cost": 10, "kind": "active",
-         "learn_board": None, "tier_level": None,
-         "initial_use": None, "cooldown": None,
-         "description": "single attack",
-         "power_min": None, "power_max": None, "hits": None},
-    ])
-    built = embeds.form_to_embed(conn, form_id)
-    conn.close()
-    assert built is not None
-    # Header + skills only.
-    titles = [e.title for e in built]
-    # No gear embed (gear embed has no title in our builder).
-    assert all(
-        not (e.title is None and any(f.name in ("A4 Accessories", "Profile") for f in e.fields))
-        for e in built
-    )
-    assert len(built) == 2
-
-
-def test_artwork_set_on_first_embed_only(tmp_db_path: Path) -> None:
-    conn = repo.connect(tmp_db_path)
-    form_id = _seed_full_kit(conn)
-    built = embeds.form_to_embed(conn, form_id)
-    conn.close()
-    assert built is not None
-    # Embed 0: thumbnail + image.
-    assert built[0].thumbnail.url == "https://example.com/castti.png"
-    assert built[0].image.url == "https://example.com/castti.png"
-    # Other embeds: no artwork attached.
-    for e in built[1:]:
-        assert e.thumbnail.url is None
-        assert e.image.url is None
-
-
-def test_skills_embed_uses_code_block(tmp_db_path: Path) -> None:
-    conn = repo.connect(tmp_db_path)
-    form_id = _seed_full_kit(conn)
-    built = embeds.form_to_embed(conn, form_id)
-    conn.close()
-    assert built is not None
-    skills_embed = next(e for e in built if e.title and e.title.startswith("Skills"))
-    # Active table goes in description.
-    assert skills_embed.description is not None
-    assert skills_embed.description.startswith("```")
-    assert "Description" in skills_embed.description.splitlines()[1]
-    # Passive / Divine / EX live as fields, also code-blocked.
-    field_names = [f.name for f in skills_embed.fields]
-    for expected in ("Passive", "Divine (TP)", "EX"):
-        assert expected in field_names
-        f = next(x for x in skills_embed.fields if x.name == expected)
-        assert "```" in f.value
-
-
-def test_ultimate_levels_are_folded(tmp_db_path: Path) -> None:
-    """Three ultimate rows (Lv1/Lv10/Lv20) collapse to one Ultimate field with three tier lines."""
-    conn = repo.connect(tmp_db_path)
-    form_id = _seed_full_kit(conn)
-    built = embeds.form_to_embed(conn, form_id)
-    conn.close()
-    assert built is not None
-    skills_embed = next(e for e in built if e.title and e.title.startswith("Skills"))
-    ult = next((f for f in skills_embed.fields if f.name == "Ultimate"), None)
-    assert ult is not None
+    ult = next(f for f in embed.fields if f.name == "Ultimate")
     assert "Lv1" in ult.value
     assert "Lv10" in ult.value
     assert "Lv20" in ult.value
 
 
 def test_collapse_ultimates_handles_solo_row() -> None:
-    """A single ultimate row with no tier_level returns one untiered group."""
     class Row(dict):
         def __getitem__(self, k):
             return super().__getitem__(k)
-
     rows = [Row({"description": "Solo ult", "tier_level": None})]
     out = embeds._collapse_ultimates(rows)
     assert len(out) == 1
@@ -346,6 +270,30 @@ def test_search_results_to_embed_empty(tmp_db_path: Path) -> None:
     embed = embeds.search_results_to_embed([], query_summary="role=ghost")
     conn.close()
     assert any(f.name == "No matches" for f in embed.fields)
+
+
+def test_safe_url_passes_full_urls() -> None:
+    assert embeds._safe_url("https://example.com/x") == "https://example.com/x"
+    assert embeds._safe_url("http://example.com/x") == "http://example.com/x"
+
+
+def test_safe_url_prefixes_sheet_fragments() -> None:
+    """The Sheets API returns in-doc anchors as fragments only (`#rangeid=…`).
+
+    Every form in the live DB has this shape; Discord rejects the bare
+    fragment, so we prefix it with the spreadsheet edit URL.
+    """
+    out = embeds._safe_url("#rangeid=1460640204")
+    assert out is not None
+    assert out.startswith("https://docs.google.com/spreadsheets/d/")
+    assert out.endswith("#rangeid=1460640204")
+
+
+def test_safe_url_rejects_garbage() -> None:
+    assert embeds._safe_url(None) is None
+    assert embeds._safe_url("") is None
+    assert embeds._safe_url("not a url") is None
+    assert embeds._safe_url("javascript:alert(1)") is None
 
 
 def test_color_from_hex_handles_garbage() -> None:
