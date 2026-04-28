@@ -366,7 +366,7 @@ def test_header_description_tags_sea_and_ex(tmp_db_path: Path) -> None:
     """SEA-only EX form should advertise both qualifiers in the description."""
     conn = repo.connect(tmp_db_path)
     ch = repo.upsert_character(conn, canonical_name="Lynette EX",
-                                base_role="dancer", base_weapon="fan")
+                                base_role="thief", base_weapon="dagger")
     form_id = repo.insert_form(
         conn, character_id=ch, display_name="Lynette EX", rarity="5*",
         variant_kind="ex", server="sea",
@@ -376,8 +376,8 @@ def test_header_description_tags_sea_and_ex(tmp_db_path: Path) -> None:
     assert embed is not None and embed.description is not None
     assert "EX form" in embed.description
     assert "SEA only" in embed.description
-    assert "Dancer" in embed.description
-    assert "Fan" in embed.description
+    assert "Thief" in embed.description
+    assert "Dagger" in embed.description
 
 
 def test_feedback_results_embed(tmp_db_path: Path) -> None:

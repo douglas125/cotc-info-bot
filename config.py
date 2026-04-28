@@ -103,6 +103,11 @@ TABS: list[TabSpec] = [
 
 TABS_BY_GID: dict[int, TabSpec] = {t.gid: t for t in TABS}
 ROLE_TABS: list[TabSpec] = [t for t in TABS if t.kind == "role"]
+WEAPON_TO_ROLE: dict[str, str] = {
+    t.weapon: t.role
+    for t in ROLE_TABS
+    if t.weapon is not None and t.role is not None
+}
 
 
 # Adversary Log CotC — sibling enemy spreadsheet.

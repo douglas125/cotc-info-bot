@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from config import TABS_BY_GID, color_family, rarity_from_color
+from config import TABS_BY_GID, WEAPON_TO_ROLE, color_family, rarity_from_color
 
 
 # --- color helpers ----------------------------------------------------------
@@ -231,6 +231,53 @@ class FormBlock:
     splash_art_url: str | None = None
     self_buffs_text: str | None = None
     affinities: list[tuple[str, str | None, str | None]] = field(default_factory=list)
+
+
+_WEAPON_PATTERNS = {
+    weapon: re.compile(rf"\b{re.escape(weapon)}\b", re.IGNORECASE)
+    for weapon in WEAPON_TO_ROLE
+}
+_PRIMARY_WEAPON_SKILL_KINDS = frozenset({"active", "divine", "ex", "ultimate"})
+
+
+def infer_weapon_from_block(block: FormBlock) -> str | None:
+    """Infer the character weapon from parsed SEA skill descriptions.
+
+    SEA-only blocks do not carry Index role headers. Skill text is the source
+    of truth; active/divine/EX/ultimate rows are preferred, with passive/latent
+    text used only when the primary rows do not yield a clear answer.
+    """
+    primary_descriptions = [
+        skill.get("description") or ""
+        for skill in block.skills
+        if skill.get("kind") in _PRIMARY_WEAPON_SKILL_KINDS
+    ]
+    weapon = _infer_weapon_from_descriptions(primary_descriptions)
+    if weapon is not None:
+        return weapon
+    return _infer_weapon_from_descriptions(
+        [skill.get("description") or "" for skill in block.skills]
+    )
+
+
+def _infer_weapon_from_descriptions(descriptions: list[str]) -> str | None:
+    counts: dict[str, int] = {}
+    haystack = "\n".join(d for d in descriptions if d)
+    if not haystack:
+        return None
+    for weapon, pattern in _WEAPON_PATTERNS.items():
+        n = len(pattern.findall(haystack))
+        if n:
+            counts[weapon] = n
+    if not counts:
+        return None
+    ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+    if len(ranked) == 1:
+        return ranked[0][0]
+    (top_weapon, top_count), (_, runner_up_count) = ranked[:2]
+    if top_count >= runner_up_count * 2:
+        return top_weapon
+    return None
 
 
 _LV_RE = re.compile(r"Lv\s*(\d+)", re.IGNORECASE)

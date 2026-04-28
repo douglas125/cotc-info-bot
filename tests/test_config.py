@@ -1,7 +1,7 @@
 """Sanity-check the static config tables don't drift out of sync."""
 from __future__ import annotations
 
-from config import ROLE_TABS, TABS, TABS_BY_GID
+from config import ROLE_TABS, TABS, TABS_BY_GID, WEAPON_TO_ROLE
 
 
 def test_tabs_inventory_count() -> None:
@@ -29,6 +29,19 @@ def test_role_tabs_have_role_and_weapon() -> None:
         assert t.role is not None
         assert t.weapon is not None
         assert t.rarity_band in ("5*", "34")
+
+
+def test_weapon_to_role_mapping() -> None:
+    assert WEAPON_TO_ROLE == {
+        "sword": "warrior",
+        "spear": "merchant",
+        "dagger": "thief",
+        "axe": "apothecary",
+        "bow": "hunter",
+        "staff": "cleric",
+        "tome": "scholar",
+        "fan": "dancer",
+    }
 
 
 def test_tabs_by_gid_is_complete() -> None:

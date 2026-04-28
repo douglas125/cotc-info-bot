@@ -6,10 +6,12 @@ import pytest
 from config import color_family, rarity_from_color, canonicalize_name, NAME_ALIASES
 from sync.parsers import (
     Anchor,
+    FormBlock,
     _color_dict_to_hex,
     _classify_skill_kind,
     _image_url_from_cell,
     _parse_skill_description,
+    infer_weapon_from_block,
     parse_anchor,
     parse_index,
     parse_role_tab,
@@ -130,6 +132,54 @@ def test_parse_skill_description_no_match_is_safe() -> None:
     out = _parse_skill_description("Self 15% Atk Up for 3 turns")
     assert "power_min" not in out  # not extracted, not a crash
     assert out["description"] == "Self 15% Atk Up for 3 turns"
+
+
+# --- SEA weapon inference ---------------------------------------------------
+
+def _weapon_block(*skills: tuple[str, str]) -> FormBlock:
+    return FormBlock(
+        display_name="Sample",
+        sheet_gid=999,
+        source_row=0,
+        skills=[
+            {"kind": kind, "description": desc}
+            for kind, desc in skills
+        ],
+    )
+
+
+def test_infer_weapon_from_block_clear_single_weapon_winner() -> None:
+    block = _weapon_block(
+        ("active", "3x single-target Dagger (3x 65 Power)"),
+        ("ex", "2x AoE Dagger and grant self buffs"),
+    )
+    assert infer_weapon_from_block(block) == "dagger"
+
+
+def test_infer_weapon_from_block_ambiguous_two_weapon_case_returns_none() -> None:
+    block = _weapon_block(
+        ("active", "1x single-target Sword"),
+        ("active", "1x single-target Spear"),
+    )
+    assert infer_weapon_from_block(block) is None
+
+
+def test_infer_weapon_from_block_zero_weapon_mentions_returns_none() -> None:
+    block = _weapon_block(("active", "Raise frontrow Atk for 3 turns"))
+    assert infer_weapon_from_block(block) is None
+
+
+def test_infer_weapon_from_block_low_count_valid_winner_succeeds() -> None:
+    block = _weapon_block(("active", "1x single-target Tome"))
+    assert infer_weapon_from_block(block) == "tome"
+
+
+def test_infer_weapon_from_block_uses_passive_text_as_fallback_only() -> None:
+    block = _weapon_block(
+        ("active", "1x single-target Bow"),
+        ("passive", "After using a Bow or Sword attack, gain buffs"),
+    )
+    assert infer_weapon_from_block(block) == "bow"
 
 
 # --- aliases ----------------------------------------------------------------
