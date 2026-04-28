@@ -113,15 +113,55 @@ def _autocomplete_forms(conn: sqlite3.Connection, current: str) -> list[app_comm
             (AUTOCOMPLETE_LIMIT,),
         ))
 
+    # Alias-prompted matches: when the typed prefix matches a NAME_ALIASES key
+    # (e.g. "Krau" → "Krauser"), surface the canonical form ("Clauser") with
+    # an alias-annotated label so the user understands the substitution.
+    alias_rows: list[tuple[str, sqlite3.Row]] = []
+    if current:
+        alias_canonicals: dict[str, str] = {}
+        for alias_key, canonical in config.NAME_ALIASES.items():
+            if current in alias_key.casefold():
+                alias_canonicals.setdefault(canonical, alias_key)
+        if alias_canonicals:
+            placeholders = ",".join("?" * len(alias_canonicals))
+            extra = list(conn.execute(
+                f"SELECT f.id, f.display_name, f.rarity, c.base_role "
+                f"FROM character_forms f "
+                f"JOIN characters c ON c.id = f.character_id "
+                f"WHERE f.display_name IN ({placeholders}) "
+                f"ORDER BY f.rarity DESC, f.display_name",
+                list(alias_canonicals.keys()),
+            ))
+            for r in extra:
+                ak = alias_canonicals.get(r["display_name"])
+                if ak:
+                    alias_rows.append((ak, r))
+
     out: list[app_commands.Choice[str]] = []
+    seen_ids: set[int] = set()
     for r in rows:
+        if r["id"] in seen_ids:
+            continue
+        seen_ids.add(r["id"])
         rarity_disp = embeds._rarity_label(r["rarity"]) if r["rarity"] else "?"
         label = f"{r['display_name']} ({rarity_disp} · {r['base_role'] or '?'})"
         # Discord caps choice name at 100 chars.
         if len(label) > 100:
             label = label[:99] + "…"
         out.append(app_commands.Choice(name=label, value=str(r["id"])))
-    return out
+    for alias_key, r in alias_rows:
+        if r["id"] in seen_ids:
+            continue
+        seen_ids.add(r["id"])
+        rarity_disp = embeds._rarity_label(r["rarity"]) if r["rarity"] else "?"
+        label = (
+            f"{r['display_name']} (a.k.a. {alias_key}) "
+            f"({rarity_disp} · {r['base_role'] or '?'})"
+        )
+        if len(label) > 100:
+            label = label[:99] + "…"
+        out.append(app_commands.Choice(name=label, value=str(r["id"])))
+    return out[:AUTOCOMPLETE_LIMIT]
 
 
 def _resolve_form_id(conn: sqlite3.Connection, name_or_id: str) -> int | None:
@@ -160,6 +200,20 @@ def _resolve_form_id(conn: sqlite3.Connection, name_or_id: str) -> int | None:
         ).fetchone()
         if row:
             return row["id"]
+
+    # Alias fallback: user typed an alternate spelling (e.g. "Krauser") that
+    # doesn't match any stored display_name; resolve via NAME_ALIASES.
+    canonical = config.alias_to_canonical(raw)
+    if canonical and canonical.casefold() != raw.casefold():
+        for variant in _ex_swap_variants(canonical):
+            row = conn.execute(
+                "SELECT id FROM character_forms "
+                "WHERE LOWER(display_name) = LOWER(?) "
+                "ORDER BY rarity DESC LIMIT 1",
+                (variant,),
+            ).fetchone()
+            if row:
+                return row["id"]
     return None
 
 
