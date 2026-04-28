@@ -235,18 +235,20 @@ def check_skill_counts_per_form(conn) -> list[tuple[bool, str]]:
 
 
 def check_skill_uniqueness_per_form(conn) -> list[tuple[bool, str]]:
-    """Each form has at most one TP/divine, one EX, one latent power, and
-    between 0 and 3 ultimate-tier rows (the Lv1/Lv10/Lv20 tiers of the same
-    Special skill). Some units have only 1 or 2 tiers released (Lv20 lands
-    later), so we allow {0,1,2,3}; anything ≥4 means the parser is over-
-    classifying — historically 'N*' board markers were mis-tagged as
-    ultimates, producing many 'ultimate' rows per form.
+    """Each form has at most one TP/divine active, one TP passive
+    (kind='tp_passive'), one EX, one latent power, and between 0 and 3
+    ultimate-tier rows (the Lv1/Lv10/Lv20 tiers of the same Special
+    skill). Some units have only 1 or 2 tiers released (Lv20 lands
+    later), so we allow {0,1,2,3}; anything ≥4 means the parser is
+    over-classifying — historically 'N*' board markers were mis-tagged
+    as ultimates, producing many 'ultimate' rows per form.
     """
     out: list[tuple[bool, str]] = []
     rows = conn.execute(
         "SELECT cf.display_name, s.kind, COUNT(*) AS n "
         "FROM character_forms cf JOIN skills s ON s.form_id = cf.id "
-        "WHERE cf.server = 'global' AND s.kind IN ('ex','divine','latent','ultimate') "
+        "WHERE cf.server = 'global' "
+        "  AND s.kind IN ('ex','divine','tp_passive','latent','ultimate') "
         "GROUP BY cf.id, s.kind"
     ).fetchall()
     by_form: dict[str, dict[str, int]] = defaultdict(dict)
@@ -255,7 +257,7 @@ def check_skill_uniqueness_per_form(conn) -> list[tuple[bool, str]]:
     bad: list[tuple[str, str]] = []
     bad_forms: set[str] = set()
     for name, counts in by_form.items():
-        for kind in ("ex", "divine", "latent"):
+        for kind in ("ex", "divine", "tp_passive", "latent"):
             n = counts.get(kind, 0)
             if n > 1:
                 bad.append((name, f"{n} {kind} skills (expected ≤1)"))

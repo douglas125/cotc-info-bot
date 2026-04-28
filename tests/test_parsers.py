@@ -469,6 +469,45 @@ def test_parse_role_tab_lv_tier_rows_stay_ultimate_inside_passive_section() -> N
     assert sorted(s["learn_board"] for s in passive) == [1, 3]
 
 
+def test_parse_role_tab_tp_inside_passive_section_becomes_tp_passive() -> None:
+    """A passive-section row whose col-5 label is literally "TP" is the
+    conditional "TP passive" (e.g. Esmeralda, Cyrus). Give it a distinct
+    kind='tp_passive' so the /character renderer can draw a `TP` badge
+    alongside the rarity stars without confusing it with the active-
+    section TP skill (kind='divine')."""
+    rows = []
+    header = [_cell()] * 26
+    header[0] = _cell("Sample")
+    header[6] = _cell("SP")
+    header[7] = _cell("Active")
+    rows.append(header)
+    rows.append(_row(sp="20", desc="basic active"))
+    # Active-section TP must stay kind='divine' even when another "TP"
+    # row appears later in the passive section.
+    rows.append(_row(kind="TP", sp="40", desc="1x ST damage (260~450 Power)"))
+    rows.append(_section_divider("Passive"))
+    rows.append(_row(kind="1*", passive_desc="Rarity-unlocked passive"))
+    rows.append(_row(kind="3*", passive_desc="Higher rarity passive"))
+    rows.append(_row(kind="TP", passive_desc="If an enemy has Deep Wound, grant self doublecast."))
+
+    sheet = _make_role_sheet(rows)
+    blocks = parse_role_tab(sheet, gid=999)
+    assert len(blocks) == 1
+    skills = blocks[0].skills
+
+    divine = [s for s in skills if s["kind"] == "divine"]
+    assert len(divine) == 1
+    assert divine[0]["sp_cost"] == 40
+    tp_passive = [s for s in skills if s["kind"] == "tp_passive"]
+    assert len(tp_passive) == 1, f"expected 1 tp_passive, got {[s['kind'] for s in skills]}"
+    assert tp_passive[0]["learn_board"] is None
+    assert tp_passive[0]["sp_cost"] is None
+    assert "Deep Wound" in tp_passive[0]["description"]
+    # Rarity passives are unaffected.
+    passive = [s for s in skills if s["kind"] == "passive"]
+    assert sorted(s["learn_board"] for s in passive) == [1, 3]
+
+
 def test_parse_role_tab_partial_ultimate_release() -> None:
     """A unit with only Lv1/Lv10 released (Lv20 not out yet) must still
     surface those tiers as ultimate — verify allows {0,1,2,3} ultimate

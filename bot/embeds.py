@@ -112,6 +112,8 @@ def _format_skill_line(s: sqlite3.Row) -> str:
         bits.append(f"`{s['sp_cost']} SP`")
     if s["learn_board"]:
         bits.append(f"`{s['learn_board']}⭐`")
+    elif s["kind"] == "tp_passive":
+        bits.append("`TP`")
     if s["tier_level"]:
         bits.append(f"`Lv{s['tier_level']}`")
     name = s["name"] or ""
@@ -190,6 +192,7 @@ SKILL_KIND_TITLES = {
     "active": "Active",
     "passive": "Passive",
     "divine": "TP",
+    "tp_passive": "Passive",
     "ex": "EX",
     "ultimate": "Ultimate",
     "latent": "Latent",
@@ -329,6 +332,19 @@ def _build_skill_kinds_section(
 ) -> discord.Embed:
     embed = _new_header_embed(form)
     by_kind = _group_by_kind(skills)
+    # tp_passive rows belong inside the Passive field of the passives
+    # section (rendered with a `TP` badge by _format_skill_line). Fold
+    # them into the passive group rather than spawning a separate field
+    # — they're a sibling of the rarity-unlocked passives, not a kind of
+    # their own from the user's perspective.
+    if (
+        "passive" in kind_order
+        and "tp_passive" not in kind_order
+        and "tp_passive" in by_kind
+    ):
+        merged = by_kind.get("passive", []) + by_kind.pop("tp_passive")
+        merged.sort(key=lambda s: s["slot_order"])
+        by_kind["passive"] = merged
     for kind in kind_order:
         if kind not in by_kind or len(embed.fields) >= MAX_FIELDS:
             continue

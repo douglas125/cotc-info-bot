@@ -570,15 +570,18 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
 
         kind, learn_board, tier_level = _classify_skill_kind(kind_label or None)
 
-        # In the passive section, force kind="passive" — some units have a
-        # passive whose col-5 label is literally "TP" (e.g. role-tab Cyrus,
-        # Yugo). A bare "N*" outside passive needs numeric SP to count as a
-        # real skill row. Lv\d+ rows are the unit's ultimate tiers and keep
-        # kind="ultimate" even if they appear after the Passive divider —
-        # historically the Special divider was sometimes missing and the
-        # tier rows ended up in the passive section.
+        # In the passive section, force kind="passive" for the bare board
+        # indicator and unknown labels. Lv\d+ rows are the unit's ultimate
+        # tiers and keep kind="ultimate" even if they appear after the
+        # Passive divider — historically the Special divider was sometimes
+        # missing and the tier rows ended up in the passive section. A
+        # passive-section row whose col-5 label is literally "TP" (e.g.
+        # Esmeralda, Cyrus, Yugo) is the conditional "TP passive" — give
+        # it kind="tp_passive" so the renderer can mark it with a `TP`
+        # badge in the Passives field while keeping the active-section TP
+        # (kind="divine") in the Actives field.
         if current_section == "passive" and tier_level is None:
-            kind = "passive"
+            kind = "tp_passive" if kind == "divine" else "passive"
         elif kind is None:
             if is_numeric_sp:
                 kind = "active"
