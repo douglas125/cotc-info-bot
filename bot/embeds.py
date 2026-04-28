@@ -11,6 +11,7 @@ section is a self-contained embed; the dropdown swaps which one is shown.
 from __future__ import annotations
 
 import sqlite3
+import textwrap
 from typing import Any, Literal
 
 import discord
@@ -130,10 +131,58 @@ def _format_skill_line(s: sqlite3.Row) -> str:
     return f"• {head}" if head else "—"
 
 
-def _skill_field_value(skills: list[sqlite3.Row]) -> str:
-    return _truncate(
-        "\n".join(_format_skill_line(s) for s in skills),
-        FIELD_VALUE_LIMIT,
+def _split_oversize_bullet(bullet: str) -> list[str]:
+    """Word-boundary split for a single bullet that itself exceeds the cap.
+
+    `textwrap.wrap` with `break_long_words=False` guarantees we never cut
+    mid-word; it returns the next-best fit at whitespace. Only when even
+    one token is longer than the cap (pathological) do we fall through to
+    a hard truncate.
+    """
+    if len(bullet) <= FIELD_VALUE_LIMIT:
+        return [bullet]
+    pieces = textwrap.wrap(
+        bullet,
+        width=FIELD_VALUE_LIMIT,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    if not pieces:
+        return [_truncate(bullet, FIELD_VALUE_LIMIT)]
+    return pieces
+
+
+def _split_bullets_into_field_values(bullets: list[str]) -> list[str]:
+    """Pack pre-rendered bullet lines into chunks ≤ ``FIELD_VALUE_LIMIT``.
+
+    Splits only between bullets — never inside one — so a kit's skill
+    list stays readable when it overflows Discord's 1024-char field cap.
+    Concatenating the returned chunks with ``\\n`` reproduces
+    ``"\\n".join(bullets)`` exactly (after any oversize-bullet
+    word-wrapping), which makes the round-trip property easy to assert.
+    """
+    if not bullets:
+        return []
+    chunks: list[str] = []
+    current = ""
+    for raw in bullets:
+        for piece in _split_oversize_bullet(raw):
+            if not current:
+                current = piece
+                continue
+            if len(current) + 1 + len(piece) <= FIELD_VALUE_LIMIT:
+                current = f"{current}\n{piece}"
+            else:
+                chunks.append(current)
+                current = piece
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _skill_field_values(skills: list[sqlite3.Row]) -> list[str]:
+    return _split_bullets_into_field_values(
+        [_format_skill_line(s) for s in skills],
     )
 
 
@@ -193,10 +242,10 @@ def _collapse_ultimates(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     return out
 
 
-def _format_ultimate_block(rows: list[sqlite3.Row]) -> str:
+def _ultimate_field_values(rows: list[sqlite3.Row]) -> list[str]:
     groups = _collapse_ultimates(rows)
     if not groups:
-        return ""
+        return []
     parts: list[str] = []
     for g in groups:
         tiers = g["tiers"]
@@ -206,7 +255,7 @@ def _format_ultimate_block(rows: list[sqlite3.Row]) -> str:
         for tl, desc in tiers:
             tag = f"Lv{tl}" if tl else "—"
             parts.append(f"**{tag}** — {desc}")
-    return _truncate("\n".join(parts), FIELD_VALUE_LIMIT)
+    return _split_bullets_into_field_values(parts)
 
 
 def _new_header_embed(form: sqlite3.Row) -> discord.Embed:
@@ -255,6 +304,22 @@ def _group_by_kind(skills: list[sqlite3.Row]) -> dict[str, list[sqlite3.Row]]:
     return by_kind
 
 
+def _add_chunked_fields(
+    embed: discord.Embed, base_title: str, chunks: list[str],
+) -> None:
+    """Add one field per chunk; suffix names with ``(n/N)`` when N > 1.
+
+    Stops early at ``MAX_FIELDS`` so callers don't overflow Discord's 25-
+    fields-per-embed cap.
+    """
+    total = len(chunks)
+    for idx, value in enumerate(chunks, start=1):
+        if len(embed.fields) >= MAX_FIELDS:
+            return
+        name = base_title if total == 1 else f"{base_title} ({idx}/{total})"
+        embed.add_field(name=name, value=value, inline=False)
+
+
 def _build_skill_kinds_section(
     form: sqlite3.Row,
     skills: list[sqlite3.Row],
@@ -267,10 +332,10 @@ def _build_skill_kinds_section(
     for kind in kind_order:
         if kind not in by_kind or len(embed.fields) >= MAX_FIELDS:
             continue
-        value = _skill_field_value(by_kind[kind])
-        if not value:
+        chunks = _skill_field_values(by_kind[kind])
+        if not chunks:
             continue
-        embed.add_field(name=SKILL_KIND_TITLES[kind], value=value, inline=False)
+        _add_chunked_fields(embed, SKILL_KIND_TITLES[kind], chunks)
     if not embed.fields:
         embed.add_field(name=empty_field_name, value=empty_message, inline=False)
     return embed
@@ -279,12 +344,15 @@ def _build_skill_kinds_section(
 def _build_ultimate_section(form: sqlite3.Row, skills: list[sqlite3.Row]) -> discord.Embed:
     embed = _new_header_embed(form)
     ult = [s for s in skills if (s["kind"] or "") == "ultimate"]
-    value = _format_ultimate_block(ult) if ult else ""
-    embed.add_field(
-        name="Ultimate",
-        value=value or "_No ultimate recorded for this form (may be unreleased)._",
-        inline=False,
-    )
+    chunks = _ultimate_field_values(ult) if ult else []
+    if not chunks:
+        embed.add_field(
+            name="Ultimate",
+            value="_No ultimate recorded for this form (may be unreleased)._",
+            inline=False,
+        )
+        return embed
+    _add_chunked_fields(embed, "Ultimate", chunks)
     return embed
 
 
