@@ -270,22 +270,15 @@ def register(tree: app_commands.CommandTree) -> None:
                 ephemeral=True,
             )
             return
-        message = embeds.build_character_message(conn, form_id, embeds.DEFAULT_SECTION)
-        if message is None:
+        embed = embeds.build_section_embed(conn, form_id, embeds.DEFAULT_SECTION)
+        if embed is None:
             await interaction.response.send_message(
                 "That form was removed by a recent refresh — try again.",
                 ephemeral=True,
             )
             return
         view = CharacterView(form_id=form_id)
-        if message.file is None:
-            await interaction.response.send_message(embed=message.embed, view=view)
-        else:
-            await interaction.response.send_message(
-                embed=message.embed,
-                file=message.file,
-                view=view,
-            )
+        await interaction.response.send_message(embed=embed, view=view)
 
     @character_cmd.autocomplete("name")
     async def _character_ac(interaction: discord.Interaction, current: str):

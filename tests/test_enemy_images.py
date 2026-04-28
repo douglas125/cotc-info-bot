@@ -16,6 +16,8 @@ def test_all_weakness_png_assets_exist() -> None:
 
 def test_render_weakness_panel_outputs_valid_png() -> None:
     assert enemy_images.ICON_SIZE == 20
+    assert enemy_images.SHIELD_SIZE == enemy_images.ICON_SIZE
+    assert enemy_images.SHIELD_W < 50
     rendered = enemy_images.render_weakness_panel(
         filename="weaknesses.png",
         stats_rows=[
@@ -40,8 +42,18 @@ def test_render_weakness_panel_outputs_valid_png() -> None:
     assert rendered.filename == "weaknesses.png"
     image = Image.open(BytesIO(rendered.data))
     assert image.format == "PNG"
-    assert image.width > 250
-    assert image.height > 60
+    assert image.width == (
+        enemy_images.PAD_X * 2
+        + enemy_images.LABEL_W
+        + enemy_images.SHIELD_W
+        + 5 * enemy_images.ICON_SIZE
+        + 4 * enemy_images.ICON_GAP
+    )
+    assert image.height == (
+        enemy_images.PAD_Y * 2
+        + 2 * enemy_images.ROW_H
+        + enemy_images.ROW_GAP
+    )
     colors = image.convert("RGBA").getcolors(maxcolors=10_000)
     assert colors is not None
     assert len(colors) > 20

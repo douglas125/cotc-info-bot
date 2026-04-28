@@ -3,22 +3,17 @@ from __future__ import annotations
 from bot import weakness_icons
 
 
-def _labels(text: str) -> list[str]:
-    return [
-        token.label
-        for token in weakness_icons.inline_tokens(text)
-        if isinstance(token, weakness_icons.IconToken)
-    ]
+def test_canonical_labels_are_case_insensitive() -> None:
+    assert weakness_icons.canonical_label("tome") == "Tome"
+    assert weakness_icons.canonical_label("FIRE") == "Fire"
+    assert weakness_icons.canonical_label("not-a-weakness") is None
 
 
-def test_inline_tokens_replace_labels_case_insensitively() -> None:
-    assert _labels("tome/Tome/FIRE/ice") == ["Tome", "Tome", "Fire", "Ice"]
-
-
-def test_inline_tokens_treat_polearm_as_spear_icon() -> None:
-    assert _labels("Polearm and spear") == ["Polearm", "Spear"]
+def test_polearm_uses_spear_icon_asset() -> None:
     assert weakness_icons.ICON_FILES["Polearm"] == weakness_icons.ICON_FILES["Spear"]
 
 
-def test_inline_tokens_do_not_match_inside_words() -> None:
-    assert _labels("firelight Lightning") == ["Lightning"]
+def test_load_icon_returns_requested_size() -> None:
+    icon = weakness_icons.load_icon("fire", size=20)
+    assert icon is not None
+    assert icon.size == (20, 20)

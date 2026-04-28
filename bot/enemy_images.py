@@ -16,7 +16,9 @@ ROW_GAP = 8
 PAD_X = 12
 PAD_Y = 10
 LABEL_W = 132
-SHIELD_W = 50
+SHIELD_SIZE = 20
+SHIELD_COUNT_GAP = 4
+SHIELD_W = 44
 ROW_H = 30
 
 BG = (43, 45, 49, 255)
@@ -65,17 +67,28 @@ def _load_icon(label: str) -> Image.Image | None:
 
 def _draw_shield(draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
     points = [
-        (x + 8, y + 2),
-        (x + 20, y + 5),
-        (x + 20, y + 14),
-        (x + 14, y + 23),
-        (x + 8, y + 27),
-        (x + 2, y + 23),
-        (x - 4, y + 14),
-        (x - 4, y + 5),
+        (x + 10, y + 1),
+        (x + 18, y + 4),
+        (x + 18, y + 10),
+        (x + 15, y + 15),
+        (x + 10, y + 19),
+        (x + 5, y + 15),
+        (x + 2, y + 10),
+        (x + 2, y + 4),
     ]
     draw.polygon(points, fill=SHIELD, outline=SHIELD_EDGE)
-    draw.line([(x + 8, y + 4), (x + 8, y + 25)], fill=SHIELD_EDGE)
+    draw.line([(x + 10, y + 3), (x + 10, y + 17)], fill=SHIELD_EDGE)
+
+
+def _centered_text_y(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.ImageFont,
+    top: int,
+    height: int,
+) -> int:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return top + (height - (bbox[3] - bbox[1])) // 2 - bbox[1]
 
 
 def render_weakness_panel(
@@ -117,11 +130,26 @@ def render_weakness_panel(
     for position in positions:
         draw.rounded_rectangle((PAD_X, y, width - PAD_X, y + ROW_H), radius=4, fill=ROW_BG)
         label = _fit_text(draw, member_by_pos.get(position, f"#{position + 1}"), label_font, LABEL_W - 8)
-        draw.text((PAD_X + 8, y + 8), label, font=label_font, fill=TEXT)
+        draw.text(
+            (PAD_X + 8, _centered_text_y(draw, label, label_font, y, ROW_H)),
+            label,
+            font=label_font,
+            fill=TEXT,
+        )
 
         shield_x = PAD_X + LABEL_W + 8
-        _draw_shield(draw, shield_x, y + 4)
-        draw.text((shield_x + 25, y + 8), shields_by_pos.get(position, "?"), font=count_font, fill=MUTED)
+        shield_y = y + (ROW_H - SHIELD_SIZE) // 2
+        _draw_shield(draw, shield_x, shield_y)
+        shield_count = shields_by_pos.get(position, "?")
+        draw.text(
+            (
+                shield_x + SHIELD_SIZE + SHIELD_COUNT_GAP,
+                _centered_text_y(draw, shield_count, count_font, y, ROW_H),
+            ),
+            shield_count,
+            font=count_font,
+            fill=MUTED,
+        )
 
         icon_x = PAD_X + LABEL_W + SHIELD_W
         for label in weaknesses_by_pos[position]:
