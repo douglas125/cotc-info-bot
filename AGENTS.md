@@ -25,7 +25,7 @@ For every change, follow this flow:
 3. **Commit and push** — `git commit` then `git push -u origin <branch>`.
 4. **Open a PR** — `gh pr create` with a clear summary and test plan.
 5. **WAIT for the user's confirmation.** Do not merge on your own initiative even if CI is green and tests pass. Pause and report the PR URL.
-6. **Merge only after explicit confirmation** — `gh pr merge --squash --delete-branch` (or as the user specifies). The `--delete-branch` flag removes the *remote* branch.
+6. **Merge only after BOTH explicit confirmation AND green CI** — once the user authorizes the merge, poll `gh pr checks <PR>` until every check passes, then run `gh pr merge --squash --delete-branch` (or as the user specifies). If CI fails, fix the issue and push a new commit to the same branch — never merge a red PR. The `--delete-branch` flag removes the *remote* branch.
 7. **Sync local main and clean up the local branch** — `git checkout main && git pull --ff-only && git branch -d <branch>`. The merged feature branch is no longer needed locally.
 8. **Confirm the Railway deployment succeeded** — Railway auto-deploys on push to `main`. Poll until the latest deployment for the merge commit shows `SUCCESS`:
 
