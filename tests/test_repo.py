@@ -17,6 +17,7 @@ def test_bootstrap_creates_all_tables(tmp_db_path: Path) -> None:
         "characters", "character_forms", "character_affinities",
         "skills", "equipment", "character_profile",
         "sync_runs", "raw_snapshots",
+        "feedback_submissions",
     }
     missing = expected - names
     conn.close()
@@ -186,4 +187,96 @@ def test_bootstrap_migrates_legacy_skills_columns(tmp_path: Path) -> None:
     ).fetchone()
     assert row["learn_board"] == 2
     assert row["description"] == "legacy row"
+    conn.close()
+
+
+# --- feedback ---------------------------------------------------------------
+
+def test_feedback_insert_list_clear_roundtrip(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    a = repo.insert_feedback(
+        conn, user_id=42, username="alice", guild_id=999,
+        feedback_text="Castti A4 missing SP bonus",
+    )
+    b = repo.insert_feedback(
+        conn, user_id=43, username="bob", guild_id=None,
+        feedback_text="Erika element wrong",
+    )
+    rows = repo.list_feedback(conn, limit=10)
+    assert len(rows) == 2
+    # newest first; both rows share submitted_at granularity (seconds), so the
+    # tiebreaker is id DESC — the second insert (`b`) must come first.
+    assert rows[0]["id"] == b
+    assert rows[1]["id"] == a
+    assert rows[0]["username"] == "bob"
+    assert rows[0]["guild_id"] is None
+    assert rows[1]["guild_id"] == 999
+
+    deleted = repo.clear_feedback(conn)
+    assert deleted == 2
+    assert repo.list_feedback(conn) == []
+    conn.close()
+
+
+def test_feedback_survives_clear_data_tables(tmp_db_path: Path) -> None:
+    """`/refresh` calls clear_data_tables; community feedback MUST survive it."""
+    conn = repo.connect(tmp_db_path)
+    repo.insert_feedback(
+        conn, user_id=1, username="user", guild_id=None,
+        feedback_text="don't wipe me",
+    )
+    _seed(conn)
+    repo.clear_data_tables(conn)
+    assert conn.execute(
+        "SELECT COUNT(*) FROM feedback_submissions"
+    ).fetchone()[0] == 1
+    conn.close()
+
+
+def test_recent_feedback_timestamps_window(tmp_db_path: Path) -> None:
+    """The rate-limit query returns rows newer than the cutoff and excludes older ones."""
+    import sqlite3
+    conn = repo.connect(tmp_db_path)
+    # Insert three rows for user 42 with explicit timestamps spread across
+    # the window, plus one outside it.
+    cur: sqlite3.Cursor = conn.cursor()
+    cur.executemany(
+        "INSERT INTO feedback_submissions("
+        "submitted_at, user_id, username, guild_id, feedback_text) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [
+            ("2026-04-27T12:00:30Z", 42, "alice", None, "msg1"),
+            ("2026-04-27T12:00:45Z", 42, "alice", None, "msg2"),
+            ("2026-04-27T12:00:55Z", 42, "alice", None, "msg3"),
+            ("2026-04-27T11:59:00Z", 42, "alice", None, "old"),
+            ("2026-04-27T12:00:50Z", 99, "other", None, "different user"),
+        ],
+    )
+
+    cutoff = "2026-04-27T12:00:00Z"   # everything in the same minute is recent
+    recent = repo.recent_feedback_timestamps(conn, user_id=42, since_iso=cutoff)
+    assert len(recent) == 3            # the "old" row is excluded
+    # Ordered newest first
+    assert recent[0] == "2026-04-27T12:00:55Z"
+    assert recent[-1] == "2026-04-27T12:00:30Z"
+
+    # Different user ⇒ none of theirs counted.
+    assert repo.recent_feedback_timestamps(conn, user_id=42, since_iso="2026-04-27T12:00:50Z") == [
+        "2026-04-27T12:00:55Z",
+    ]
+    conn.close()
+
+
+def test_feedback_accepts_2000_char_body(tmp_db_path: Path) -> None:
+    """Length cap is enforced by Discord's app_commands.Range, but the schema
+    itself must not surprise us with a hidden cap."""
+    conn = repo.connect(tmp_db_path)
+    body = "x" * 2000
+    rid = repo.insert_feedback(
+        conn, user_id=1, username="bigtext", guild_id=None, feedback_text=body,
+    )
+    row = conn.execute(
+        "SELECT feedback_text FROM feedback_submissions WHERE id = ?", (rid,)
+    ).fetchone()
+    assert len(row["feedback_text"]) == 2000
     conn.close()

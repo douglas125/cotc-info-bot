@@ -121,6 +121,14 @@ in `bot/`; entry point is `python -m bot`.
   optional, all autocompletes pull from the live DB.
 - `/refresh` — admin-gated; re-runs `sync.runner.run_sync` off the event
   loop. Refuses if a refresh is already in flight.
+- `/feedback text:<≤2000 chars>` — anyone; logs a correction/inconsistency
+  report into `feedback_submissions`. Per-user rate limit (3/60s) is
+  enforced by counting recent rows in the same table — survives bot
+  restarts. Reply is ephemeral.
+- `/feedback_list [limit:1-25]` — admin-gated; ephemeral embed of the
+  newest submissions.
+- `/feedback_clear confirm:bool` — admin-gated; deletes all rows from
+  `feedback_submissions`. Refuses unless `confirm:true`.
 
 **One-time Discord setup:**
 1. Create an app at https://discord.com/developers/applications.
@@ -186,6 +194,30 @@ red=5★, green=free 3→5★, yellow=4★, blue=3★.
    form row with `server='sea'`).
 6. Persist inside `BEGIN IMMEDIATE`: `clear_data_tables` then re-insert.
    `rebuild_fts` repopulates the FTS index. `sync_runs` row is finalized.
+
+### What `/refresh` (and `clear_data_tables`) wipes vs preserves
+
+The wipe loop in `repo.clear_data_tables` is intentional and the contents
+matter — adding or removing a table here changes whether community state
+survives a re-sync. Treat it as a policy decision, not a maintenance chore.
+
+**Wiped on every refresh** (sheet-derived, regenerated from the snapshot):
+
+- `characters_fts`, `character_profile`, `equipment`, `skills`,
+  `character_affinities`, `character_forms`, `characters`
+
+**Preserved across refreshes** (must NOT be added to the wipe loop):
+
+- `sync_runs` / `raw_snapshots` — sync history & raw payloads, used by the
+  verifier and by parser re-runs.
+- `feedback_submissions` — community-submitted corrections (`/feedback`).
+  Wiping it would silently delete user reports on every re-sync. Cleared
+  explicitly via the admin-only `/feedback_clear` slash command.
+
+When you add a new table that holds user/community state (anything not
+derivable from the sheet), default to *not* listing it in
+`clear_data_tables`, and add a one-line entry above so the policy stays
+discoverable.
 
 ## Tests
 

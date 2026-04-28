@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import discord
@@ -182,6 +183,20 @@ def _is_admin(user_id: int) -> bool:
 
 
 # ----------------------------------------------------------------------------
+# /feedback helpers
+# ----------------------------------------------------------------------------
+
+FEEDBACK_RATE_LIMIT = 3            # max submissions per user ...
+FEEDBACK_RATE_WINDOW_SEC = 60      # ... per rolling window
+FEEDBACK_MAX_LEN = 2000
+
+
+def _parse_iso(ts: str) -> datetime:
+    # repo._now_iso writes "%Y-%m-%dT%H:%M:%SZ" — naive UTC; attach tzinfo.
+    return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+# ----------------------------------------------------------------------------
 # Registration
 # ----------------------------------------------------------------------------
 
@@ -308,5 +323,117 @@ def register(tree: app_commands.CommandTree) -> None:
             f"Sync OK. forms={summary.get('character_forms', '?')} · "
             f"skills={summary.get('skills', '?')} · "
             f"equipment={summary.get('equipment', '?')}",
+            ephemeral=True,
+        )
+
+    @tree.command(
+        name="feedback",
+        description="Flag a correction or inconsistency in the character data.",
+    )
+    @app_commands.describe(
+        text=f"What's wrong or could be improved? (≤ {FEEDBACK_MAX_LEN} chars)",
+    )
+    async def feedback_cmd(
+        interaction: discord.Interaction,
+        text: app_commands.Range[str, 1, FEEDBACK_MAX_LEN],
+    ) -> None:
+        body = (text or "").strip()
+        if not body:
+            await interaction.response.send_message(
+                "Feedback can't be empty.", ephemeral=True,
+            )
+            return
+
+        conn = bot_db.conn()
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=FEEDBACK_RATE_WINDOW_SEC)
+        cutoff_iso = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+        recent = repo.recent_feedback_timestamps(conn, interaction.user.id, cutoff_iso)
+        if len(recent) >= FEEDBACK_RATE_LIMIT:
+            oldest = min(recent)
+            elapsed = (datetime.now(timezone.utc) - _parse_iso(oldest)).total_seconds()
+            retry_in = max(1, FEEDBACK_RATE_WINDOW_SEC - int(elapsed))
+            await interaction.response.send_message(
+                f"Slow down — you've hit the {FEEDBACK_RATE_LIMIT}-per-"
+                f"{FEEDBACK_RATE_WINDOW_SEC}s limit. Try again in {retry_in}s.",
+                ephemeral=True,
+            )
+            return
+
+        repo.insert_feedback(
+            conn,
+            user_id=interaction.user.id,
+            username=str(interaction.user),
+            guild_id=interaction.guild_id,
+            feedback_text=body,
+        )
+        await interaction.response.send_message(
+            "Thanks — your feedback was logged.", ephemeral=True,
+        )
+
+    @tree.command(
+        name="feedback_list",
+        description="(admin) Show the most recent community feedback submissions.",
+    )
+    @app_commands.describe(limit="How many entries to show (1–25, default 10).")
+    async def feedback_list_cmd(
+        interaction: discord.Interaction,
+        limit: app_commands.Range[int, 1, 25] = 10,
+    ) -> None:
+        if not _is_admin(interaction.user.id):
+            await interaction.response.send_message(
+                "You're not authorised to read feedback.", ephemeral=True,
+            )
+            return
+        rows = repo.list_feedback(bot_db.conn(), limit=limit)
+        if not rows:
+            await interaction.response.send_message(
+                "No feedback yet.", ephemeral=True,
+            )
+            return
+        embed = discord.Embed(
+            title=f"Latest {len(rows)} feedback submission(s)",
+            color=discord.Color.blurple(),
+        )
+        for r in rows:
+            body = r["feedback_text"] or ""
+            if len(body) > 900:
+                body = body[:899] + "…"
+            embed.add_field(
+                name=f"#{r['id']} · {r['username']} · {r['submitted_at']}",
+                value=body or "—",
+                inline=False,
+            )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @tree.command(
+        name="feedback_clear",
+        description="(admin) Delete all stored feedback. Requires confirm:true.",
+    )
+    @app_commands.describe(
+        confirm="Set to true to actually delete. Defaults to false (no-op).",
+    )
+    async def feedback_clear_cmd(
+        interaction: discord.Interaction,
+        confirm: bool = False,
+    ) -> None:
+        if not _is_admin(interaction.user.id):
+            await interaction.response.send_message(
+                "You're not authorised to clear feedback.", ephemeral=True,
+            )
+            return
+        conn = bot_db.conn()
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM feedback_submissions"
+        ).fetchone()[0]
+        if not confirm:
+            await interaction.response.send_message(
+                f"{pending} feedback entries on file. "
+                f"Re-run with `confirm:true` to delete them all.",
+                ephemeral=True,
+            )
+            return
+        deleted = repo.clear_feedback(conn)
+        await interaction.response.send_message(
+            f"Deleted {deleted} feedback entr{'y' if deleted == 1 else 'ies'}.",
             ephemeral=True,
         )

@@ -356,3 +356,48 @@ def counts(conn: sqlite3.Connection) -> dict[str, int]:
                 "character_affinities"):
         out[tbl] = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
     return out
+
+
+# --- feedback (community-submitted corrections) -----------------------------
+
+def insert_feedback(
+    conn: sqlite3.Connection,
+    *,
+    user_id: int,
+    username: str,
+    guild_id: int | None,
+    feedback_text: str,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO feedback_submissions("
+        "submitted_at, user_id, username, guild_id, feedback_text"
+        ") VALUES (?, ?, ?, ?, ?)",
+        (_now_iso(), user_id, username, guild_id, feedback_text),
+    )
+    return cur.lastrowid
+
+
+def list_feedback(conn: sqlite3.Connection, limit: int = 25) -> list[sqlite3.Row]:
+    return list(conn.execute(
+        "SELECT id, submitted_at, user_id, username, guild_id, feedback_text "
+        "FROM feedback_submissions ORDER BY submitted_at DESC, id DESC LIMIT ?",
+        (limit,),
+    ))
+
+
+def clear_feedback(conn: sqlite3.Connection) -> int:
+    cur = conn.execute("DELETE FROM feedback_submissions")
+    return cur.rowcount
+
+
+def recent_feedback_timestamps(
+    conn: sqlite3.Connection, user_id: int, since_iso: str,
+) -> list[str]:
+    """Timestamps of this user's submissions newer than `since_iso`. Used by
+    the per-user rate limit to count submissions in the rolling window."""
+    return [r[0] for r in conn.execute(
+        "SELECT submitted_at FROM feedback_submissions "
+        "WHERE user_id = ? AND submitted_at > ? "
+        "ORDER BY submitted_at DESC",
+        (user_id, since_iso),
+    )]
