@@ -1,10 +1,10 @@
 """SQLite connection helper for the bot.
 
-Mirrors `app.py::_conn`: open a fresh connection per call, bootstrap the
-schema once. discord.py runs handlers on the asyncio loop's main thread, so
-a per-call connection is the simplest way to avoid sqlite3's
-"connections are bound to their creation thread" trap when handlers occasionally
-get scheduled onto thread-pool executors (e.g. for `run_in_executor`).
+Open a fresh connection per call, bootstrap the schema once. discord.py
+runs handlers on the asyncio loop's main thread, so a per-call connection
+is the simplest way to avoid sqlite3's "connections are bound to their
+creation thread" trap when handlers occasionally get scheduled onto
+thread-pool executors (e.g. for `run_in_executor`).
 """
 from __future__ import annotations
 

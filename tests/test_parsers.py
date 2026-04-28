@@ -384,6 +384,64 @@ def test_parse_role_tab_castti_shape_classifies_sections_correctly() -> None:
     assert lp["description"].count("\n") >= 2  # 3 lines joined
 
 
+def test_parse_role_tab_lv_tier_rows_stay_ultimate_inside_passive_section() -> None:
+    """Regression: if Lv1/Lv10/Lv20 rows fall inside the Passive section
+    (e.g. a missing Special divider, or a layout quirk), they must still be
+    classified as kind='ultimate' with their tier_level — not silently
+    re-tagged as passive. Older parser versions produced kind='passive'
+    with tier_level set, which dropped the unit's ultimate from the kit."""
+    rows = []
+    header = [_cell()] * 26
+    header[0] = _cell("Sample")
+    header[6] = _cell("SP")
+    header[7] = _cell("Active")
+    rows.append(header)
+    rows.append(_row(sp="20", desc="basic active"))
+    # Passive divider FIRST — Lv tier rows then appear in the passive section.
+    rows.append(_section_divider("Passive"))
+    rows.append(_row(kind="1*", passive_desc="Standard passive 1"))
+    rows.append(_row(kind="Lv1",  desc="Lv1 ultimate description"))
+    rows.append(_row(kind="Lv10", desc="Lv10 ultimate description"))
+    rows.append(_row(kind="Lv20", desc="Lv20 ultimate description"))
+    rows.append(_row(kind="3*", passive_desc="Standard passive 3"))
+
+    sheet = _make_role_sheet(rows)
+    blocks = parse_role_tab(sheet, gid=999)
+    assert len(blocks) == 1
+    skills = blocks[0].skills
+
+    ult = [s for s in skills if s["kind"] == "ultimate"]
+    assert len(ult) == 3, f"expected 3 ultimate rows, got {[s['kind'] for s in skills]}"
+    assert {s["tier_level"] for s in ult} == {1, 10, 20}
+    assert all(s["sp_cost"] is None for s in ult)
+    # Standard passives are still passives.
+    passive = [s for s in skills if s["kind"] == "passive"]
+    assert sorted(s["learn_board"] for s in passive) == [1, 3]
+
+
+def test_parse_role_tab_partial_ultimate_release() -> None:
+    """A unit with only Lv1/Lv10 released (Lv20 not out yet) must still
+    surface those tiers as ultimate — verify allows {0,1,2,3} ultimate
+    rows."""
+    rows = []
+    header = [_cell()] * 26
+    header[0] = _cell("Sample")
+    header[6] = _cell("SP")
+    header[7] = _cell("Active")
+    rows.append(header)
+    rows.append(_row(sp="20", desc="basic active"))
+    rows.append(_section_divider("Special"))
+    rows.append(_row(kind="Lv1",  desc="Lv1 ultimate description"))
+    rows.append(_row(kind="Lv10", desc="Lv10 ultimate description"))
+    rows.append(_section_divider("Passive"))
+    rows.append(_row(kind="1*", passive_desc="standard passive"))
+
+    sheet = _make_role_sheet(rows)
+    blocks = parse_role_tab(sheet, gid=999)
+    ult = [s for s in blocks[0].skills if s["kind"] == "ultimate"]
+    assert {s["tier_level"] for s in ult} == {1, 10}
+
+
 def test_parse_role_tab_extracts_a4_accessories_with_exclusivity() -> None:
     """The accessory column (col 21) is the unit's A4 accessories — primary
     one in the block-header row, plus optional 'Exclusive Accessory N' rows

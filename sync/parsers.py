@@ -502,8 +502,11 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
         # In the passive section, force kind="passive" — some units have a
         # passive whose col-5 label is literally "TP" (e.g. role-tab Cyrus,
         # Yugo). A bare "N*" outside passive needs numeric SP to count as a
-        # real skill row.
-        if current_section == "passive":
+        # real skill row. Lv\d+ rows are the unit's ultimate tiers and keep
+        # kind="ultimate" even if they appear after the Passive divider —
+        # historically the Special divider was sometimes missing and the
+        # tier rows ended up in the passive section.
+        if current_section == "passive" and tier_level is None:
             kind = "passive"
         elif kind is None:
             if is_numeric_sp:
