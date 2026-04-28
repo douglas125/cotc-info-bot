@@ -107,6 +107,7 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
         progress("Writing into SQLite (transactional)...")
         with repo.transaction(conn):
             repo.clear_data_tables(conn)
+            index_name_keys: set[str] = set()
             for entry in index_entries:
                 ch_id = repo.upsert_character(
                     conn, canonical_name=entry.canonical_name,
@@ -124,6 +125,7 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                     name_color_hex=entry.color_hex,
                     hyperlink_url=entry.hyperlink_url,
                 )
+                index_name_keys.add(entry.canonical_name.lower())
                 # SEA/GL Unique Kits takes precedence: if the character has a
                 # block in that tab, use it instead of the role-tab block.
                 # Otherwise fall back to the role-tab block (rarity-band aware).
@@ -145,6 +147,52 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                             splash_art_url=block.splash_art_url,
                             self_buffs_text=block.self_buffs_text,
                         )
+
+            # Second pass: SEA blocks with no matching Index entry. These are
+            # SEA-only EX variants (e.g. "Lynette EX") that the Index hasn't
+            # caught up with — without this pass they'd be silently dropped.
+            for block in sea_blocks:
+                key = block.display_name.lower()
+                canon_key = canonicalize_name(block.display_name).lower()
+                if key in index_name_keys or canon_key in index_name_keys:
+                    continue
+                base_name = _strip_ex_affix(block.display_name)
+                base_row = conn.execute(
+                    "SELECT base_role, base_weapon FROM characters "
+                    "WHERE LOWER(canonical_name) = LOWER(?)",
+                    (base_name,),
+                ).fetchone()
+                base_role = base_row["base_role"] if base_row else None
+                base_weapon = base_row["base_weapon"] if base_row else None
+                ch_id = repo.upsert_character(
+                    conn, canonical_name=block.display_name,
+                    base_role=base_role, base_weapon=base_weapon,
+                )
+                form_id = repo.insert_form(
+                    conn,
+                    character_id=ch_id,
+                    display_name=block.display_name,
+                    rarity="5*",
+                    variant_kind=_variant_kind_for(block.display_name),
+                    server="sea",
+                    sheet_gid=SEA_GID,
+                    source_row=block.source_row,
+                )
+                if block.level_cap is not None:
+                    conn.execute(
+                        "UPDATE character_forms SET level_cap = ? WHERE id = ?",
+                        (block.level_cap, form_id),
+                    )
+                repo.insert_skills(conn, form_id, block.skills)
+                repo.insert_equipment(conn, form_id, block.equipment)
+                if block.splash_art_url or block.self_buffs_text:
+                    repo.upsert_profile(
+                        conn, form_id,
+                        splash_art_url=block.splash_art_url,
+                        self_buffs_text=block.self_buffs_text,
+                    )
+                index_name_keys.add(key)
+
             progress("Rebuilding FTS index...")
             repo.rebuild_fts(conn)
 
@@ -220,11 +268,24 @@ def _select_block_for(entry, candidates, blocks_by_tab):
 
 
 def _variant_kind_for(name: str) -> str:
-    n = name.lower()
-    if n.startswith("ex2 "):
+    n = name.lower().strip()
+    if n.startswith("ex2 ") or n.endswith(" ex2"):
         return "ex2"
-    if n.startswith("ex "):
+    if n.startswith("ex ") or n.endswith(" ex"):
         return "ex"
     if "saint of" in n or "(alt)" in n:
         return "alt"
     return "base"
+
+
+def _strip_ex_affix(name: str) -> str:
+    """Return the base character name with any EX/EX2 prefix or suffix removed."""
+    n = name.strip()
+    low = n.lower()
+    for affix in ("ex2 ", "ex "):
+        if low.startswith(affix):
+            return n[len(affix):].strip()
+    for affix in (" ex2", " ex"):
+        if low.endswith(affix):
+            return n[: -len(affix)].strip()
+    return n
