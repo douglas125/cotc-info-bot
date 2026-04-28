@@ -112,6 +112,8 @@ def _format_skill_line(s: sqlite3.Row) -> str:
         bits.append(f"`{s['sp_cost']} SP`")
     if s["learn_board"]:
         bits.append(f"`{s['learn_board']}⭐`")
+    elif s["kind"] == "tp_passive":
+        bits.append("`TP`")
     if s["tier_level"]:
         bits.append(f"`Lv{s['tier_level']}`")
     name = s["name"] or ""
@@ -329,6 +331,16 @@ def _build_skill_kinds_section(
 ) -> discord.Embed:
     embed = _new_header_embed(form)
     by_kind = _group_by_kind(skills)
+    # Fold tp_passive into the passive group so it renders as a `TP`
+    # badge inside the Passive field, not a separate kind.
+    if (
+        "passive" in kind_order
+        and "tp_passive" not in kind_order
+        and "tp_passive" in by_kind
+    ):
+        merged = by_kind.get("passive", []) + by_kind.pop("tp_passive")
+        merged.sort(key=lambda s: s["slot_order"])
+        by_kind["passive"] = merged
     for kind in kind_order:
         if kind not in by_kind or len(embed.fields) >= MAX_FIELDS:
             continue

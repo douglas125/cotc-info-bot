@@ -106,6 +106,12 @@ def _seed_full_kit(conn) -> int:
         "description": "Gain 'Every Drop Counts' for 1 turn",
         "power_min": None, "power_max": None, "hits": None,
     })
+    rows.append({
+        "slot_order": 34, "name": None, "sp_cost": None, "kind": "tp_passive",
+        "learn_board": None, "tier_level": None, "initial_use": None, "cooldown": None,
+        "description": "If an enemy has Deep Wound, grant self doublecast.",
+        "power_min": None, "power_max": None, "hits": None,
+    })
     repo.insert_skills(conn, form_id, rows)
     repo.insert_equipment(conn, form_id, [
         {"slot": None, "name": "Healer's Charm", "description": "+heal",
@@ -165,6 +171,42 @@ def test_build_section_passives_includes_latent(tmp_db_path: Path) -> None:
     latent_field = next(f for f in embed.fields if f.name == "Latent")
     assert "init 2t" in latent_field.value
     assert "cd 3t" in latent_field.value
+
+
+def test_build_section_passives_renders_tp_passive_with_badge(tmp_db_path: Path) -> None:
+    """A tp_passive row must render inside the same "Passive" field as
+    the rarity-unlocked passives, with a `TP` badge that visually
+    mirrors the `1⭐` / `3⭐` badges."""
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed_full_kit(conn)
+    embed = embeds.build_section_embed(conn, form_id, "passives")
+    conn.close()
+
+    field_names = [f.name for f in embed.fields]
+    assert "Passive" in field_names
+    # The passive TP must NOT spawn its own "TP" field in this section.
+    assert "TP" not in field_names
+    passive_field = next(f for f in embed.fields if f.name == "Passive")
+    assert "`1⭐`" in passive_field.value
+    assert "`TP`" in passive_field.value
+    assert "Deep Wound" in passive_field.value
+
+
+def test_build_section_actives_tp_field_has_no_redundant_tp_badge(tmp_db_path: Path) -> None:
+    """The actives view shows the SP-costing TP/divine skill under a "TP"
+    field. The bullet should lead with the SP cost, not with a redundant
+    `TP` badge (the field title already says "TP"). The passive-section
+    TP row must NOT leak into this field."""
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed_full_kit(conn)
+    embed = embeds.build_section_embed(conn, form_id, "actives")
+    conn.close()
+
+    tp_field = next(f for f in embed.fields if f.name == "TP")
+    assert "`40 SP`" in tp_field.value
+    assert "`TP`" not in tp_field.value
+    # Passive-section TP description must not appear in the actives view.
+    assert "Deep Wound" not in tp_field.value
 
 
 def test_skill_line_has_no_slot_number_or_b_prefix(tmp_db_path: Path) -> None:

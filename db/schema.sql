@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS skills (
     slot_order      INTEGER NOT NULL,
     name            TEXT,
     sp_cost         INTEGER,
-    kind            TEXT,            -- 'active'|'passive'|'divine'|'ex'|'ultimate'|'latent'
+    kind            TEXT,            -- 'active'|'passive'|'divine'|'tp_passive'|'ex'|'ultimate'|'latent'
     learn_board     INTEGER,         -- prestige board (1..6) for active/passive rows
     tier_level      INTEGER,         -- upgrade tier (1, 10, 20) for ultimate rows
     initial_use     INTEGER,         -- latent: turns before first trigger
