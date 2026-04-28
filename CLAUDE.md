@@ -25,7 +25,15 @@ For every change, follow this flow:
 3. **Commit and push** — `git commit` then `git push -u origin <branch>`.
 4. **Open a PR** — `gh pr create` with a clear summary and test plan.
 5. **WAIT for the user's confirmation.** Do not merge on your own initiative even if CI is green and tests pass. Pause and report the PR URL.
-6. **Merge only after explicit confirmation** — `gh pr merge --squash --delete-branch` (or as the user specifies).
+6. **Merge only after explicit confirmation** — `gh pr merge --squash --delete-branch` (or as the user specifies). The `--delete-branch` flag removes the *remote* branch.
+7. **Sync local main and clean up the local branch** — `git checkout main && git pull --ff-only && git branch -d <branch>`. The merged feature branch is no longer needed locally.
+8. **Confirm the Railway deployment succeeded** — Railway auto-deploys on push to `main`. Poll until the latest deployment for the merge commit shows `SUCCESS`:
+
+   ```bash
+   railway deployment list --limit 3 --json | python -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['status'], d['meta']['commitHash'][:7], d['meta']['commitMessage'].splitlines()[0])"
+   ```
+
+   Statuses: `BUILDING` / `DEPLOYING` → keep polling; `SUCCESS` → done; `FAILED` / `CRASHED` → investigate via `railway logs --deployment <id>`. A previous deployment showing `REMOVED` is normal — that just means it was superseded by a newer build (e.g., back-to-back PR merges).
 
 Treat `main` as protected. Never push directly to it, never merge without confirmation, never force-push to it.
 
