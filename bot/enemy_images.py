@@ -17,8 +17,9 @@ PAD_X = 12
 PAD_Y = 10
 LABEL_W = 132
 SHIELD_SIZE = 20
-SHIELD_COUNT_GAP = 4
-SHIELD_W = 44
+SHIELD_COUNT_FONT_SIZE = 20
+SHIELD_COUNT_GAP = 5
+SHIELD_W = 64
 ROW_H = 30
 
 BG = (43, 45, 49, 255)
@@ -124,7 +125,7 @@ def render_weakness_panel(
     image = Image.new("RGBA", (width, height), BG)
     draw = ImageDraw.Draw(image)
     label_font = _font(15, bold=True)
-    count_font = _font(16, bold=True)
+    count_font = _font(SHIELD_COUNT_FONT_SIZE, bold=True)
 
     y = PAD_Y
     for position in positions:
@@ -148,7 +149,7 @@ def render_weakness_panel(
             ),
             shield_count,
             font=count_font,
-            fill=MUTED,
+            fill=TEXT,
         )
 
         icon_x = PAD_X + LABEL_W + SHIELD_W
