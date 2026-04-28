@@ -74,19 +74,25 @@ CREATE TABLE IF NOT EXISTS character_profile (
 );
 
 CREATE TABLE IF NOT EXISTS sync_runs (
-    id              INTEGER PRIMARY KEY,
-    started_at      TEXT NOT NULL,
-    finished_at     TEXT,
-    status          TEXT NOT NULL,        -- 'running' | 'ok' | 'error'
-    error           TEXT,
-    forms_count     INTEGER,
-    skills_count    INTEGER
+    id                INTEGER PRIMARY KEY,
+    started_at        TEXT NOT NULL,
+    finished_at       TEXT,
+    status            TEXT NOT NULL,        -- 'running' | 'ok' | 'error'
+    error             TEXT,
+    forms_count       INTEGER,
+    skills_count      INTEGER,
+    enemies_count     INTEGER,
+    enemy_forms_count INTEGER
 );
 
--- One row per sync run; payload is gzipped JSON of the full Sheets API response.
+-- One row per (sync run, source kind); payload is gzipped JSON of the Sheets
+-- API response for that sheet. `kind` distinguishes the two pipelines so a
+-- single /refresh produces two snapshots under one run.
 CREATE TABLE IF NOT EXISTS raw_snapshots (
-    sync_run_id     INTEGER PRIMARY KEY REFERENCES sync_runs(id) ON DELETE CASCADE,
-    payload_json    BLOB NOT NULL
+    sync_run_id     INTEGER NOT NULL REFERENCES sync_runs(id) ON DELETE CASCADE,
+    kind            TEXT NOT NULL DEFAULT 'characters',  -- 'characters' | 'enemies'
+    payload_json    BLOB NOT NULL,
+    PRIMARY KEY (sync_run_id, kind)
 );
 
 -- Free-text search over canonical names, display names, skill text and equipment text.
@@ -113,3 +119,67 @@ CREATE INDEX IF NOT EXISTS ix_feedback_submitted
     ON feedback_submissions(submitted_at DESC);
 CREATE INDEX IF NOT EXISTS ix_feedback_user_time
     ON feedback_submissions(user_id, submitted_at DESC);
+
+
+-- ===========================================================================
+-- Enemies (Adversary Log CotC sheet — separate spreadsheet, parallel pipeline)
+-- ===========================================================================
+--
+-- Modeling decisions (driven by verify/probe_enemies.py findings):
+--  * The Lvl-N display tabs hold the user-facing name + a per-cell rank
+--    dropdown. The displayed stats are whichever rank was last selected, so
+--    they cannot drive a multi-rank /enemy. The *Data tabs hold all 6 ranks
+--    × N members per encounter, indexed by encounter name.
+--  * One `enemies` row per (canonical_name, category) — the same encounter
+--    can appear in multiple Lvl-N tabs and we want each as a separate entry.
+--  * One `enemy_forms` row per rank (Rank1/2/3, EX1/2/3, or 'Default' for
+--    NPCs which only have one stat row).
+--  * Stats stored long-form in `enemy_member_stats`: variable encounter
+--    composition (1 leader, optionally 1-2 adds) is data-driven by position.
+--  * Weakness icons are inserted images, not API-readable. Break-shield
+--    counts are folded into the stats grid as the 'Shields' stat. The /enemy
+--    embed adds a "see sheet for weakness icons" link.
+
+CREATE TABLE IF NOT EXISTS enemies (
+    id              INTEGER PRIMARY KEY,
+    canonical_name  TEXT NOT NULL,        -- e.g. 'Sly Leader Lloris'
+    category        TEXT NOT NULL,        -- 'Lvl 1' | ... | 'Solistia Lvl 75' | '120 NPCs'
+    region          TEXT,                 -- 'Osterra' | 'Solistia' | 'NPCs'
+    sheet_gid       INTEGER,
+    source_row      INTEGER,
+    name_color_hex  TEXT,
+    hyperlink_url   TEXT,                 -- '#gid=...&range=...' anchor into the sheet
+    is_npc          INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(canonical_name, category, sheet_gid)
+);
+CREATE INDEX IF NOT EXISTS ix_enemies_category ON enemies(category);
+CREATE INDEX IF NOT EXISTS ix_enemies_name ON enemies(canonical_name);
+
+CREATE TABLE IF NOT EXISTS enemy_forms (
+    id              INTEGER PRIMARY KEY,
+    enemy_id        INTEGER NOT NULL REFERENCES enemies(id) ON DELETE CASCADE,
+    rank            TEXT NOT NULL,         -- 'Rank1'|'Rank2'|'Rank3'|'EX1'|'EX2'|'EX3'|'Default'
+    rank_order      INTEGER NOT NULL,      -- 1..6 for ranked, 0 for NPC 'Default'
+    UNIQUE(enemy_id, rank)
+);
+CREATE INDEX IF NOT EXISTS ix_enemy_forms_enemy ON enemy_forms(enemy_id);
+
+CREATE TABLE IF NOT EXISTS enemy_member_stats (
+    id              INTEGER PRIMARY KEY,
+    form_id         INTEGER NOT NULL REFERENCES enemy_forms(id) ON DELETE CASCADE,
+    position        INTEGER NOT NULL,      -- 0 = leader, 1+ = adds
+    member_name     TEXT,                  -- 'Leader Lloris' | 'Mini Lloris' | NULL
+    stat_name       TEXT NOT NULL,         -- 'Shields'|'HP'|'P. Atk'|'P. Def'|'E. Atk'|...
+    stat_value      TEXT NOT NULL,         -- TEXT — values include '-' or large ints
+    UNIQUE(form_id, position, stat_name)
+);
+CREATE INDEX IF NOT EXISTS ix_enemy_stats_form ON enemy_member_stats(form_id);
+
+-- Free-text search across enemy canonical names, categories, and member names.
+CREATE VIRTUAL TABLE IF NOT EXISTS enemies_fts USING fts5(
+    enemy_id UNINDEXED,
+    canonical_name,
+    category,
+    member_names,
+    tokenize = 'unicode61 remove_diacritics 2'
+);

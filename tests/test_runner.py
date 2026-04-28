@@ -247,7 +247,7 @@ def test_run_sync_sea_kit_takes_precedence_and_emits_one_form(
     SEA tab's skills (not the role tab's) to win.
     """
     payload = _build_payload_with_overlap()
-    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key: payload)
+    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key, *_: payload)
     monkeypatch.setattr("db.repo.DB_PATH", tmp_db_path)
 
     summary = runner_mod.run_sync("dummy-key")
@@ -320,7 +320,7 @@ def test_run_sync_creates_form_for_sea_only_block(
     """SEA-only EX variants (e.g. Lynette EX) must surface as their own form
     even though they aren't listed in the Characters Index."""
     payload = _build_payload_with_sea_only_ex()
-    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key: payload)
+    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key, *_: payload)
     monkeypatch.setattr("db.repo.DB_PATH", tmp_db_path)
 
     summary = runner_mod.run_sync("dummy-key")

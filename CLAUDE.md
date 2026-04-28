@@ -66,9 +66,11 @@ character_sheet/
 ├── bot/                         # Discord bot (`python -m bot`)
 │   ├── __main__.py              # entrypoint; cold-start sync if DB empty
 │   ├── client.py                # discord.Client + CommandTree wiring
-│   ├── commands.py              # /character, /search, /refresh
-│   ├── embeds.py                # pure embed builders (testable, no runtime)
-│   ├── views.py                 # /character dropdown view
+│   ├── commands.py              # /character, /enemy, /search, /refresh, /feedback
+│   ├── embeds.py                # /character embed builders (no runtime)
+│   ├── enemy_embeds.py          # /enemy embed builders (no runtime)
+│   ├── views.py                 # /character dropdown view (sections)
+│   ├── enemy_views.py           # /enemy dropdown view (rank tiers)
 │   └── db.py                    # per-call SQLite connection helper
 ├── sync/
 │   ├── fetch.py                 # one Sheets API v4 call, all tabs
@@ -117,10 +119,17 @@ in `bot/`; entry point is `python -m bot`.
 **Commands:**
 - `/character name:<autocomplete>` — full embed (kit, affinities, A4
   accessories, profile, sync footer).
+- `/enemy name:<autocomplete>` — stats grid + break-shield count for one
+  encounter at a chosen rank. Dropdown swaps among the enemy's available
+  ranks (Rank1..EX3 for ranked enemies; NPCs are single-rank with no
+  dropdown). Per-position weakness icons aren't API-readable — the embed
+  links back to the spreadsheet for them. Source: the second enemy sheet
+  (Adversary Log CotC), see `INFO_SOURCES.md`.
 - `/search role weapon rarity weakness text` — top-10 list, all params
   optional, all autocompletes pull from the live DB.
 - `/refresh` — admin-gated; re-runs `sync.runner.run_sync` off the event
-  loop. Refuses if a refresh is already in flight.
+  loop, syncing both the character and enemy spreadsheets in one
+  transaction. Refuses if a refresh is already in flight.
 - `/feedback text:<≤2000 chars>` — anyone; logs a correction/inconsistency
   report into `feedback_submissions`. Per-user rate limit (3/60s) is
   enforced by counting recent rows in the same table — survives bot
@@ -192,32 +201,36 @@ red=5★, green=free 3→5★, yellow=4★, blue=3★.
    per-character blocks; extracts skills, equipment, profile.
 5. SEA/GL parser flags characters with SEA-only kit variants (creates a second
    form row with `server='sea'`).
-6. Persist inside `BEGIN IMMEDIATE`: `clear_data_tables` then re-insert.
-   `rebuild_fts` repopulates the FTS index. `sync_runs` row is finalized.
+6. Persist inside `BEGIN IMMEDIATE`: `clear_character_tables` /
+   `clear_enemy_tables` then re-insert. `rebuild_fts` /
+   `rebuild_enemy_fts` repopulate the FTS indexes. `sync_runs` row is
+   finalized with both character and enemy counts.
 
-### What `/refresh` (and `clear_data_tables`) wipes vs preserves
+### What `/refresh` wipes vs preserves
 
-The wipe loop in `repo.clear_data_tables` is intentional and the contents
-matter — adding or removing a table here changes whether community state
-survives a re-sync. Treat it as a policy decision, not a maintenance chore.
+The wipe loops in `repo.clear_character_tables` and `repo.clear_enemy_tables`
+are intentional and the contents matter — adding or removing a table here
+changes whether community state survives a re-sync. Treat it as a policy
+decision, not a maintenance chore.
 
 **Wiped on every refresh** (sheet-derived, regenerated from the snapshot):
 
-- `characters_fts`, `character_profile`, `equipment`, `skills`,
-  `character_affinities`, `character_forms`, `characters`
+- Character side: `characters_fts`, `character_profile`, `equipment`,
+  `skills`, `character_affinities`, `character_forms`, `characters`
+- Enemy side: `enemies_fts`, `enemy_member_stats`, `enemy_forms`, `enemies`
 
-**Preserved across refreshes** (must NOT be added to the wipe loop):
+**Preserved across refreshes** (must NOT be added to either wipe loop):
 
 - `sync_runs` / `raw_snapshots` — sync history & raw payloads, used by the
-  verifier and by parser re-runs.
+  verifier and by parser re-runs. `raw_snapshots` carries one row per
+  `(sync_run_id, kind)` so both pipelines are auditable from one run.
 - `feedback_submissions` — community-submitted corrections (`/feedback`).
   Wiping it would silently delete user reports on every re-sync. Cleared
   explicitly via the admin-only `/feedback_clear` slash command.
 
 When you add a new table that holds user/community state (anything not
-derivable from the sheet), default to *not* listing it in
-`clear_data_tables`, and add a one-line entry above so the policy stays
-discoverable.
+derivable from a sheet), default to *not* listing it in either wipe loop,
+and add a one-line entry above so the policy stays discoverable.
 
 ## Tests
 

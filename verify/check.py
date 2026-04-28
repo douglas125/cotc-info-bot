@@ -39,12 +39,10 @@ WARN = "⚠️"
 
 
 def _load_latest_payload(conn) -> dict[str, Any]:
-    row = conn.execute(
-        "SELECT payload_json FROM raw_snapshots ORDER BY sync_run_id DESC LIMIT 1"
-    ).fetchone()
-    if not row:
-        raise SystemExit("No raw snapshot in DB — run sync first.")
-    return json.loads(gzip.decompress(row[0]).decode("utf-8"))
+    blob = repo.latest_raw_snapshot(conn, kind="characters")
+    if blob is None:
+        raise SystemExit("No character raw snapshot in DB — run sync first.")
+    return json.loads(gzip.decompress(blob).decode("utf-8"))
 
 
 def _live_role_tab_names(payload: dict, gid: int) -> list[tuple[int, str]]:

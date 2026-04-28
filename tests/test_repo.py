@@ -73,11 +73,11 @@ def test_upsert_character_idempotent(tmp_db_path: Path) -> None:
     conn.close()
 
 
-def test_clear_data_tables_keeps_sync_history(tmp_db_path: Path) -> None:
+def test_clear_character_tables_keeps_sync_history(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     run_id = repo.start_sync_run(conn)
     _seed(conn)
-    repo.clear_data_tables(conn)
+    repo.clear_character_tables(conn)
     assert conn.execute("SELECT COUNT(*) FROM characters").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0] == 0
     # sync_runs should NOT be wiped
@@ -220,15 +220,15 @@ def test_feedback_insert_list_clear_roundtrip(tmp_db_path: Path) -> None:
     conn.close()
 
 
-def test_feedback_survives_clear_data_tables(tmp_db_path: Path) -> None:
-    """`/refresh` calls clear_data_tables; community feedback MUST survive it."""
+def test_feedback_survives_clear_character_tables(tmp_db_path: Path) -> None:
+    """`/refresh` calls clear_character_tables; community feedback MUST survive it."""
     conn = repo.connect(tmp_db_path)
     repo.insert_feedback(
         conn, user_id=1, username="user", guild_id=None,
         feedback_text="don't wipe me",
     )
     _seed(conn)
-    repo.clear_data_tables(conn)
+    repo.clear_character_tables(conn)
     assert conn.execute(
         "SELECT COUNT(*) FROM feedback_submissions"
     ).fetchone()[0] == 1

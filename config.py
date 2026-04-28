@@ -105,6 +105,66 @@ TABS_BY_GID: dict[int, TabSpec] = {t.gid: t for t in TABS}
 ROLE_TABS: list[TabSpec] = [t for t in TABS if t.kind == "role"]
 
 
+# Adversary Log CotC — sibling enemy spreadsheet.
+ENEMIES_SPREADSHEET_ID = "1Of4zz3rlV973Rt2kzHqoSWjiJmfhb77iMnAYofCT3Gs"
+ENEMIES_SPREADSHEET_URL = f"https://docs.google.com/spreadsheets/d/{ENEMIES_SPREADSHEET_ID}"
+
+
+@dataclass(frozen=True)
+class EnemyTabSpec:
+    gid: int
+    name: str
+    category: str           # display label, e.g. 'Lvl 1' or '120 NPCs'
+    region: str | None      # 'Osterra' | 'Solistia' | None
+
+
+# GIDs and metadata discovered via verify/probe_enemies.py. Each Lvl-N tab
+# is a "category" of enemies (the level at which the player encounters them).
+# 120 NPCs is single-rank; the parser treats it as is_npc=True.
+ENEMIES_TABS: list[EnemyTabSpec] = [
+    EnemyTabSpec(336420009,  "Lvl 1",            "Lvl 1",            "Osterra"),
+    EnemyTabSpec(462109912,  "Lvl 25",           "Lvl 25",           "Osterra"),
+    EnemyTabSpec(1105319828, "Lvl 50",           "Lvl 50",           "Osterra"),
+    EnemyTabSpec(441922710,  "Lvl 75",           "Lvl 75",           "Osterra"),
+    EnemyTabSpec(1544805455, "Solistia Lvl 1",   "Solistia Lvl 1",   "Solistia"),
+    EnemyTabSpec(795720982,  "Solistia Lvl 25",  "Solistia Lvl 25",  "Solistia"),
+    EnemyTabSpec(1229169620, "Solistia Lvl 50",  "Solistia Lvl 50",  "Solistia"),
+    EnemyTabSpec(945280021,  "Solistia Lvl 75",  "Solistia Lvl 75",  "Solistia"),
+    EnemyTabSpec(2117870435, "120 NPCs",         "120 NPCs",         "NPCs"),
+]
+ENEMIES_TABS_BY_GID: dict[int, EnemyTabSpec] = {t.gid: t for t in ENEMIES_TABS}
+
+# Data-source tabs (per-rank stats live here, indexed by encounter name).
+ENEMY_DATA_TAB_GIDS: dict[str, int] = {
+    "Osterra":  758398692,   # 'Osterra Data'
+    "Solistia": 761197564,   # 'Solistia Data'
+    "NPCs":     1230510791,  # '120 NPCs Data'
+}
+
+# Display tabs whose blocks should be treated as NPCs (single-rank, no dropdown).
+ENEMY_NPC_TAB_GIDS: frozenset[int] = frozenset({2117870435})
+
+# Tabs that are not parser inputs: instructional, layout scaffold, image assets.
+ENEMY_SKIP_TABS: frozenset[str] = frozenset({
+    "Guide", "Template", "Images",
+})
+
+# Display-tab name → data-tab encounter key. Populate when the verifier
+# reports an unmatched display block. Aliases are preferred over fuzzy
+# substring matching because they're self-documenting.
+#
+# Reasons each entry exists (left = visible name, right = data-tab spelling):
+#   community-sheet typos and abbreviations.
+ENEMY_NAME_ALIASES: dict[str, str] = {
+    "Ring-Sealed Beast":        "RingBeast",
+    "Black-Clad Shadow":        "Black Shadow",
+    "Ignazio the Hungry Fang":  "Ignazio HUNGY",
+    "M'suhi the Viper":         "Msushi",
+    "Avar the Conqueror":       "Aval Conqueror",
+    "Avar the Bestial Claw":    "Aval",
+}
+
+
 # Color → rarity mapping. The reference sheet legend (row 5):
 #   Red    = Base 5★
 #   Green  = Free Base 3 → 5★
