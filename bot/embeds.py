@@ -254,10 +254,16 @@ def _group_by_kind(skills: list[sqlite3.Row]) -> dict[str, list[sqlite3.Row]]:
     return by_kind
 
 
-def _build_actives_section(form: sqlite3.Row, skills: list[sqlite3.Row]) -> discord.Embed:
+def _build_skill_kinds_section(
+    form: sqlite3.Row,
+    skills: list[sqlite3.Row],
+    kind_order: tuple[str, ...],
+    empty_field_name: str,
+    empty_message: str,
+) -> discord.Embed:
     embed = _new_header_embed(form)
     by_kind = _group_by_kind(skills)
-    for kind in ACTIVE_KIND_ORDER:
+    for kind in kind_order:
         if kind not in by_kind or len(embed.fields) >= MAX_FIELDS:
             continue
         value = _skill_field_value(by_kind[kind])
@@ -265,30 +271,7 @@ def _build_actives_section(form: sqlite3.Row, skills: list[sqlite3.Row]) -> disc
             continue
         embed.add_field(name=SKILL_KIND_TITLES[kind], value=value, inline=False)
     if not embed.fields:
-        embed.add_field(
-            name="Active Skills",
-            value="_No active skills recorded for this form._",
-            inline=False,
-        )
-    return embed
-
-
-def _build_passives_section(form: sqlite3.Row, skills: list[sqlite3.Row]) -> discord.Embed:
-    embed = _new_header_embed(form)
-    by_kind = _group_by_kind(skills)
-    for kind in PASSIVE_KIND_ORDER:
-        if kind not in by_kind or len(embed.fields) >= MAX_FIELDS:
-            continue
-        value = _skill_field_value(by_kind[kind])
-        if not value:
-            continue
-        embed.add_field(name=SKILL_KIND_TITLES[kind], value=value, inline=False)
-    if not embed.fields:
-        embed.add_field(
-            name="Passive Skills",
-            value="_No passive skills recorded for this form._",
-            inline=False,
-        )
+        embed.add_field(name=empty_field_name, value=empty_message, inline=False)
     return embed
 
 
@@ -296,14 +279,11 @@ def _build_ultimate_section(form: sqlite3.Row, skills: list[sqlite3.Row]) -> dis
     embed = _new_header_embed(form)
     ult = [s for s in skills if (s["kind"] or "") == "ultimate"]
     value = _format_ultimate_block(ult) if ult else ""
-    if value:
-        embed.add_field(name="Ultimate", value=value, inline=False)
-    else:
-        embed.add_field(
-            name="Ultimate",
-            value="_No ultimate recorded for this form (may be unreleased)._",
-            inline=False,
-        )
+    embed.add_field(
+        name="Ultimate",
+        value=value or "_No ultimate recorded for this form (may be unreleased)._",
+        inline=False,
+    )
     return embed
 
 
@@ -382,9 +362,15 @@ def build_section_embed(
     last_sync = repo.latest_sync_run(conn)
 
     if section == "actives":
-        embed = _build_actives_section(form, repo.get_skills(conn, form_id))
+        embed = _build_skill_kinds_section(
+            form, repo.get_skills(conn, form_id), ACTIVE_KIND_ORDER,
+            "Active Skills", "_No active skills recorded for this form._",
+        )
     elif section == "passives":
-        embed = _build_passives_section(form, repo.get_skills(conn, form_id))
+        embed = _build_skill_kinds_section(
+            form, repo.get_skills(conn, form_id), PASSIVE_KIND_ORDER,
+            "Passive Skills", "_No passive skills recorded for this form._",
+        )
     elif section == "ultimate":
         embed = _build_ultimate_section(form, repo.get_skills(conn, form_id))
     elif section == "a4":
