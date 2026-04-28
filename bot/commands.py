@@ -311,6 +311,10 @@ def register(tree: app_commands.CommandTree) -> None:
     @app_commands.describe(name="Start typing a character name to see suggestions.")
     async def character_cmd(interaction: discord.Interaction, name: str) -> None:
         conn = bot_db.conn()
+        try:
+            repo.increment_command_usage(conn, "character")
+        except sqlite3.Error:
+            logger.exception("failed to record /character usage")
         form_id = _resolve_form_id(conn, name)
         if form_id is None:
             await interaction.response.send_message(
@@ -336,6 +340,10 @@ def register(tree: app_commands.CommandTree) -> None:
     @app_commands.describe(name="Start typing an enemy name to see suggestions.")
     async def enemy_cmd(interaction: discord.Interaction, name: str) -> None:
         conn = bot_db.conn()
+        try:
+            repo.increment_command_usage(conn, "enemy")
+        except sqlite3.Error:
+            logger.exception("failed to record /enemy usage")
         enemy_id = _resolve_enemy_id(conn, name)
         if enemy_id is None:
             await interaction.response.send_message(

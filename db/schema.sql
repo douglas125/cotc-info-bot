@@ -120,6 +120,15 @@ CREATE INDEX IF NOT EXISTS ix_feedback_submitted
 CREATE INDEX IF NOT EXISTS ix_feedback_user_time
     ON feedback_submissions(user_id, submitted_at DESC);
 
+-- Per-command, per-day invocation counter for /character and /enemy.
+-- Survives /refresh (intentionally NOT in repo.clear_*_tables).
+CREATE TABLE IF NOT EXISTS command_usage_daily (
+    command_name  TEXT NOT NULL,            -- 'character' | 'enemy'
+    usage_date    TEXT NOT NULL,            -- 'YYYY-MM-DD' (UTC)
+    count         INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (command_name, usage_date)
+);
+
 
 -- ===========================================================================
 -- Enemies (Adversary Log CotC sheet — separate spreadsheet, parallel pipeline)

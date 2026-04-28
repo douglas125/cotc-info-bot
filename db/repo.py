@@ -694,3 +694,24 @@ def recent_feedback_timestamps(
         "ORDER BY submitted_at DESC LIMIT ?",
         (user_id, since_iso, limit),
     )]
+
+
+# --- command usage telemetry ------------------------------------------------
+
+def increment_command_usage(
+    conn: sqlite3.Connection,
+    command_name: str,
+    *,
+    usage_date: str | None = None,
+) -> None:
+    """Bump the (command_name, today-UTC) counter by 1.
+
+    `usage_date` override exists only for tests."""
+    date = usage_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    conn.execute(
+        "INSERT INTO command_usage_daily(command_name, usage_date, count) "
+        "VALUES (?, ?, 1) "
+        "ON CONFLICT(command_name, usage_date) "
+        "DO UPDATE SET count = count + 1",
+        (command_name, date),
+    )
