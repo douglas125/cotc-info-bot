@@ -7,11 +7,9 @@ A local Streamlit app that mirrors a community-maintained Google Sheet for
 the user can filter and search characters by role, rarity, weakness/element,
 weapon, and free-text against skills/equipment.
 
-- **Source spreadsheet** (public, read-only): `1LF2NbjnMsq8Jo2TSpocu6NN-o9dsUlmd8xCMZpKUHNw`
-  → https://docs.google.com/spreadsheets/d/1LF2NbjnMsq8Jo2TSpocu6NN-o9dsUlmd8xCMZpKUHNw
-- **19 tabs total**: 1 master Index, 1 Release History, 1 SEA/GL Unique Kits,
-  8 ⭐5 role tabs, 8 3✯&4✯ role tabs. The full gid → tab-name map is in
-  `config.py::TABS`.
+- **Canonical data source**: see [`INFO_SOURCES.md`](INFO_SOURCES.md) for
+  the spreadsheet URL/ID, tab inventory, and a list of what the Sheets v4
+  API exposes (and notably what it does *not* — inserted-image artwork).
 - **Why a local copy**: the live sheet uses cell color (rarity), inline icons
   (weakness/weapon/element), and hyperlinks to encode information that is fast
   to read but painful to filter or cross-reference inside Sheets.
