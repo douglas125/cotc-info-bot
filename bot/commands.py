@@ -1,4 +1,4 @@
-"""Slash command definitions: /character, /search, /refresh.
+"""Slash command definitions: /character, /search, /enemy, /refresh.
 
 Registers everything onto a `discord.app_commands.CommandTree` so the bot
 client's `on_ready` can sync once at startup.
@@ -16,7 +16,8 @@ from discord import app_commands
 
 import config
 from bot import db as bot_db
-from bot import embeds
+from bot import embeds, enemy_embeds
+from bot.enemy_views import EnemyView
 from bot.views import CharacterView
 from db import repo
 
@@ -183,6 +184,61 @@ def _is_admin(user_id: int) -> bool:
 
 
 # ----------------------------------------------------------------------------
+# Enemy-name autocomplete and resolution (used by /enemy)
+# ----------------------------------------------------------------------------
+
+def _autocomplete_enemies(
+    conn: sqlite3.Connection, current: str,
+) -> list[app_commands.Choice[str]]:
+    """Return up to AUTOCOMPLETE_LIMIT choices.
+
+    The repo query already orders prefix matches first (see
+    `repo.enemy_choices_by_name`), so we just trim and format here.
+    Choice value is the stringified enemy_id so the command handler can
+    skip free-text resolution when the user picked from the dropdown.
+    """
+    rows = repo.enemy_choices_by_name(conn, current, AUTOCOMPLETE_LIMIT)
+    out: list[app_commands.Choice[str]] = []
+    for r in rows:
+        category = r["category"] or ""
+        label = f"{r['canonical_name']} — {category}" if category else r["canonical_name"]
+        # Discord caps Choice.name at 100 chars.
+        if len(label) > 100:
+            label = label[:99] + "…"
+        out.append(app_commands.Choice(name=label, value=str(r["enemy_id"])))
+    return out
+
+
+def _resolve_enemy_id(conn: sqlite3.Connection, name_or_id: str) -> int | None:
+    """Resolve a /enemy `name` parameter to an enemy_id.
+
+    Accepts either the stringified id from autocomplete or a raw name typed
+    by the user. Falls back to a case-insensitive exact match, then prefix.
+    """
+    s = (name_or_id or "").strip()
+    if not s:
+        return None
+    if s.isdigit():
+        if conn.execute("SELECT 1 FROM enemies WHERE id = ?", (int(s),)).fetchone():
+            return int(s)
+    row = conn.execute(
+        "SELECT id FROM enemies WHERE LOWER(canonical_name) = LOWER(?) "
+        "ORDER BY id LIMIT 1",
+        (s,),
+    ).fetchone()
+    if row:
+        return row[0]
+    row = conn.execute(
+        "SELECT id FROM enemies WHERE LOWER(canonical_name) LIKE LOWER(?) "
+        "ORDER BY id LIMIT 1",
+        (f"{s}%",),
+    ).fetchone()
+    if row:
+        return row[0]
+    return None
+
+
+# ----------------------------------------------------------------------------
 # /feedback helpers
 # ----------------------------------------------------------------------------
 
@@ -227,6 +283,39 @@ def register(tree: app_commands.CommandTree) -> None:
     @character_cmd.autocomplete("name")
     async def _character_ac(interaction: discord.Interaction, current: str):
         return _autocomplete_forms(bot_db.conn(), current)
+
+    @tree.command(name="enemy", description="Show stats and break shields for a CotC encounter at any rank.")
+    @app_commands.describe(name="Start typing an enemy name to see suggestions.")
+    async def enemy_cmd(interaction: discord.Interaction, name: str) -> None:
+        conn = bot_db.conn()
+        enemy_id = _resolve_enemy_id(conn, name)
+        if enemy_id is None:
+            await interaction.response.send_message(
+                f"No enemy matches `{name}`. Try a shorter prefix.",
+                ephemeral=True,
+            )
+            return
+        ranks = enemy_embeds.available_ranks(conn, enemy_id)
+        rank = enemy_embeds.default_rank(ranks)
+        if rank is None:
+            await interaction.response.send_message(
+                "That enemy has no rank data yet — the maintainer hasn't filled it in.",
+                ephemeral=True,
+            )
+            return
+        embed = enemy_embeds.build_enemy_embed(conn, enemy_id, rank)
+        if embed is None:
+            await interaction.response.send_message(
+                "That enemy was removed by a recent refresh — try again.",
+                ephemeral=True,
+            )
+            return
+        view = EnemyView(enemy_id=enemy_id, available_ranks=ranks, current_rank=rank)
+        await interaction.response.send_message(embed=embed, view=view)
+
+    @enemy_cmd.autocomplete("name")
+    async def _enemy_ac(interaction: discord.Interaction, current: str):
+        return _autocomplete_enemies(bot_db.conn(), current)
 
     @tree.command(name="search", description="Filter CotC units by role, weapon, rarity, weakness, or free text.")
     @app_commands.describe(
@@ -319,10 +408,16 @@ def register(tree: app_commands.CommandTree) -> None:
                 )
                 return
 
+        unmatched = summary.get("unmatched_enemies") or []
+        unmatched_note = ""
+        if unmatched:
+            unmatched_note = f" · enemies_unmatched={len(unmatched)}"
         await interaction.followup.send(
             f"Sync OK. forms={summary.get('character_forms', '?')} · "
             f"skills={summary.get('skills', '?')} · "
-            f"equipment={summary.get('equipment', '?')}",
+            f"equipment={summary.get('equipment', '?')} · "
+            f"enemies={summary.get('enemies', '?')} · "
+            f"enemy_forms={summary.get('enemy_forms', '?')}{unmatched_note}",
             ephemeral=True,
         )
 

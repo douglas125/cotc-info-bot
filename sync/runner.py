@@ -5,8 +5,16 @@ import sqlite3
 from collections import defaultdict
 from typing import Any, Callable
 
-from config import NAME_ALIASES, ROLE_TABS, TABS_BY_GID, canonicalize_name
+from config import (
+    ENEMIES_SPREADSHEET_ID,
+    ENEMY_DATA_TAB_GIDS,
+    NAME_ALIASES,
+    ROLE_TABS,
+    TABS_BY_GID,
+    canonicalize_name,
+)
 from db import repo
+from sync.enemy_parsers import parse_all as parse_enemies, rank_order
 from sync.fetch import fetch_spreadsheet, sheet_by_gid
 from sync.parsers import (
     Anchor,
@@ -56,10 +64,15 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
     run_id = repo.start_sync_run(conn)
 
     try:
-        progress("Fetching spreadsheet from Google Sheets API...")
+        progress("Fetching character spreadsheet from Google Sheets API...")
         payload = fetch_spreadsheet(api_key)
-        progress("Persisting raw snapshot...")
-        repo.store_raw_snapshot(conn, run_id, payload)
+        progress("Persisting raw character snapshot...")
+        repo.store_raw_snapshot(conn, run_id, payload, kind="characters")
+
+        progress("Fetching enemy spreadsheet (Adversary Log CotC)...")
+        enemy_payload = fetch_spreadsheet(api_key, ENEMIES_SPREADSHEET_ID)
+        progress("Persisting raw enemy snapshot...")
+        repo.store_raw_snapshot(conn, run_id, enemy_payload, kind="enemies")
 
         progress("Parsing Characters Index...")
         index_sheet = sheet_by_gid(payload, 1917707422)
@@ -106,7 +119,7 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
 
         progress("Writing into SQLite (transactional)...")
         with repo.transaction(conn):
-            repo.clear_data_tables(conn)
+            repo.clear_character_tables(conn)
             index_name_keys: set[str] = set()
             for entry in index_entries:
                 ch_id = repo.upsert_character(
@@ -193,18 +206,58 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                     )
                 index_name_keys.add(key)
 
-            progress("Rebuilding FTS index...")
+            progress("Rebuilding character FTS index...")
             repo.rebuild_fts(conn)
+
+            progress("Parsing enemy spreadsheet...")
+            enemy_parse = parse_enemies(enemy_payload, ENEMY_DATA_TAB_GIDS)
+            for name, tab in enemy_parse.unmatched:
+                progress(f"  WARN: enemy display block unmatched: '{name}' on tab '{tab}'")
+            progress(f"  Parsed {len(enemy_parse.enemies)} enemies "
+                     f"({sum(1 for e in enemy_parse.enemies if e.is_npc)} NPCs).")
+
+            progress("Writing enemy data...")
+            repo.clear_enemy_tables(conn)
+            for enemy in enemy_parse.enemies:
+                enemy_id = repo.upsert_enemy(
+                    conn,
+                    canonical_name=enemy.canonical_name,
+                    category=enemy.category,
+                    region=enemy.region,
+                    sheet_gid=enemy.sheet_gid,
+                    source_row=enemy.source_row,
+                    name_color_hex=enemy.name_color_hex,
+                    hyperlink_url=enemy.hyperlink_url,
+                    is_npc=enemy.is_npc,
+                )
+                for rank_key, stat_rows in enemy.rank_stats.items():
+                    form_id = repo.insert_enemy_form(
+                        conn,
+                        enemy_id=enemy_id,
+                        rank=rank_key,
+                        rank_order=rank_order(rank_key),
+                    )
+                    repo.insert_enemy_member_stats(conn, form_id, stat_rows)
+                    repo.insert_enemy_weaknesses(
+                        conn, form_id, enemy.weaknesses_by_position,
+                    )
+
+            progress("Rebuilding enemy FTS index...")
+            repo.rebuild_enemy_fts(conn)
 
         c = repo.counts(conn)
         repo.finish_sync_run(
             conn, run_id, status="ok",
             forms_count=c["character_forms"],
             skills_count=c["skills"],
+            enemies_count=c["enemies"],
+            enemy_forms_count=c["enemy_forms"],
         )
         progress(f"Sync OK. Forms={c['character_forms']} Skills={c['skills']} "
-                 f"Equipment={c['equipment']} Affinities={c['character_affinities']}.")
-        return {"run_id": run_id, "status": "ok", **c}
+                 f"Equipment={c['equipment']} Affinities={c['character_affinities']} "
+                 f"Enemies={c['enemies']} EnemyForms={c['enemy_forms']}.")
+        return {"run_id": run_id, "status": "ok",
+                "unmatched_enemies": list(enemy_parse.unmatched), **c}
 
     except Exception as exc:
         repo.finish_sync_run(conn, run_id, status="error", error=str(exc))

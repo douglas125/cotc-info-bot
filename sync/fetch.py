@@ -26,8 +26,10 @@ _FIELDS = (
     "sheets.data.rowData.values("
     "formattedValue,"
     "hyperlink,"
+    "note,"
     "userEnteredValue,"
     "effectiveValue,"
+    "dataValidation.condition(type,values.userEnteredValue),"
     "effectiveFormat.textFormat.foregroundColorStyle.rgbColor,"
     "effectiveFormat.textFormat.foregroundColor,"
     "effectiveFormat.backgroundColorStyle.rgbColor,"
@@ -47,7 +49,7 @@ def _build_service(api_key: str):
     wait=wait_exponential(multiplier=1, min=2, max=15),
     reraise=True,
 )
-def fetch_spreadsheet(api_key: str) -> dict[str, Any]:
+def fetch_spreadsheet(api_key: str, spreadsheet_id: str = SPREADSHEET_ID) -> dict[str, Any]:
     """Single API call returning grid data for all tabs.
 
     Raises HttpError on non-retryable Google errors (e.g. 403 invalid key).
@@ -55,7 +57,7 @@ def fetch_spreadsheet(api_key: str) -> dict[str, Any]:
     svc = _build_service(api_key)
     return (
         svc.spreadsheets()
-        .get(spreadsheetId=SPREADSHEET_ID, includeGridData=True, fields=_FIELDS)
+        .get(spreadsheetId=spreadsheet_id, includeGridData=True, fields=_FIELDS)
         .execute()
     )
 

@@ -45,20 +45,21 @@ SECTION_DESCRIPTIONS: dict[Section, str] = {
 DEFAULT_SECTION: Section = "actives"
 
 
-def _safe_url(url: str | None) -> str | None:
+def _safe_url(url: str | None, base_edit_url: str = _SHEET_BASE_URL) -> str | None:
     """Return a Discord-acceptable URL.
 
     The Sheets API returns in-doc anchors (`#rangeid=...`, `#gid=...`) as
     fragment-only strings — Discord rejects those for `Embed.url`. Prefix
-    fragments with the spreadsheet's edit URL so they resolve to the
-    intended cell when opened.
+    fragments with `base_edit_url` so they resolve to the intended cell
+    when opened. The `bot.enemy_embeds` module passes the enemy
+    spreadsheet's edit URL.
     """
     if not url:
         return None
     if url.startswith(("http://", "https://")):
         return url
     if url.startswith("#"):
-        return _SHEET_BASE_URL + url
+        return base_edit_url + url
     return None
 
 
