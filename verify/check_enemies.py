@@ -229,6 +229,69 @@ def check_weaknesses_present(conn) -> tuple[bool, str]:
     return True, f"{n_with_weak}/{n_forms} ranked forms have weaknesses ({pct:.0f}%)"
 
 
+def check_lvl120_npc_weaknesses_present(conn) -> tuple[bool, str]:
+    """Sibling of check_weaknesses_present, scoped to the 120 NPCs tab.
+
+    Pre-fix this would have been 0% — `parse_npc_display_tab` never extracted
+    weaknesses. Set the bar high (>=70%) so any future regression that drops
+    them again is loud.
+    """
+    n_forms = conn.execute(
+        "SELECT COUNT(*) FROM enemy_forms f "
+        "JOIN enemies e ON e.id = f.enemy_id WHERE e.category = '120 NPCs'"
+    ).fetchone()[0]
+    if n_forms == 0:
+        return False, "no 120 NPCs forms in DB — display-tab parser dropped them all"
+    n_with_weak = conn.execute(
+        "SELECT COUNT(*) FROM enemy_forms f "
+        "JOIN enemies e ON e.id = f.enemy_id "
+        "WHERE e.category = '120 NPCs' AND EXISTS ("
+        "  SELECT 1 FROM enemy_weaknesses w WHERE w.form_id = f.id)"
+    ).fetchone()[0]
+    pct = n_with_weak * 100.0 / n_forms
+    if pct < 70:
+        return False, (
+            f"only {n_with_weak}/{n_forms} lvl120 forms have weaknesses ({pct:.0f}%)"
+        )
+    return True, f"{n_with_weak}/{n_forms} lvl120 forms have weaknesses ({pct:.0f}%)"
+
+
+def check_lvl120_canalbrine_multi_member(conn) -> tuple[bool, str]:
+    """Spot-check that Canalbrine — a known multi-position lvl120 encounter —
+    persists with each member as a distinct row.
+
+    Pre-fix the NPC parser collapsed every encounter to a single position
+    using the encounter name as the member name, so this would have shown
+    1 position for Canalbrine instead of 3.
+    """
+    rows = list(conn.execute(
+        "SELECT DISTINCT s.position, s.member_name "
+        "FROM enemies e "
+        "JOIN enemy_forms f ON f.enemy_id = e.id "
+        "JOIN enemy_member_stats s ON s.form_id = f.id "
+        "WHERE e.canonical_name = 'Canalbrine' AND e.category = '120 NPCs' "
+        "ORDER BY s.position"
+    ))
+    if not rows:
+        return False, "Canalbrine not found in 120 NPCs — parser failed to detect it"
+    n_positions = len({r["position"] for r in rows})
+    member_names = [r["member_name"] for r in rows]
+    if n_positions < 2:
+        return False, (
+            f"Canalbrine should have multi-position members; got {n_positions} "
+            f"position(s) with member names {member_names}"
+        )
+    if len(set(member_names)) < 2:
+        return False, (
+            f"Canalbrine positions all share one member name {member_names!r} — "
+            "the per-position member-name extractor regressed"
+        )
+    return True, (
+        f"Canalbrine has {n_positions} positions with distinct members "
+        f"{member_names}"
+    )
+
+
 def check_lloris_ex3_weaknesses(conn) -> tuple[bool, str]:
     """Per the screenshot: Leader Lloris EX3 = Axe/Bow/Ice/Wind/Dark."""
     rows = list(conn.execute(
@@ -273,6 +336,8 @@ def main() -> int:
         ("Largo EX3 present",             lambda: check_largo_ex3_present(conn)),
         ("Lloris EX3 stats vs screenshot", lambda: check_lloris_ex3_against_screenshot(conn)),
         ("weaknesses present per form",    lambda: check_weaknesses_present(conn)),
+        ("lvl120 NPC weaknesses present",   lambda: check_lvl120_npc_weaknesses_present(conn)),
+        ("lvl120 Canalbrine multi-member",  lambda: check_lvl120_canalbrine_multi_member(conn)),
         ("Lloris EX3 weaknesses vs screenshot", lambda: check_lloris_ex3_weaknesses(conn)),
     ]
     ok = True

@@ -6,11 +6,13 @@ from typing import Any
 import pytest
 
 from sync.enemy_parsers import (
+    _DISPLAY_BLOCK_HEIGHT,
+    _detect_display_blocks,
     _find_block_anchors,
+    parse_all,
     parse_data_tab,
     parse_npc_data_tab,
     parse_display_tab,
-    parse_npc_display_tab,
     reconcile_display_to_data,
     rank_order,
     _index_to_col_letters,
@@ -319,20 +321,262 @@ def test_parse_display_tab_normalizes_polearm_to_spear() -> None:
     assert blocks[0].weaknesses_by_position == [["Spear"]]
 
 
-def test_parse_npc_display_tab_takes_every_row3_cell() -> None:
-    spec = EnemyTabSpec(gid=2117870435, name="120 NPCs", category="120 NPCs", region="NPCs")
+# --- 120 NPCs display-tab parsing ------------------------------------------
+#
+# These tests pin down the layout of the lvl120 (120 NPCs) tab, which the
+# original parser silently mis-handled: it only walked row 3 of the display
+# tab, never extracted weaknesses, and treated every block as a single-member
+# NPC even when the encounter pulled multiple catalog rows via VLOOKUP.
+
+_NPC_GID = 2117870435  # gid of the 120 NPCs display tab; in ENEMY_NPC_TAB_GIDS.
+_SEPARATOR_BG = "#222222"
+
+
+def test_parse_display_tab_npc_single_member_picks_formatted_name() -> None:
+    """Single-position NPC widget: the member-name strip carries the display
+    name directly (e.g. 'New Delsta'), no VLOOKUP needed for harvesting."""
+    spec = EnemyTabSpec(gid=_NPC_GID, name="120 NPCs", category="120 NPCs", region="NPCs")
+    blank = lambda: [_cell() for _ in range(12)]
     rows: list[list[dict[str, Any]]] = [
-        [_cell()] * 10,
-        [_cell()] * 10,
-        [_cell()] * 10,
-        [_cell(), _cell("New Delsta"), _cell(), _cell(), _cell(),
-         _cell(), _cell(), _cell(), _cell(), _cell("Toto'haha")],
+        blank(), blank(), blank(),
+        # row 3: encounter names with a #222222 separator at col 0 (block-start signal).
+        [_cell(bg=_SEPARATOR_BG), _cell("New Delsta"),
+         _cell(), _cell(), _cell(), _cell(), _cell(), _cell(),
+         _cell(), _cell(), _cell(), _cell()],
+        blank(),
+        blank(),
+        # row 6: member-name strip + shield count + weakness formulas.
+        [_cell(), _cell(),
+         _cell("New Delsta"),  # col 2 = member-name reference
+         _cell(),
+         _cell("38"),  # shield count
+         _formula_cell("=Sword"),
+         _formula_cell("=Dagger"),
+         _formula_cell("=Light"),
+         _cell(), _cell(), _cell(), _cell()],
     ]
-    blocks = parse_npc_display_tab(_sheet_from_rows(rows, gid=2117870435), spec)
-    names = sorted(b.display_name for b in blocks)
-    assert names == ["New Delsta", "Toto'haha"]
-    for b in blocks:
-        assert b.is_npc is True
+    blocks = parse_display_tab(_sheet_from_rows(rows, gid=_NPC_GID), spec)
+    assert len(blocks) == 1
+    b = blocks[0]
+    assert b.display_name == "New Delsta"
+    assert b.is_npc is True
+    assert b.member_names_by_position == ["New Delsta"]
+    assert b.weaknesses_by_position == [["Sword", "Dagger", "Light"]]
+
+
+def test_parse_display_tab_npc_multi_member_uses_vlookup_formulas() -> None:
+    """Multi-position widget (Canalbrine-shape): the member-name strip holds
+    position INDEX labels ('1', '2', '3') instead of names, so the parser
+    must extract names from the VLOOKUP formula on the HP row."""
+    spec = EnemyTabSpec(gid=_NPC_GID, name="120 NPCs", category="120 NPCs", region="NPCs")
+    blank = lambda: [_cell() for _ in range(36)]
+    # Block at name_col=23 with #222222 separator at col 22.
+    name_row = [_cell() for _ in range(36)]
+    name_row[22] = _cell(bg=_SEPARATOR_BG)
+    name_row[23] = _cell("Canalbrine")
+    # Row 6: per-position labels + shield count + weakness formulas for pos 0.
+    member_strip = [_cell() for _ in range(36)]
+    member_strip[24] = _cell("1")  # position INDEX label, not a name
+    member_strip[25] = _cell("2")
+    member_strip[26] = _cell("3")
+    member_strip[27] = _cell("1")  # weakness sub-grid pos label
+    member_strip[28] = _cell("22")  # shield count
+    member_strip[29] = _formula_cell("=Spear")
+    member_strip[30] = _formula_cell("=Bow")
+    member_strip[31] = _formula_cell("=Wind")
+    # Row 7: HP row — VLOOKUP formulas carry the actual member names.
+    hp_strip = [_cell() for _ in range(36)]
+    hp_strip[24] = _formula_cell('=VLOOKUP("Canalbrine 1",\'120 NPCs Data\'!A:K,4,0)')
+    hp_strip[25] = _formula_cell('=VLOOKUP("Canalbrine 2",\'120 NPCs Data\'!A:K,4,0)')
+    hp_strip[26] = _formula_cell('=VLOOKUP("Canalbrine 3",\'120 NPCs Data\'!A:K,4,0)')
+    hp_strip[27] = _cell("2")  # weakness sub-grid pos label
+    hp_strip[28] = _cell("20")
+    hp_strip[29] = _formula_cell("=Bow")
+    hp_strip[30] = _formula_cell("=Staff")
+    hp_strip[31] = _formula_cell("=Lightning")
+    # Row 8: third weakness row.
+    row8 = [_cell() for _ in range(36)]
+    row8[27] = _cell("3")
+    row8[28] = _cell("23")
+    row8[29] = _formula_cell("=Spear")
+    row8[30] = _formula_cell("=Fan")
+    row8[31] = _formula_cell("=Ice")
+    rows: list[list[dict[str, Any]]] = [
+        blank(), blank(), blank(),
+        name_row, blank(), blank(),
+        member_strip, hp_strip, row8,
+    ]
+    blocks = parse_display_tab(_sheet_from_rows(rows, gid=_NPC_GID), spec)
+    assert len(blocks) == 1
+    b = blocks[0]
+    assert b.display_name == "Canalbrine"
+    assert b.is_npc is True
+    assert b.member_names_by_position == ["Canalbrine 1", "Canalbrine 2", "Canalbrine 3"]
+    assert b.weaknesses_by_position == [
+        ["Spear", "Bow", "Wind"],
+        ["Bow", "Staff", "Lightning"],
+        ["Spear", "Fan", "Ice"],
+    ]
+
+
+def test_parse_display_tab_npc_direct_cell_ref_falls_back_to_encounter_name() -> None:
+    """`Cropdale` and similar widgets pull a single member via a direct
+    `='120 NPCs Data'!D10` ref instead of VLOOKUP. The member name isn't
+    recoverable from the formula, so we fall back to the encounter name."""
+    spec = EnemyTabSpec(gid=_NPC_GID, name="120 NPCs", category="120 NPCs", region="NPCs")
+    blank = lambda: [_cell() for _ in range(12)]
+    rows: list[list[dict[str, Any]]] = [
+        blank(), blank(), blank(),
+        [_cell(bg=_SEPARATOR_BG), _cell("Cropdale"),
+         _cell(), _cell(), _cell(), _cell(), _cell(), _cell(),
+         _cell(), _cell(), _cell(), _cell()],
+        blank(),
+        blank(),
+        # row 6: member-name strip carries only a position-index label.
+        [_cell(), _cell(),
+         _cell("1"),  # position-index label, not a name
+         _cell(), _cell(), _cell(), _cell(), _cell(),
+         _cell(), _cell(), _cell(), _cell()],
+        # row 7: HP row with a direct cell ref (no VLOOKUP name to extract).
+        [_cell(), _cell(),
+         _formula_cell("='120 NPCs Data'!D10"),
+         _cell(), _cell(), _cell(), _cell(), _cell(),
+         _cell(), _cell(), _cell(), _cell()],
+    ]
+    blocks = parse_display_tab(_sheet_from_rows(rows, gid=_NPC_GID), spec)
+    assert len(blocks) == 1
+    assert blocks[0].member_names_by_position == ["Cropdale"]
+
+
+def test_detect_display_blocks_finds_blocks_in_second_block_row() -> None:
+    """Ranked tabs with more encounters than fit in one block-row layout
+    were silently truncated by the old single-row scan. Make sure block-row
+    2 (rows starting at _DISPLAY_NAME_ROW + _DISPLAY_BLOCK_HEIGHT) is now
+    detected — this is the regression that allowed the lvl120 bug to ship
+    while looking benign on ranked tabs."""
+    blank = lambda: [_cell() for _ in range(12)]
+    rows: list[list[dict[str, Any]]] = [
+        blank(), blank(), blank(),
+        # Block row 1: one block at name_col=1.
+        [_cell(), _cell("Lyblac"), _cell(), _cell("EX3"), _cell(),
+         _cell(), _cell(), _cell(), _cell(), _cell(), _cell(), _cell()],
+    ]
+    # Pad to the start of block row 2 (_DISPLAY_NAME_ROW + _DISPLAY_BLOCK_HEIGHT).
+    while len(rows) < 3 + _DISPLAY_BLOCK_HEIGHT:
+        rows.append(blank())
+    # Block row 2: another block at name_col=1.
+    rows.append([_cell(), _cell("Largo"), _cell(), _cell("EX3"), _cell(),
+                 _cell(), _cell(), _cell(), _cell(), _cell(), _cell(), _cell()])
+    detected = _detect_display_blocks(rows, use_separator_fallback=False)
+    name_rows = sorted({nr for nr, _, _ in detected})
+    assert name_rows == [3, 3 + _DISPLAY_BLOCK_HEIGHT]
+
+
+def test_detect_display_blocks_npc_separator_fallback() -> None:
+    """The 120 NPCs tab has no rank badges, so the parser must fall back to a
+    separator-color heuristic: a name cell whose left neighbor is on the
+    dark #222222 separator background."""
+    blank = lambda: [_cell() for _ in range(36)]
+    name_row = [_cell() for _ in range(36)]
+    # Three blocks: at cols 1, 12, 23 — each preceded by a #222222 separator.
+    name_row[0] = _cell(bg=_SEPARATOR_BG)
+    name_row[1] = _cell("New Delsta")
+    name_row[11] = _cell(bg=_SEPARATOR_BG)
+    name_row[12] = _cell("Toto'haha")
+    name_row[22] = _cell(bg=_SEPARATOR_BG)
+    name_row[23] = _cell("Canalbrine")
+    rows: list[list[dict[str, Any]]] = [
+        blank(), blank(), blank(),
+        name_row,
+    ]
+    # Without the fallback flag, no rank badges → no blocks.
+    assert _detect_display_blocks(rows, use_separator_fallback=False) == []
+    # With the fallback flag, all three blocks are detected.
+    detected = _detect_display_blocks(rows, use_separator_fallback=True)
+    name_cols = sorted(c for _, c, _ in detected)
+    assert name_cols == [1, 12, 23]
+
+
+def test_detect_display_blocks_npc_separator_rejects_non_separator_neighbors() -> None:
+    """Sub-grid headers and position-index labels also live on the name row in
+    some layouts — the separator-bg signal is what distinguishes a true
+    block-start from an in-block label."""
+    blank = lambda: [_cell() for _ in range(12)]
+    name_row = [_cell() for _ in range(12)]
+    name_row[0] = _cell(bg=_SEPARATOR_BG)
+    name_row[1] = _cell("New Delsta")  # legit block (left neighbor is separator)
+    # col 5 has text but its left neighbor is plain — should NOT be a block.
+    name_row[4] = _cell(bg="#ffffff")
+    name_row[5] = _cell("Weaknesses")  # in-block label
+    rows = [blank(), blank(), blank(), name_row]
+    detected = _detect_display_blocks(rows, use_separator_fallback=True)
+    assert sorted(c for _, c, _ in detected) == [1]
+
+
+def test_parse_all_npc_multi_member_persists_per_position_stats() -> None:
+    """End-to-end: a multi-member NPC display block + matching catalog rows
+    in the data tab should produce a single ParsedEnemy with one stats row
+    per position, each carrying its own member_name."""
+    # Display tab: one Canalbrine block with 3 members (VLOOKUPs in HP row).
+    blank = lambda: [_cell() for _ in range(36)]
+    name_row = [_cell() for _ in range(36)]
+    name_row[22] = _cell(bg=_SEPARATOR_BG)
+    name_row[23] = _cell("Canalbrine")
+    member_strip = [_cell() for _ in range(36)]
+    member_strip[24] = _cell("1")
+    member_strip[25] = _cell("2")
+    member_strip[26] = _cell("3")
+    member_strip[28] = _cell("22")
+    member_strip[29] = _formula_cell("=Spear")
+    hp_strip = [_cell() for _ in range(36)]
+    hp_strip[24] = _formula_cell('=VLOOKUP("Canalbrine 1",\'120 NPCs Data\'!A:K,4,0)')
+    hp_strip[25] = _formula_cell('=VLOOKUP("Canalbrine 2",\'120 NPCs Data\'!A:K,4,0)')
+    hp_strip[26] = _formula_cell('=VLOOKUP("Canalbrine 3",\'120 NPCs Data\'!A:K,4,0)')
+    display_rows = [blank(), blank(), blank(),
+                    name_row, blank(), blank(),
+                    member_strip, hp_strip]
+    display_sheet = _sheet_from_rows(display_rows, gid=_NPC_GID)
+    display_sheet["properties"]["title"] = "120 NPCs"
+
+    # Data tab: catalog with the three Canalbrine members.
+    data_rows = [
+        [_cell()] * 13,
+        [_cell(), _cell("NPC Name"), _cell("Shields"), _cell("HP"),
+         _cell("P. Atk"), _cell("P. Def"), _cell("E. Atk"), _cell("E. Def"),
+         _cell("Speed"), _cell("Crit"), _cell("CritDef"), _cell("Equip Atk")],
+        [_cell(), _cell("Canalbrine 1"),
+         _cell("22"), _cell("4671645"), _cell("1200"), _cell("383"),
+         _cell("1436"), _cell("454"), _cell("525"), _cell("525"),
+         _cell("525"), _cell("190")],
+        [_cell(), _cell("Canalbrine 2"),
+         _cell("20"), _cell("800250"), _cell("1295"), _cell("360"),
+         _cell("1413"), _cell("360"), _cell("454"), _cell("572"),
+         _cell("313"), _cell("190")],
+        [_cell(), _cell("Canalbrine 3"),
+         _cell("23"), _cell("833250"), _cell("1200"), _cell("407"),
+         _cell("1342"), _cell("430"), _cell("360"), _cell("407"),
+         _cell("430"), _cell("190")],
+    ]
+    data_sheet = _sheet_from_rows(data_rows, gid=1230510791)
+    data_sheet["properties"]["title"] = "120 NPCs Data"
+
+    payload = {"sheets": [display_sheet, data_sheet]}
+    # Restrict to just the NPC pipeline by overriding the data-tab map.
+    result = parse_all(payload, {"NPCs": 1230510791})
+    npc_enemies = [e for e in result.enemies if e.is_npc]
+    assert len(npc_enemies) == 1
+    enemy = npc_enemies[0]
+    assert enemy.canonical_name == "Canalbrine"
+    assert "Default" in enemy.rank_stats
+    by_position: dict[int, dict[str, str]] = {}
+    name_by_position: dict[int, str] = {}
+    for row in enemy.rank_stats["Default"]:
+        by_position.setdefault(row["position"], {})[row["stat_name"]] = row["stat_value"]
+        name_by_position[row["position"]] = row["member_name"]
+    assert name_by_position == {0: "Canalbrine 1", 1: "Canalbrine 2", 2: "Canalbrine 3"}
+    assert by_position[0]["HP"] == "4671645"
+    assert by_position[1]["HP"] == "800250"
+    assert by_position[2]["HP"] == "833250"
 
 
 # --- reconcile_display_to_data ---------------------------------------------

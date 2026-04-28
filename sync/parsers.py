@@ -48,6 +48,20 @@ def _cell_color_hex(cell: dict[str, Any]) -> str | None:
     return None
 
 
+def _cell_bg_hex(cell: dict[str, Any]) -> str | None:
+    """Best-effort cell background color as '#RRGGBB'."""
+    fmt = cell.get("effectiveFormat", {})
+    rgb = fmt.get("backgroundColorStyle", {}).get("rgbColor")
+    if rgb:
+        hx = _color_dict_to_hex(rgb)
+        if hx:
+            return hx
+    bg = fmt.get("backgroundColor")
+    if bg:
+        return _color_dict_to_hex(bg)
+    return None
+
+
 def _cell_text(cell: dict[str, Any]) -> str:
     return (cell.get("formattedValue") or "").strip()
 
