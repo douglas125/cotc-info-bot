@@ -5,9 +5,9 @@ only the ranks this particular enemy actually has (Rank1..EX3 for ranked
 encounters; NPCs have a single 'Default' form, in which case the view is
 created without a Select at all).
 
-On selection the callback rebuilds the embed via
-`enemy_embeds.build_enemy_embed`, recreates the Select with the new rank
-as the default-selected option, and edits the message in place.
+On selection the callback rebuilds the embed and weakness image via
+`enemy_embeds.build_enemy_message`, recreates the Select with the new rank as
+the default-selected option, and edits the message in place.
 """
 from __future__ import annotations
 
@@ -50,15 +50,26 @@ class _RankSelect(discord.ui.Select["EnemyView"]):
             return
         rank: enemy_embeds.Rank = self.values[0]  # type: ignore[assignment]
         conn = bot_db.conn()
-        embed = enemy_embeds.build_enemy_embed(conn, view.enemy_id, rank)
-        if embed is None:
+        message = enemy_embeds.build_enemy_message(conn, view.enemy_id, rank)
+        if message is None:
             await interaction.response.send_message(
                 ENEMY_REMOVED_MSG, ephemeral=True,
             )
             return
         view.clear_items()
         view.add_item(_RankSelect(available=view.available_ranks, current=rank))
-        await interaction.response.edit_message(embed=embed, view=view)
+        if message.file is None:
+            await interaction.response.edit_message(
+                embed=message.embed,
+                attachments=[],
+                view=view,
+            )
+        else:
+            await interaction.response.edit_message(
+                embed=message.embed,
+                attachments=[message.file],
+                view=view,
+            )
 
 
 class EnemyView(discord.ui.View):
@@ -76,6 +87,9 @@ class EnemyView(discord.ui.View):
     ) -> None:
         super().__init__(timeout=180)
         self.enemy_id = enemy_id
-        self.available_ranks = available_ranks
-        if len(available_ranks) > 1:
-            self.add_item(_RankSelect(available=available_ranks, current=current_rank))
+        self.available_ranks = sorted(
+            available_ranks,
+            key=lambda rank: enemy_embeds.RANK_ORDER.get(rank, 99),
+        )
+        if len(self.available_ranks) > 1:
+            self.add_item(_RankSelect(available=self.available_ranks, current=current_rank))

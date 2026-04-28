@@ -303,15 +303,22 @@ def register(tree: app_commands.CommandTree) -> None:
                 ephemeral=True,
             )
             return
-        embed = enemy_embeds.build_enemy_embed(conn, enemy_id, rank)
-        if embed is None:
+        message = enemy_embeds.build_enemy_message(conn, enemy_id, rank)
+        if message is None:
             await interaction.response.send_message(
                 "That enemy was removed by a recent refresh — try again.",
                 ephemeral=True,
             )
             return
         view = EnemyView(enemy_id=enemy_id, available_ranks=ranks, current_rank=rank)
-        await interaction.response.send_message(embed=embed, view=view)
+        if message.file is None:
+            await interaction.response.send_message(embed=message.embed, view=view)
+        else:
+            await interaction.response.send_message(
+                embed=message.embed,
+                file=message.file,
+                view=view,
+            )
 
     @enemy_cmd.autocomplete("name")
     async def _enemy_ac(interaction: discord.Interaction, current: str):
