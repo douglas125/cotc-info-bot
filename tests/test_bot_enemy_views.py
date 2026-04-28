@@ -18,7 +18,7 @@ def test_view_with_multiple_ranks_attaches_select() -> None:
     assert len(selects) == 1
     sel = selects[0]
     values = [o.value for o in sel.options]
-    assert values == ["Rank1", "EX3"]
+    assert values == ["EX3", "Rank1"]
     default = next(o for o in sel.options if o.default)
     assert default.value == "EX3"
 
@@ -35,7 +35,7 @@ def test_view_with_single_rank_npc_has_no_select() -> None:
 
 
 def test_select_options_use_friendly_labels() -> None:
-    sel = _RankSelect(available=["Rank1", "EX1", "EX3"], current="Rank1")
+    sel = _RankSelect(available=["EX3", "EX1", "Rank1"], current="Rank1")
     by_value = {o.value: o.label for o in sel.options}
     assert by_value["Rank1"] == "Rank 1"
     assert by_value["EX1"] == "EX 1"

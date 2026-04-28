@@ -63,10 +63,8 @@ def test_build_enemy_embed_renders_stats_grid(tmp_db_path: Path) -> None:
     assert "Stats" in fields
     assert "1,143,210" in fields["Stats"]
     assert "822,762" in fields["Stats"]
-    # Weaknesses field (combines break-shield count + weakness labels per position)
-    assert "Weaknesses" in fields
-    assert "30" in fields["Weaknesses"]
-    assert "18" in fields["Weaknesses"]
+    assert "Weaknesses" not in fields
+    assert embed.image.url is None
 
 
 def test_build_enemy_embed_renders_weakness_labels(tmp_db_path: Path) -> None:
@@ -80,9 +78,12 @@ def test_build_enemy_embed_renders_weakness_labels(tmp_db_path: Path) -> None:
     ])
     embed = enemy_embeds.build_enemy_embed(conn, enemy_id, "EX3")
     assert embed is not None
-    weaknesses_field = next(f for f in embed.fields if f.name == "Weaknesses")
-    for label in ("Axe", "Bow", "Ice", "Wind", "Dark", "Dagger", "Lightning"):
-        assert label in weaknesses_field.value
+    assert embed.image.url == f"attachment://enemy_weaknesses_{enemy_id}_ex3.png"
+    message = enemy_embeds.build_enemy_message(conn, enemy_id, "EX3")
+    assert message is not None
+    assert message.file is not None
+    assert message.file.filename == f"enemy_weaknesses_{enemy_id}_ex3.png"
+    assert message.embed.image.url == f"attachment://enemy_weaknesses_{enemy_id}_ex3.png"
 
 
 def test_build_enemy_embed_returns_none_for_missing_enemy(tmp_db_path: Path) -> None:
@@ -145,7 +146,7 @@ def test_available_ranks_collapses_to_default_for_npcs(tmp_db_path: Path) -> Non
     assert enemy_embeds.available_ranks(conn, enemy_id) == ["Default"]
 
 
-def test_default_rank_picks_lowest() -> None:
-    assert enemy_embeds.default_rank(["EX2", "Rank2", "EX3"]) == "Rank2"
+def test_default_rank_picks_highest() -> None:
+    assert enemy_embeds.default_rank(["EX2", "Rank2", "EX3"]) == "EX3"
     assert enemy_embeds.default_rank(["Default"]) == "Default"
     assert enemy_embeds.default_rank([]) is None
