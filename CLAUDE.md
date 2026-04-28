@@ -2,10 +2,10 @@
 
 ## What this project is
 
-A local Streamlit app that mirrors a community-maintained Google Sheet for
+A Discord bot that mirrors a community-maintained Google Sheet for
 *Octopath Traveler: Champions of the Continent* into a SQLite database, so
-the user can filter and search characters by role, rarity, weakness/element,
-weapon, and free-text against skills/equipment.
+users can filter and search characters by role, rarity, weakness/element,
+weapon, and free-text against skills/equipment via slash commands.
 
 - **Canonical data source**: see [`INFO_SOURCES.md`](INFO_SOURCES.md) for
   the spreadsheet URL/ID, tab inventory, and a list of what the Sheets v4
@@ -45,7 +45,7 @@ Treat `main` as protected. Never push directly to it, never merge without confir
 conda activate cotc-search
 ```
 
-The env is defined in `environment.yml` (Python 3.11 + streamlit,
+The env is defined in `environment.yml` (Python 3.11 + discord.py,
 google-api-python-client, google-auth, tenacity, pillow). Recreate with:
 
 ```bash
@@ -63,13 +63,13 @@ character_sheet/
 ├── railway.json                 # Railway build/deploy config
 ├── config.py                    # sheet ID, tab map, color→rarity, paths,
 │                                # env-var-aware get_setting helper
-├── app.py                       # Streamlit UI (entry point)
 ├── bot/                         # Discord bot (`python -m bot`)
 │   ├── __main__.py              # entrypoint; cold-start sync if DB empty
 │   ├── client.py                # discord.Client + CommandTree wiring
 │   ├── commands.py              # /character, /search, /refresh
 │   ├── embeds.py                # pure embed builders (testable, no runtime)
-│   └── db.py                    # per-call connection (mirrors app.py)
+│   ├── views.py                 # /character dropdown view
+│   └── db.py                    # per-call SQLite connection helper
 ├── sync/
 │   ├── fetch.py                 # one Sheets API v4 call, all tabs
 │   ├── parsers.py               # Index parser + role-tab parser + SEA/GL
@@ -100,18 +100,18 @@ conda activate cotc-search
 
 # Sync from CLI:
 python -m sync.cli --api-key $GOOGLE_API_KEY
-# or, with the key already saved by the UI:
+# or, with the key already saved at ~/.cotc-search/config.toml:
 python -m sync.cli --api-key "$(grep api_key ~/.cotc-search/config.toml | cut -d'"' -f2)"
 
-# Run the UI (browser opens at http://localhost:8501):
-streamlit run app.py
+# Run the Discord bot:
+python -m bot
 ```
 
-The Refresh button in the UI sidebar performs the same sync as the CLI.
+The `/refresh` slash command (admin-gated) re-runs the same sync as the CLI.
 
 ## Discord bot
 
-Same SQLite mirror, surfaced through Discord slash commands. Code lives
+The SQLite mirror is surfaced through Discord slash commands. Code lives
 in `bot/`; entry point is `python -m bot`.
 
 **Commands:**
@@ -205,13 +205,11 @@ python -m verify.check
 filters, config inventory (19 tabs, 16 role tabs), parser internals
 (color→rarity, anchor parsing, role-tab block detection on synthetic
 payloads, alias table consistency, Levenshtein distances), runner block
-selection (alias / fuzzy / band-aware), and a Streamlit `AppTest` smoke
-test. There is also an explicit regression test for the SQLite cross-thread
-bug — `tests/test_repo_threadsafety.py` documents the failure mode and
-asserts the per-thread-connection pattern app.py uses.
-
-A lint-style guard in `tests/test_app_smoke.py` fails on any reintroduction
-of the deprecated `use_container_width=` kwarg.
+selection (alias / fuzzy / band-aware), and bot-side embed builders /
+view wiring / autocomplete / admin gating. There is also an explicit
+regression test for the SQLite cross-thread bug —
+`tests/test_repo_threadsafety.py` documents the failure mode and asserts
+the per-thread-connection pattern `bot/db.py` uses.
 
 ## Important: do not assume parser correctness
 

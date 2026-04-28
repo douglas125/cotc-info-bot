@@ -3,4 +3,3 @@ google-api-python-client>=2.100
 google-auth>=2.20
 tenacity>=8.2
 pillow>=10.0
-streamlit>=1.30

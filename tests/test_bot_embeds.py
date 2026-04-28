@@ -123,16 +123,16 @@ def _seed_full_kit(conn) -> int:
 
 
 def test_section_keys_and_labels_are_consistent() -> None:
-    assert embeds.SECTIONS == ("skills", "a4", "info")
+    assert embeds.SECTIONS == ("actives", "passives", "ultimate", "a4", "info")
     assert set(embeds.SECTION_LABELS.keys()) == set(embeds.SECTIONS)
     assert set(embeds.SECTION_DESCRIPTIONS.keys()) == set(embeds.SECTIONS)
-    assert embeds.DEFAULT_SECTION == "skills"
+    assert embeds.DEFAULT_SECTION == "actives"
 
 
-def test_build_section_skills_basic_shape(tmp_db_path: Path) -> None:
+def test_build_section_actives_basic_shape(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     form_id = _seed(conn)
-    embed = embeds.build_section_embed(conn, form_id, "skills")
+    embed = embeds.build_section_embed(conn, form_id, "actives")
     conn.close()
 
     assert embed is not None
@@ -146,13 +146,42 @@ def test_build_section_skills_basic_shape(tmp_db_path: Path) -> None:
 
     field_names = [f.name for f in embed.fields]
     assert "Active" in field_names
-    assert "Latent" in field_names
+    # Latent belongs to the Passives section, not Actives.
+    assert "Latent" not in field_names
     active_field = next(f for f in embed.fields if f.name == "Active")
     assert "Fireball" in active_field.value
     assert "Hellfire" in active_field.value
+
+
+def test_build_section_passives_includes_latent(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed(conn)
+    embed = embeds.build_section_embed(conn, form_id, "passives")
+    conn.close()
+
+    assert embed is not None
+    field_names = [f.name for f in embed.fields]
+    assert "Latent" in field_names
     latent_field = next(f for f in embed.fields if f.name == "Latent")
     assert "init 2t" in latent_field.value
     assert "cd 3t" in latent_field.value
+
+
+def test_skill_line_has_no_slot_number_or_b_prefix(tmp_db_path: Path) -> None:
+    """Skill bullets must not show a leading "N." index, and board markers
+    must render as "1*" not "B1*"."""
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed_full_kit(conn)
+    embed = embeds.build_section_embed(conn, form_id, "actives")
+    conn.close()
+    active_field = next(f for f in embed.fields if f.name == "Active")
+    # No "**N.**" leading index pattern.
+    import re as _re
+    assert not _re.search(r"\*\*\d+\.\*\*", active_field.value)
+    # Board markers render without the "B" prefix.
+    assert "`B1⭐`" not in active_field.value
+    assert "`B2⭐`" not in active_field.value
+    assert "`1⭐`" in active_field.value or "`2⭐`" in active_field.value
 
 
 def test_build_section_a4_basic_shape(tmp_db_path: Path) -> None:
@@ -201,12 +230,12 @@ def test_build_section_info_basic_shape(tmp_db_path: Path) -> None:
 
 def test_build_section_returns_none_for_missing_form(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
-    embed = embeds.build_section_embed(conn, form_id=99999, section="skills")
+    embed = embeds.build_section_embed(conn, form_id=99999, section="actives")
     conn.close()
     assert embed is None
 
 
-def test_build_section_skills_respects_field_limits(tmp_db_path: Path) -> None:
+def test_build_section_actives_respects_field_limits(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     ch = repo.upsert_character(conn, canonical_name="LongDude", base_role="r", base_weapon="w")
     form_id = repo.insert_form(conn, character_id=ch, display_name="LongDude", rarity="5*")
@@ -219,17 +248,17 @@ def test_build_section_skills_respects_field_limits(tmp_db_path: Path) -> None:
          "power_min": None, "power_max": None, "hits": None}
         for i in range(1, 31)
     ])
-    embed = embeds.build_section_embed(conn, form_id, "skills")
+    embed = embeds.build_section_embed(conn, form_id, "actives")
     conn.close()
     for f in embed.fields:
         assert len(f.value) <= embeds.FIELD_VALUE_LIMIT
         assert len(f.name) <= embeds.FIELD_NAME_LIMIT
 
 
-def test_build_section_skills_folds_ultimates(tmp_db_path: Path) -> None:
+def test_build_section_ultimate_folds_tiers(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     form_id = _seed_full_kit(conn)
-    embed = embeds.build_section_embed(conn, form_id, "skills")
+    embed = embeds.build_section_embed(conn, form_id, "ultimate")
     conn.close()
     ult = next(f for f in embed.fields if f.name == "Ultimate")
     assert "Lv1" in ult.value
@@ -326,7 +355,7 @@ def test_header_description_has_no_unescaped_star(tmp_db_path: Path) -> None:
     (Discord parses ``*X*`` as italic, mangling the rarity readout)."""
     conn = repo.connect(tmp_db_path)
     form_id = _seed(conn)
-    embed = embeds.build_section_embed(conn, form_id, "skills")
+    embed = embeds.build_section_embed(conn, form_id, "actives")
     conn.close()
     assert embed is not None and embed.description is not None
     assert "5*" not in embed.description
@@ -342,7 +371,7 @@ def test_header_description_tags_sea_and_ex(tmp_db_path: Path) -> None:
         conn, character_id=ch, display_name="Lynette EX", rarity="5*",
         variant_kind="ex", server="sea",
     )
-    embed = embeds.build_section_embed(conn, form_id, "skills")
+    embed = embeds.build_section_embed(conn, form_id, "actives")
     conn.close()
     assert embed is not None and embed.description is not None
     assert "EX form" in embed.description

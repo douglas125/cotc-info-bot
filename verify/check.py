@@ -238,10 +238,11 @@ def check_skill_counts_per_form(conn) -> list[tuple[bool, str]]:
 
 def check_skill_uniqueness_per_form(conn) -> list[tuple[bool, str]]:
     """Each form has at most one TP/divine, one EX, one latent power, and
-    either 0 or 3 ultimate-tier rows (the 3 Lv1/Lv10/Lv20 tiers of the same
-    Special skill). Anything else means the parser is over-classifying —
-    historically 'N*' board markers were mis-tagged as ultimates, producing
-    many 'ultimate' rows per form.
+    between 0 and 3 ultimate-tier rows (the Lv1/Lv10/Lv20 tiers of the same
+    Special skill). Some units have only 1 or 2 tiers released (Lv20 lands
+    later), so we allow {0,1,2,3}; anything ≥4 means the parser is over-
+    classifying — historically 'N*' board markers were mis-tagged as
+    ultimates, producing many 'ultimate' rows per form.
     """
     out: list[tuple[bool, str]] = []
     rows = conn.execute(
@@ -262,8 +263,8 @@ def check_skill_uniqueness_per_form(conn) -> list[tuple[bool, str]]:
                 bad.append((name, f"{n} {kind} skills (expected ≤1)"))
                 bad_forms.add(name)
         n_ult = counts.get("ultimate", 0)
-        if n_ult not in (0, 3):
-            bad.append((name, f"{n_ult} ultimate-tier rows (expected 0 or 3)"))
+        if n_ult > 3:
+            bad.append((name, f"{n_ult} ultimate-tier rows (expected 0–3)"))
             bad_forms.add(name)
     total_forms = conn.execute(
         "SELECT COUNT(*) FROM character_forms WHERE server='global'"

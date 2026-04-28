@@ -28,12 +28,12 @@ def test_character_view_custom_section() -> None:
     sel = next(c for c in view.children if isinstance(c, discord.ui.Select))
     info_opt = next(o for o in sel.options if o.value == "info")
     assert info_opt.default is True
-    skills_opt = next(o for o in sel.options if o.value == "skills")
-    assert skills_opt.default is False
+    actives_opt = next(o for o in sel.options if o.value == "actives")
+    assert actives_opt.default is False
 
 
 def test_section_select_options_match_labels() -> None:
-    sel = _SectionSelect(current="skills")
+    sel = _SectionSelect(current="actives")
     by_value = {o.value: o for o in sel.options}
     for s in embeds.SECTIONS:
         assert by_value[s].label == embeds.SECTION_LABELS[s]

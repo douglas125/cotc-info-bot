@@ -4,9 +4,9 @@ These take a sqlite3 connection plus a form_id (or a list of search rows)
 and return a `discord.Embed`. They have no Discord runtime dependency
 beyond the `Embed` data class — fully unit-testable.
 
-The `/character` command surfaces three sections through a dropdown:
-"skills" (default), "a4", and "info". Each section is a self-contained
-embed; the dropdown swaps which one is shown.
+The `/character` command surfaces five sections through a dropdown:
+"actives" (default), "passives", "ultimate", "a4", and "info". Each
+section is a self-contained embed; the dropdown swaps which one is shown.
 """
 from __future__ import annotations
 
@@ -26,19 +26,23 @@ FIELD_NAME_LIMIT = 256
 TITLE_LIMIT = 256
 MAX_FIELDS = 25
 
-Section = Literal["skills", "a4", "info"]
-SECTIONS: tuple[Section, ...] = ("skills", "a4", "info")
+Section = Literal["actives", "passives", "ultimate", "a4", "info"]
+SECTIONS: tuple[Section, ...] = ("actives", "passives", "ultimate", "a4", "info")
 SECTION_LABELS: dict[Section, str] = {
-    "skills": "Skills",
+    "actives": "Active Skills",
+    "passives": "Passive Skills",
+    "ultimate": "Ultimate",
     "a4": "A4 Accessory",
     "info": "Info",
 }
 SECTION_DESCRIPTIONS: dict[Section, str] = {
-    "skills": "Active / Passive / Divine / EX / Ultimate / Latent",
+    "actives": "Active skills, TP, and EX",
+    "passives": "Passive skills and Latent Power",
+    "ultimate": "Ultimate (Special) tiers",
     "a4": "A4 accessory and effect",
     "info": "Affinities, release info, source link",
 }
-DEFAULT_SECTION: Section = "skills"
+DEFAULT_SECTION: Section = "actives"
 
 
 def _safe_url(url: str | None) -> str | None:
@@ -102,12 +106,10 @@ def _truncate(text: str, limit: int) -> str:
 def _format_skill_line(s: sqlite3.Row) -> str:
     """One-line markdown bullet for a skill row."""
     bits: list[str] = []
-    if s["slot_order"] is not None:
-        bits.append(f"**{s['slot_order']}.**")
     if s["sp_cost"] is not None:
         bits.append(f"`{s['sp_cost']} SP`")
     if s["learn_board"]:
-        bits.append(f"`B{s['learn_board']}⭐`")
+        bits.append(f"`{s['learn_board']}⭐`")
     if s["tier_level"]:
         bits.append(f"`Lv{s['tier_level']}`")
     name = s["name"] or ""
@@ -123,8 +125,8 @@ def _format_skill_line(s: sqlite3.Row) -> str:
         desc = f"[{' / '.join(prefix)}] {desc}"
     head = " ".join(bits).strip()
     if desc:
-        return f"{head} — {desc}" if head else desc
-    return head or "—"
+        return f"• {head} — {desc}" if head else f"• {desc}"
+    return f"• {head}" if head else "—"
 
 
 def _skill_field_value(skills: list[sqlite3.Row]) -> str:
@@ -137,12 +139,13 @@ def _skill_field_value(skills: list[sqlite3.Row]) -> str:
 SKILL_KIND_TITLES = {
     "active": "Active",
     "passive": "Passive",
-    "divine": "Divine (TP)",
+    "divine": "TP",
     "ex": "EX",
     "ultimate": "Ultimate",
     "latent": "Latent",
 }
-SKILL_KIND_ORDER = ("active", "passive", "divine", "ex", "ultimate", "latent")
+ACTIVE_KIND_ORDER = ("active", "divine", "ex")
+PASSIVE_KIND_ORDER = ("passive", "latent")
 
 
 def _affinity_groups(affs: list[sqlite3.Row]) -> dict[str, list[str]]:
@@ -244,27 +247,61 @@ def _attach_footer(embed: discord.Embed, last_sync: sqlite3.Row | None) -> None:
     embed.set_footer(text=f"synced {ts} · status: {last_sync['status']}")
 
 
-def _build_skills_section(form: sqlite3.Row, skills: list[sqlite3.Row]) -> discord.Embed:
-    embed = _new_header_embed(form)
+def _group_by_kind(skills: list[sqlite3.Row]) -> dict[str, list[sqlite3.Row]]:
     by_kind: dict[str, list[sqlite3.Row]] = {}
     for s in skills:
         by_kind.setdefault(s["kind"] or "active", []).append(s)
+    return by_kind
 
-    for kind in SKILL_KIND_ORDER:
+
+def _build_actives_section(form: sqlite3.Row, skills: list[sqlite3.Row]) -> discord.Embed:
+    embed = _new_header_embed(form)
+    by_kind = _group_by_kind(skills)
+    for kind in ACTIVE_KIND_ORDER:
         if kind not in by_kind or len(embed.fields) >= MAX_FIELDS:
             continue
-        if kind == "ultimate":
-            value = _format_ultimate_block(by_kind[kind])
-        else:
-            value = _skill_field_value(by_kind[kind])
+        value = _skill_field_value(by_kind[kind])
         if not value:
             continue
         embed.add_field(name=SKILL_KIND_TITLES[kind], value=value, inline=False)
-
     if not embed.fields:
         embed.add_field(
-            name="Skills",
-            value="_No skills recorded for this form._",
+            name="Active Skills",
+            value="_No active skills recorded for this form._",
+            inline=False,
+        )
+    return embed
+
+
+def _build_passives_section(form: sqlite3.Row, skills: list[sqlite3.Row]) -> discord.Embed:
+    embed = _new_header_embed(form)
+    by_kind = _group_by_kind(skills)
+    for kind in PASSIVE_KIND_ORDER:
+        if kind not in by_kind or len(embed.fields) >= MAX_FIELDS:
+            continue
+        value = _skill_field_value(by_kind[kind])
+        if not value:
+            continue
+        embed.add_field(name=SKILL_KIND_TITLES[kind], value=value, inline=False)
+    if not embed.fields:
+        embed.add_field(
+            name="Passive Skills",
+            value="_No passive skills recorded for this form._",
+            inline=False,
+        )
+    return embed
+
+
+def _build_ultimate_section(form: sqlite3.Row, skills: list[sqlite3.Row]) -> discord.Embed:
+    embed = _new_header_embed(form)
+    ult = [s for s in skills if (s["kind"] or "") == "ultimate"]
+    value = _format_ultimate_block(ult) if ult else ""
+    if value:
+        embed.add_field(name="Ultimate", value=value, inline=False)
+    else:
+        embed.add_field(
+            name="Ultimate",
+            value="_No ultimate recorded for this form (may be unreleased)._",
             inline=False,
         )
     return embed
@@ -344,8 +381,12 @@ def build_section_embed(
 
     last_sync = repo.latest_sync_run(conn)
 
-    if section == "skills":
-        embed = _build_skills_section(form, repo.get_skills(conn, form_id))
+    if section == "actives":
+        embed = _build_actives_section(form, repo.get_skills(conn, form_id))
+    elif section == "passives":
+        embed = _build_passives_section(form, repo.get_skills(conn, form_id))
+    elif section == "ultimate":
+        embed = _build_ultimate_section(form, repo.get_skills(conn, form_id))
     elif section == "a4":
         embed = _build_a4_section(form, repo.get_equipment(conn, form_id))
     elif section == "info":

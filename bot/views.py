@@ -1,8 +1,9 @@
 """Interactive `discord.ui.View` for `/character`.
 
 The View carries a single `Select` dropdown that swaps the embed between
-"skills", "a4", and "info" sections. Each callback rebuilds the embed via
-`embeds.build_section_embed` and edits the message in place.
+"actives", "passives", "ultimate", "a4", and "info" sections. Each callback
+rebuilds the embed via `embeds.build_section_embed` and edits the message
+in place.
 
 The View has the discord.py default 180s timeout — after that the dropdown
 stops working and the user has to re-run `/character`. Persistent views
