@@ -159,6 +159,21 @@ def check_fts_searchable(conn) -> tuple[bool, str]:
     return True, f"FTS for 'Lloris*' returned {len(rows)} match(es)"
 
 
+def check_largo_ex3_present(conn) -> tuple[bool, str]:
+    """Regression: Largo's display block has a Wave label between name and rank."""
+    row = conn.execute(
+        "SELECT e.category, e.region, e.hyperlink_url "
+        "FROM enemies e "
+        "JOIN enemy_forms f ON f.enemy_id = e.id AND f.rank = 'EX3' "
+        "WHERE e.canonical_name = 'Largo' AND e.category = 'Lvl 75' "
+        "AND e.region = 'Osterra' "
+        "LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return False, "Largo Lvl 75 EX3 not found in DB"
+    return True, f"Largo EX3 present ({row['hyperlink_url']})"
+
+
 def check_lloris_ex3_against_screenshot(conn) -> tuple[bool, str]:
     """Spot-check: Sly Leader Lloris EX3 must match the user-provided screenshot.
 
@@ -255,6 +270,7 @@ def main() -> int:
         ("NPC single-rank shape",         lambda: check_npc_single_rank(conn)),
         ("stats present + HP sanity",     lambda: check_stats_present(conn)),
         ("FTS searchable",                lambda: check_fts_searchable(conn)),
+        ("Largo EX3 present",             lambda: check_largo_ex3_present(conn)),
         ("Lloris EX3 stats vs screenshot", lambda: check_lloris_ex3_against_screenshot(conn)),
         ("weaknesses present per form",    lambda: check_weaknesses_present(conn)),
         ("Lloris EX3 weaknesses vs screenshot", lambda: check_lloris_ex3_weaknesses(conn)),
