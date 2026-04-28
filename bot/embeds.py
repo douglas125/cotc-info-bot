@@ -192,7 +192,6 @@ SKILL_KIND_TITLES = {
     "active": "Active",
     "passive": "Passive",
     "divine": "TP",
-    "tp_passive": "Passive",
     "ex": "EX",
     "ultimate": "Ultimate",
     "latent": "Latent",
@@ -332,11 +331,8 @@ def _build_skill_kinds_section(
 ) -> discord.Embed:
     embed = _new_header_embed(form)
     by_kind = _group_by_kind(skills)
-    # tp_passive rows belong inside the Passive field of the passives
-    # section (rendered with a `TP` badge by _format_skill_line). Fold
-    # them into the passive group rather than spawning a separate field
-    # — they're a sibling of the rarity-unlocked passives, not a kind of
-    # their own from the user's perspective.
+    # Fold tp_passive into the passive group so it renders as a `TP`
+    # badge inside the Passive field, not a separate kind.
     if (
         "passive" in kind_order
         and "tp_passive" not in kind_order

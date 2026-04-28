@@ -174,9 +174,9 @@ def test_build_section_passives_includes_latent(tmp_db_path: Path) -> None:
 
 
 def test_build_section_passives_renders_tp_passive_with_badge(tmp_db_path: Path) -> None:
-    """A passive-section TP row (kind='divine', sp_cost=None) must render
-    inside the same "Passive" field as the rarity-unlocked passives, with
-    a `TP` badge that visually mirrors the `1⭐` / `3⭐` badges."""
+    """A tp_passive row must render inside the same "Passive" field as
+    the rarity-unlocked passives, with a `TP` badge that visually
+    mirrors the `1⭐` / `3⭐` badges."""
     conn = repo.connect(tmp_db_path)
     form_id = _seed_full_kit(conn)
     embed = embeds.build_section_embed(conn, form_id, "passives")
