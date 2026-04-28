@@ -212,6 +212,22 @@ def test_parse_display_tab_finds_block_with_rank_badge() -> None:
     assert b.hyperlink_url == "#gid=999&range=B4"
 
 
+def test_parse_display_tab_skips_wave_label_between_name_and_rank_badge() -> None:
+    """Multi-wave widgets label the wave near the rank badge; the name is farther left."""
+    spec = EnemyTabSpec(gid=999, name="Lvl 75", category="Lvl 75", region="Osterra")
+    rows: list[list[dict[str, Any]]] = [
+        [_cell() for _ in range(12)],
+        [_cell() for _ in range(12)],
+        [_cell() for _ in range(12)],
+        [_cell(), _cell("Largo"), _cell(), _cell("Wave 1"), _cell("EX3"),
+         _cell(), _cell(), _cell(), _cell(), _cell(), _cell(), _cell()],
+    ]
+    blocks = parse_display_tab(_sheet_from_rows(rows, gid=999), spec)
+    assert len(blocks) == 1
+    assert blocks[0].display_name == "Largo"
+    assert blocks[0].hyperlink_url == "#gid=999&range=B4"
+
+
 def test_parse_display_tab_extracts_weakness_formulas_single_position() -> None:
     """1-position block: weaknesses on row 6, formula cells like '=Sword'."""
     spec = EnemyTabSpec(gid=999, name="Lvl 75", category="Lvl 75", region="Osterra")

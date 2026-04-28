@@ -61,6 +61,7 @@ _DISPLAY_RANK_COL_OFFSET = 3
 _DISPLAY_BLOCK_HEIGHT = 13  # rows 3..15 are the block body
 
 _RANK_BADGE_RE = re.compile(r"^\s*(rank\s*[123]|ex\s*[123])\s*$", re.IGNORECASE)
+_DISPLAY_AUX_LABEL_RE = re.compile(r"^\s*wave\s+\d+\s*$", re.IGNORECASE)
 
 # Display-tab weakness icons are formula-named-range references like '=Sword'.
 # We whitelist what counts as a weakness so we don't accidentally pick up
@@ -300,13 +301,18 @@ def _detect_display_blocks(rows: list[list[dict[str, Any]]]) -> list[tuple[int, 
             if left >= len(name_row):
                 continue
             t = _cell_text(name_row[left])
-            if t and not _RANK_BADGE_RE.match(t):
+            if t and not _RANK_BADGE_RE.match(t) and not _is_display_aux_label(t):
                 name_col = left
                 break
         if name_col is None:
             continue
         blocks.append((name_col, rc))
     return blocks
+
+
+def _is_display_aux_label(text: str) -> bool:
+    """Return True for display metadata cells that are not enemy names."""
+    return bool(_DISPLAY_AUX_LABEL_RE.match(text))
 
 
 def _formula(cell: dict[str, Any]) -> str:
