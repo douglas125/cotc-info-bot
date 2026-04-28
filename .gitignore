@@ -31,6 +31,7 @@ env/
 # --- IDEs / OS junk -----------------------------------------------------
 .vscode/
 .idea/
+.claude/
 .DS_Store
 Thumbs.db
 desktop.ini
