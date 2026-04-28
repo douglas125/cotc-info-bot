@@ -239,12 +239,25 @@ NAME_ALIASES: dict[str, str] = {
     "Krauser":  "Clauser",
     "Araune":   "Alaune",     # JP↔EN transliteration drift
     "Elrica":   "Erika",      # JP↔EN transliteration drift
+    "Tithi":    "Titi",       # SEA spells the dancer 'Tithi'; Index has 'Titi'
 }
 
 
 def canonicalize_name(name: str) -> str:
     """Return the Index canonical name for any role-tab spelling we know about."""
     return NAME_ALIASES.get(name, name)
+
+
+_ALIAS_LOOKUP_CI: dict[str, str] = {k.casefold(): v for k, v in NAME_ALIASES.items()}
+
+
+def alias_to_canonical(name: str) -> str | None:
+    """Case-insensitive alias lookup. Returns the canonical Index name if
+    `name` is a known alias, else None. Used by the bot at query time so
+    users can find characters by alternate spellings (e.g. 'Krauser')."""
+    if not name:
+        return None
+    return _ALIAS_LOOKUP_CI.get(name.casefold())
 
 
 # Discord links and other constants useful in the UI footer.

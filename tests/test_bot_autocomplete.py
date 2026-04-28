@@ -152,6 +152,38 @@ def test_resolve_form_id_swaps_ex_position(tmp_db_path: Path) -> None:
     conn.close()
 
 
+def _seed_alias_target(conn) -> int:
+    ch = repo.upsert_character(conn, canonical_name="Clauser",
+                                base_role="merchant", base_weapon="spear")
+    return repo.insert_form(conn, character_id=ch, display_name="Clauser", rarity="5*")
+
+
+def test_resolve_form_id_via_alias(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    fid = _seed_alias_target(conn)
+    assert bot_commands._resolve_form_id(conn, "Krauser") == fid
+    conn.close()
+
+
+def test_resolve_form_id_via_alias_case_insensitive(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    fid = _seed_alias_target(conn)
+    assert bot_commands._resolve_form_id(conn, "krauser") == fid
+    assert bot_commands._resolve_form_id(conn, "KRAUSER") == fid
+    conn.close()
+
+
+def test_autocomplete_surfaces_alias(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    fid = _seed_alias_target(conn)
+    choices = bot_commands._autocomplete_forms(conn, current="Krau")
+    conn.close()
+    matches = [c for c in choices if int(c.value) == fid]
+    assert matches, f"expected Clauser via alias 'Krauser' for prefix 'Krau': {[c.name for c in choices]}"
+    assert "Clauser" in matches[0].name
+    assert "Krauser" in matches[0].name
+
+
 def test_filter_choices_caps_and_filters() -> None:
     values = [f"role-{i:02d}" for i in range(40)]
     out = bot_commands._filter_choices(values, current="")

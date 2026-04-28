@@ -68,6 +68,30 @@ def _lock() -> asyncio.Lock:
 # Form-name autocomplete (used by /character)
 # ----------------------------------------------------------------------------
 
+def _choice_for_form(
+    r: sqlite3.Row, alias_key: str | None = None,
+) -> app_commands.Choice[str]:
+    rarity_disp = embeds._rarity_label(r["rarity"]) if r["rarity"] else "?"
+    suffix = f" (a.k.a. {alias_key})" if alias_key else ""
+    label = f"{r['display_name']}{suffix} ({rarity_disp} · {r['base_role'] or '?'})"
+    if len(label) > 100:  # Discord caps Choice.name at 100 chars
+        label = label[:99] + "…"
+    return app_commands.Choice(name=label, value=str(r["id"]))
+
+
+def _exact_match_form_id(conn: sqlite3.Connection, name: str) -> int | None:
+    for variant in _ex_swap_variants(name):
+        row = conn.execute(
+            "SELECT id FROM character_forms "
+            "WHERE LOWER(display_name) = LOWER(?) "
+            "ORDER BY rarity DESC LIMIT 1",
+            (variant,),
+        ).fetchone()
+        if row:
+            return row["id"]
+    return None
+
+
 def _autocomplete_forms(conn: sqlite3.Connection, current: str) -> list[app_commands.Choice[str]]:
     """Look up display_names matching `current`, returning Choices keyed by form_id.
 
@@ -113,15 +137,40 @@ def _autocomplete_forms(conn: sqlite3.Connection, current: str) -> list[app_comm
             (AUTOCOMPLETE_LIMIT,),
         ))
 
+    alias_rows: list[tuple[str, sqlite3.Row]] = []
+    if current:
+        alias_canonicals: dict[str, str] = {}
+        for alias_key, canonical in config.NAME_ALIASES.items():
+            if current in alias_key.lower():
+                alias_canonicals.setdefault(canonical, alias_key)
+        if alias_canonicals:
+            placeholders = ",".join("?" * len(alias_canonicals))
+            extra = list(conn.execute(
+                f"SELECT f.id, f.display_name, f.rarity, c.base_role "
+                f"FROM character_forms f "
+                f"JOIN characters c ON c.id = f.character_id "
+                f"WHERE f.display_name IN ({placeholders}) "
+                f"ORDER BY f.rarity DESC, f.display_name",
+                list(alias_canonicals.keys()),
+            ))
+            for r in extra:
+                ak = alias_canonicals.get(r["display_name"])
+                if ak:
+                    alias_rows.append((ak, r))
+
     out: list[app_commands.Choice[str]] = []
+    seen_ids: set[int] = set()
     for r in rows:
-        rarity_disp = embeds._rarity_label(r["rarity"]) if r["rarity"] else "?"
-        label = f"{r['display_name']} ({rarity_disp} · {r['base_role'] or '?'})"
-        # Discord caps choice name at 100 chars.
-        if len(label) > 100:
-            label = label[:99] + "…"
-        out.append(app_commands.Choice(name=label, value=str(r["id"])))
-    return out
+        if r["id"] in seen_ids:
+            continue
+        seen_ids.add(r["id"])
+        out.append(_choice_for_form(r))
+    for alias_key, r in alias_rows:
+        if r["id"] in seen_ids:
+            continue
+        seen_ids.add(r["id"])
+        out.append(_choice_for_form(r, alias_key=alias_key))
+    return out[:AUTOCOMPLETE_LIMIT]
 
 
 def _resolve_form_id(conn: sqlite3.Connection, name_or_id: str) -> int | None:
@@ -139,18 +188,11 @@ def _resolve_form_id(conn: sqlite3.Connection, name_or_id: str) -> int | None:
         ).fetchone():
             return candidate
 
-    # Free-text fallback: exact display_name match (case-insensitive), or
-    # leftmost prefix match if exact misses. Try EX prefix↔suffix swap
-    # variants too so "Castti EX" resolves to stored "EX Castti".
-    for variant in _ex_swap_variants(raw):
-        row = conn.execute(
-            "SELECT id FROM character_forms "
-            "WHERE LOWER(display_name) = LOWER(?) "
-            "ORDER BY rarity DESC LIMIT 1",
-            (variant,),
-        ).fetchone()
-        if row:
-            return row["id"]
+    # Free-text fallback: exact, then leftmost prefix, then alias map.
+    # EX prefix↔suffix swap variants let "Castti EX" resolve to "EX Castti".
+    fid = _exact_match_form_id(conn, raw)
+    if fid is not None:
+        return fid
     for variant in _ex_swap_variants(raw):
         row = conn.execute(
             "SELECT id FROM character_forms "
@@ -160,6 +202,12 @@ def _resolve_form_id(conn: sqlite3.Connection, name_or_id: str) -> int | None:
         ).fetchone()
         if row:
             return row["id"]
+
+    canonical = config.alias_to_canonical(raw)
+    if canonical and canonical.lower() != raw.lower():
+        fid = _exact_match_form_id(conn, canonical)
+        if fid is not None:
+            return fid
     return None
 
 
