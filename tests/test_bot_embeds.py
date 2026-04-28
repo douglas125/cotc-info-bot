@@ -401,3 +401,108 @@ def test_feedback_results_embed_truncates_long_body(tmp_db_path: Path) -> None:
     conn.close()
     embed = embeds.feedback_results_to_embed(rows)
     assert len(embed.fields[0].value) <= embeds.FIELD_VALUE_LIMIT
+
+
+def test_split_bullets_round_trips_and_respects_limit() -> None:
+    """The splitter must (a) never exceed FIELD_VALUE_LIMIT per chunk,
+    (b) split only between bullets — concatenating chunks with ``\\n``
+    reproduces the original ``"\\n".join(bullets)``, and (c) actually
+    produce >1 chunk when the total would overflow.
+    """
+    bullets = [f"• Skill {i} " + ("x" * 200) for i in range(20)]
+    chunks = embeds._split_bullets_into_field_values(bullets)
+
+    assert len(chunks) >= 2  # 20 * ~210 chars > 1024 → must split
+    for c in chunks:
+        assert len(c) <= embeds.FIELD_VALUE_LIMIT
+        # The boundary landed on a bullet — no chunk starts mid-line.
+        assert c.startswith("• ")
+        # No ellipsis from a defensive _truncate path.
+        assert "…" not in c
+    assert "\n".join(chunks) == "\n".join(bullets)
+
+
+def test_split_bullets_single_bullet_word_boundary() -> None:
+    """A bullet longer than the cap must split at whitespace, not mid-word."""
+    body = " ".join([f"word{i}" for i in range(400)])  # >1024 chars
+    bullet = f"• {body}"
+    assert len(bullet) > embeds.FIELD_VALUE_LIMIT
+
+    chunks = embeds._split_bullets_into_field_values([bullet])
+
+    assert len(chunks) >= 2
+    for c in chunks:
+        assert len(c) <= embeds.FIELD_VALUE_LIMIT
+    # Every token in every chunk must be one of the original whole words —
+    # i.e. no token was cut in half.
+    original_tokens = set(bullet.split())
+    for c in chunks:
+        for tok in c.split():
+            assert tok in original_tokens, f"split mid-word: {tok!r}"
+
+
+def test_split_bullets_empty_input() -> None:
+    assert embeds._split_bullets_into_field_values([]) == []
+
+
+def test_build_section_actives_splits_overflowing_kit(tmp_db_path: Path) -> None:
+    """EX-Viola-shaped regression: an Actives list that exceeds 1024 chars
+    must render across multiple ``Active (n/N)`` fields with no truncation
+    marker, every chunk starting on a bullet."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="EXViola",
+                                base_role="scholar", base_weapon="tome")
+    form_id = repo.insert_form(
+        conn, character_id=ch, display_name="EX Viola", rarity="5*",
+        variant_kind="ex",
+    )
+    long_desc = (
+        "1x AoE Light (1x 180-735 Power), inflicts 15% Light Resistance "
+        "Down for 2 turns and also inflicts Blind for 2 turns."
+    )
+    skills = []
+    for i in range(1, 11):
+        skills.append({
+            "slot_order": i, "name": None, "sp_cost": 60 + i, "kind": "active",
+            "learn_board": (i % 6) or None, "tier_level": None,
+            "initial_use": None, "cooldown": None,
+            "description": long_desc,
+            "power_min": None, "power_max": None, "hits": None,
+        })
+    repo.insert_skills(conn, form_id, skills)
+
+    embed = embeds.build_section_embed(conn, form_id, "actives")
+    conn.close()
+    assert embed is not None
+
+    active_fields = [f for f in embed.fields if f.name.startswith("Active")]
+    assert len(active_fields) >= 2, "long Actives kit should span multiple fields"
+
+    n = len(active_fields)
+    for idx, f in enumerate(active_fields, start=1):
+        assert f.name == f"Active ({idx}/{n})"
+        assert len(f.value) <= embeds.FIELD_VALUE_LIMIT
+        assert f.value.startswith("• ")
+        assert "…" not in f.value
+
+    # Round-trip: joining all the Active chunks reproduces the full bullet
+    # list, in order, with no skill dropped.
+    rejoined = "\n".join(f.value for f in active_fields)
+    expected_bullets = [
+        embeds._format_skill_line(row) for row in repo.get_skills(
+            repo.connect(tmp_db_path), form_id,
+        ) if (row["kind"] or "") == "active"
+    ]
+    assert rejoined == "\n".join(expected_bullets)
+
+
+def test_build_section_actives_single_field_when_short(tmp_db_path: Path) -> None:
+    """Regression: a normal-length kit must still render as a single
+    ``Active`` field with no ``(n/N)`` suffix."""
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed(conn)
+    embed = embeds.build_section_embed(conn, form_id, "actives")
+    conn.close()
+    active_fields = [f for f in embed.fields if f.name.startswith("Active")]
+    assert len(active_fields) == 1
+    assert active_fields[0].name == "Active"
