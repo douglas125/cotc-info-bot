@@ -15,6 +15,7 @@ def test_all_weakness_png_assets_exist() -> None:
 
 
 def test_render_weakness_panel_outputs_valid_png() -> None:
+    assert enemy_images.ICON_SIZE == 20
     rendered = enemy_images.render_weakness_panel(
         filename="weaknesses.png",
         stats_rows=[

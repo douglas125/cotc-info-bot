@@ -8,16 +8,16 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
+from bot import weakness_icons
 
-ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
-ICON_SIZE = 28
+ICON_SIZE = weakness_icons.ICON_SIZE
 ICON_GAP = 4
 ROW_GAP = 8
 PAD_X = 12
 PAD_Y = 10
 LABEL_W = 132
-SHIELD_W = 54
-ROW_H = 34
+SHIELD_W = 50
+ROW_H = 30
 
 BG = (43, 45, 49, 255)
 ROW_BG = (56, 58, 64, 255)
@@ -26,23 +26,7 @@ MUTED = (181, 186, 193, 255)
 SHIELD = (114, 137, 218, 255)
 SHIELD_EDGE = (216, 222, 233, 255)
 
-ICON_FILES: dict[str, str] = {
-    "Sword": "weakness_sword.png",
-    "Spear": "weakness_spear.png",
-    "Polearm": "weakness_spear.png",
-    "Dagger": "weakness_dagger.png",
-    "Axe": "weakness_axe.png",
-    "Bow": "weakness_bow.png",
-    "Tome": "weakness_tome.png",
-    "Staff": "weakness_staff.png",
-    "Fan": "weakness_fan.png",
-    "Fire": "weakness_fire.png",
-    "Ice": "weakness_ice.png",
-    "Lightning": "weakness_lightning.png",
-    "Wind": "weakness_wind.png",
-    "Light": "weakness_light.png",
-    "Dark": "weakness_dark.png",
-}
+ICON_FILES = weakness_icons.ICON_FILES
 
 
 @dataclass(frozen=True)
@@ -76,14 +60,7 @@ def _fit_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, m
 
 
 def _load_icon(label: str) -> Image.Image | None:
-    filename = ICON_FILES.get(label)
-    if filename is None:
-        return None
-    path = ASSETS_DIR / filename
-    if not path.exists():
-        return None
-    with Image.open(path) as image:
-        return image.convert("RGBA").resize((ICON_SIZE, ICON_SIZE), Image.Resampling.NEAREST)
+    return weakness_icons.load_icon(label, ICON_SIZE)
 
 
 def _draw_shield(draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
@@ -150,7 +127,7 @@ def render_weakness_panel(
         for label in weaknesses_by_pos[position]:
             icon = _load_icon(label)
             if icon is not None:
-                image.alpha_composite(icon, (icon_x, y + 3))
+                image.alpha_composite(icon, (icon_x, y + (ROW_H - ICON_SIZE) // 2))
             icon_x += ICON_SIZE + ICON_GAP
         y += ROW_H + ROW_GAP
 

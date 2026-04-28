@@ -2,8 +2,8 @@
 
 The View carries a single `Select` dropdown that swaps the embed between
 "actives", "passives", "ultimate", "a4", and "info" sections. Each callback
-rebuilds the embed via `embeds.build_section_embed` and edits the message
-in place.
+rebuilds the embed and rendered section attachment via
+`embeds.build_character_message` and edits the message in place.
 
 The View has the discord.py default 180s timeout — after that the dropdown
 stops working and the user has to re-run `/character`. Persistent views
@@ -52,8 +52,8 @@ class _SectionSelect(discord.ui.Select["CharacterView"]):
         section: embeds.Section = self.values[0]  # type: ignore[assignment]
 
         conn = bot_db.conn()
-        embed = embeds.build_section_embed(conn, view.form_id, section)
-        if embed is None:
+        message = embeds.build_character_message(conn, view.form_id, section)
+        if message is None:
             await interaction.response.send_message(
                 FORM_REMOVED_MSG, ephemeral=True,
             )
@@ -63,7 +63,18 @@ class _SectionSelect(discord.ui.Select["CharacterView"]):
         # option (Discord clears the visible choice after a callback otherwise).
         view.clear_items()
         view.add_item(_SectionSelect(current=section))
-        await interaction.response.edit_message(embed=embed, view=view)
+        if message.file is None:
+            await interaction.response.edit_message(
+                embed=message.embed,
+                attachments=[],
+                view=view,
+            )
+        else:
+            await interaction.response.edit_message(
+                embed=message.embed,
+                attachments=[message.file],
+                view=view,
+            )
 
 
 class CharacterView(discord.ui.View):
