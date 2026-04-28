@@ -337,7 +337,7 @@ def register(tree: app_commands.CommandTree) -> None:
         interaction: discord.Interaction,
         text: app_commands.Range[str, 1, FEEDBACK_MAX_LEN],
     ) -> None:
-        body = (text or "").strip()
+        body = text.strip()
         if not body:
             await interaction.response.send_message(
                 "Feedback can't be empty.", ephemeral=True,
@@ -345,12 +345,17 @@ def register(tree: app_commands.CommandTree) -> None:
             return
 
         conn = bot_db.conn()
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=FEEDBACK_RATE_WINDOW_SEC)
-        cutoff_iso = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
-        recent = repo.recent_feedback_timestamps(conn, interaction.user.id, cutoff_iso)
+        now = datetime.now(timezone.utc)
+        cutoff_iso = (now - timedelta(seconds=FEEDBACK_RATE_WINDOW_SEC)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        recent = repo.recent_feedback_timestamps(
+            conn, interaction.user.id, cutoff_iso, limit=FEEDBACK_RATE_LIMIT,
+        )
         if len(recent) >= FEEDBACK_RATE_LIMIT:
-            oldest = min(recent)
-            elapsed = (datetime.now(timezone.utc) - _parse_iso(oldest)).total_seconds()
+            # `recent` is ordered DESC, so the last element is the oldest in
+            # the window — that's when the user can next submit.
+            elapsed = (now - _parse_iso(recent[-1])).total_seconds()
             retry_in = max(1, FEEDBACK_RATE_WINDOW_SEC - int(elapsed))
             await interaction.response.send_message(
                 f"Slow down — you've hit the {FEEDBACK_RATE_LIMIT}-per-"
@@ -390,20 +395,9 @@ def register(tree: app_commands.CommandTree) -> None:
                 "No feedback yet.", ephemeral=True,
             )
             return
-        embed = discord.Embed(
-            title=f"Latest {len(rows)} feedback submission(s)",
-            color=discord.Color.blurple(),
+        await interaction.response.send_message(
+            embed=embeds.feedback_results_to_embed(rows), ephemeral=True,
         )
-        for r in rows:
-            body = r["feedback_text"] or ""
-            if len(body) > 900:
-                body = body[:899] + "…"
-            embed.add_field(
-                name=f"#{r['id']} · {r['username']} · {r['submitted_at']}",
-                value=body or "—",
-                inline=False,
-            )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @tree.command(
         name="feedback_clear",
@@ -422,12 +416,9 @@ def register(tree: app_commands.CommandTree) -> None:
             )
             return
         conn = bot_db.conn()
-        pending = conn.execute(
-            "SELECT COUNT(*) FROM feedback_submissions"
-        ).fetchone()[0]
         if not confirm:
             await interaction.response.send_message(
-                f"{pending} feedback entries on file. "
+                f"{repo.count_feedback(conn)} feedback entries on file. "
                 f"Re-run with `confirm:true` to delete them all.",
                 ephemeral=True,
             )

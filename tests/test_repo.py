@@ -212,9 +212,11 @@ def test_feedback_insert_list_clear_roundtrip(tmp_db_path: Path) -> None:
     assert rows[0]["guild_id"] is None
     assert rows[1]["guild_id"] == 999
 
+    assert repo.count_feedback(conn) == 2
     deleted = repo.clear_feedback(conn)
     assert deleted == 2
     assert repo.list_feedback(conn) == []
+    assert repo.count_feedback(conn) == 0
     conn.close()
 
 
@@ -254,16 +256,24 @@ def test_recent_feedback_timestamps_window(tmp_db_path: Path) -> None:
     )
 
     cutoff = "2026-04-27T12:00:00Z"   # everything in the same minute is recent
-    recent = repo.recent_feedback_timestamps(conn, user_id=42, since_iso=cutoff)
+    recent = repo.recent_feedback_timestamps(
+        conn, user_id=42, since_iso=cutoff, limit=10,
+    )
     assert len(recent) == 3            # the "old" row is excluded
     # Ordered newest first
     assert recent[0] == "2026-04-27T12:00:55Z"
     assert recent[-1] == "2026-04-27T12:00:30Z"
 
-    # Different user ⇒ none of theirs counted.
-    assert repo.recent_feedback_timestamps(conn, user_id=42, since_iso="2026-04-27T12:00:50Z") == [
-        "2026-04-27T12:00:55Z",
-    ]
+    # Limit caps the result so a spammy user can't force an unbounded read.
+    capped = repo.recent_feedback_timestamps(
+        conn, user_id=42, since_iso=cutoff, limit=2,
+    )
+    assert capped == ["2026-04-27T12:00:55Z", "2026-04-27T12:00:45Z"]
+
+    # Different user filter still works.
+    assert repo.recent_feedback_timestamps(
+        conn, user_id=42, since_iso="2026-04-27T12:00:50Z", limit=10,
+    ) == ["2026-04-27T12:00:55Z"]
     conn.close()
 
 

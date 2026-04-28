@@ -390,14 +390,20 @@ def clear_feedback(conn: sqlite3.Connection) -> int:
     return cur.rowcount
 
 
+def count_feedback(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) FROM feedback_submissions").fetchone()[0]
+
+
 def recent_feedback_timestamps(
-    conn: sqlite3.Connection, user_id: int, since_iso: str,
+    conn: sqlite3.Connection, user_id: int, since_iso: str, *, limit: int,
 ) -> list[str]:
-    """Timestamps of this user's submissions newer than `since_iso`. Used by
-    the per-user rate limit to count submissions in the rolling window."""
+    """Timestamps of this user's submissions newer than `since_iso`, newest first.
+
+    Bounded by `limit` so a spammy user can't force an unbounded read — the
+    rate-limit caller only needs to know whether the window is full."""
     return [r[0] for r in conn.execute(
         "SELECT submitted_at FROM feedback_submissions "
         "WHERE user_id = ? AND submitted_at > ? "
-        "ORDER BY submitted_at DESC",
-        (user_id, since_iso),
+        "ORDER BY submitted_at DESC LIMIT ?",
+        (user_id, since_iso, limit),
     )]
