@@ -15,6 +15,7 @@ import discord
 from bot import enemy_images
 from bot.embeds import (
     EMBED_DESCRIPTION_LIMIT,
+    FIELD_NAME_LIMIT,
     FIELD_VALUE_LIMIT,
     TITLE_LIMIT,
     _attach_footer,
@@ -96,10 +97,24 @@ def default_rank(ranks: list[Rank]) -> Rank | None:
     return sorted(ranks, key=lambda r: RANK_ORDER.get(r, 99))[0]
 
 
-def _build_stats_field(stats_rows: list[sqlite3.Row]) -> str | None:
-    """Render the stats grid as a fixed-width Discord code block."""
+def _format_stat_value(value: str) -> str:
+    """Add thousands separators to integer stat values; pass everything else through."""
+    stripped = value.lstrip("-").replace(",", "")
+    if stripped and stripped.isdigit():
+        return format(int(value.replace(",", "")), ",")
+    return value
+
+
+def _build_member_stat_fields(
+    stats_rows: list[sqlite3.Row],
+) -> list[tuple[str, str, bool]]:
+    """Build one (name, value, inline) tuple per member position.
+
+    Each member's stats render as a code block with one stat per line, names
+    left-padded and values right-padded so digits align within that block.
+    """
     if not stats_rows:
-        return None
+        return []
     by_pos: dict[int, dict[str, str]] = {}
     pos_labels: dict[int, str] = {}
     for row in stats_rows:
@@ -108,36 +123,23 @@ def _build_stats_field(stats_rows: list[sqlite3.Row]) -> str | None:
             pos_labels[row["position"]] = row["member_name"]
     positions = sorted(by_pos.keys())
     if not positions:
-        return None
+        return []
 
-    stat_names: list[str] = []
-    seen_stats: set[str] = set()
+    inline = len(positions) > 1
+    fields: list[tuple[str, str, bool]] = []
     for pos in positions:
-        for stat in by_pos[pos]:
-            if stat not in seen_stats:
-                seen_stats.add(stat)
-                stat_names.append(stat)
-    stat_names.sort(key=_stat_sort_key)
-
-    headers = [pos_labels.get(p, f"#{p + 1}") for p in positions]
-    short_headers = [h if len(h) <= 14 else h[:13] + "..." for h in headers]
-    name_width = min(max((len(s) for s in stat_names), default=4), 12)
-    col_widths = [max(len(h), 7) for h in short_headers]
-    for stat in stat_names:
-        for p_i, pos in enumerate(positions):
-            col_widths[p_i] = max(col_widths[p_i], len(by_pos[pos].get(stat, "-")))
-
-    lines = [
-        f"{'':<{name_width}}  "
-        + "  ".join(h.rjust(w) for h, w in zip(short_headers, col_widths))
-    ]
-    for stat in stat_names:
-        cells = [
-            by_pos[pos].get(stat, "-").rjust(col_widths[p_i])
-            for p_i, pos in enumerate(positions)
-        ]
-        lines.append(f"{stat[:name_width]:<{name_width}}  " + "  ".join(cells))
-    return _truncate("```\n" + "\n".join(lines) + "\n```", FIELD_VALUE_LIMIT)
+        member_stats = by_pos[pos]
+        ordered = sorted(member_stats.keys(), key=_stat_sort_key)
+        formatted = [(s, _format_stat_value(member_stats[s])) for s in ordered]
+        name_width = max((len(s) for s, _ in formatted), default=4)
+        value_width = max((len(v) for _, v in formatted), default=0)
+        body = "\n".join(
+            f"{s:<{name_width}}  {v:>{value_width}}" for s, v in formatted
+        )
+        value = _truncate("```\n" + body + "\n```", FIELD_VALUE_LIMIT)
+        name = pos_labels.get(pos, f"#{pos + 1}")[:FIELD_NAME_LIMIT]
+        fields.append((name, value, inline))
+    return fields
 
 
 def _new_enemy_header_embed(enemy: sqlite3.Row, rank_label: str) -> discord.Embed:
@@ -174,9 +176,8 @@ def _build_enemy_parts(
     stats_rows = repo.get_enemy_member_stats(conn, form["id"])
     weakness_rows = repo.get_enemy_weaknesses(conn, form["id"])
     embed = _new_enemy_header_embed(enemy, RANK_LABELS.get(rank, rank))
-    stats_field = _build_stats_field(stats_rows)
-    if stats_field:
-        embed.add_field(name="Stats", value=stats_field, inline=False)
+    for name, value, inline in _build_member_stat_fields(stats_rows):
+        embed.add_field(name=name, value=value, inline=inline)
     _attach_footer(embed, repo.latest_sync_run(conn))
     return embed, stats_rows, weakness_rows
 
