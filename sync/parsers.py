@@ -86,6 +86,16 @@ def _col_letters_to_index(letters: str) -> int:
     return n - 1
 
 
+def _index_to_col_letters(c: int) -> str:
+    """Inverse of `_col_letters_to_index`. 0->'A', 25->'Z', 26->'AA', ..."""
+    s = ""
+    n = c + 1
+    while n > 0:
+        n, rem = divmod(n - 1, 26)
+        s = chr(ord("A") + rem) + s
+    return s
+
+
 @dataclass
 class Anchor:
     gid: int

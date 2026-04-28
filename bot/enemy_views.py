@@ -30,7 +30,7 @@ class _RankSelect(discord.ui.Select["EnemyView"]):
         options = [
             discord.SelectOption(
                 label=enemy_embeds.RANK_LABELS[r],
-                description=enemy_embeds.RANK_DESCRIPTIONS[r] or None,
+                description=enemy_embeds.RANK_DESCRIPTIONS[r],
                 value=r,
                 default=(r == current),
             )

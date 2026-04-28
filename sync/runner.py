@@ -210,16 +210,15 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             repo.rebuild_fts(conn)
 
             progress("Parsing enemy spreadsheet...")
-            enemies = parse_enemies(enemy_payload, ENEMY_DATA_TAB_GIDS)
-            unmatched = list(getattr(parse_enemies, "unmatched", []) or [])
-            for name, tab in unmatched:
+            enemy_parse = parse_enemies(enemy_payload, ENEMY_DATA_TAB_GIDS)
+            for name, tab in enemy_parse.unmatched:
                 progress(f"  WARN: enemy display block unmatched: '{name}' on tab '{tab}'")
-            progress(f"  Parsed {len(enemies)} enemies "
-                     f"({sum(1 for e in enemies if e.is_npc)} NPCs).")
+            progress(f"  Parsed {len(enemy_parse.enemies)} enemies "
+                     f"({sum(1 for e in enemy_parse.enemies if e.is_npc)} NPCs).")
 
             progress("Writing enemy data...")
             repo.clear_enemy_tables(conn)
-            for enemy in enemies:
+            for enemy in enemy_parse.enemies:
                 enemy_id = repo.upsert_enemy(
                     conn,
                     canonical_name=enemy.canonical_name,
@@ -257,7 +256,8 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
         progress(f"Sync OK. Forms={c['character_forms']} Skills={c['skills']} "
                  f"Equipment={c['equipment']} Affinities={c['character_affinities']} "
                  f"Enemies={c['enemies']} EnemyForms={c['enemy_forms']}.")
-        return {"run_id": run_id, "status": "ok", "unmatched_enemies": unmatched, **c}
+        return {"run_id": run_id, "status": "ok",
+                "unmatched_enemies": list(enemy_parse.unmatched), **c}
 
     except Exception as exc:
         repo.finish_sync_run(conn, run_id, status="error", error=str(exc))

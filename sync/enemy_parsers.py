@@ -36,7 +36,7 @@ from config import (
     ENEMY_NPC_TAB_GIDS,
 )
 from sync.fetch import iter_rows, sheet_by_gid
-from sync.parsers import _cell_color_hex, _cell_text
+from sync.parsers import _cell_color_hex, _cell_text, _index_to_col_letters
 
 
 # --- constants discovered by the probe -------------------------------------
@@ -410,16 +410,6 @@ def parse_npc_display_tab(sheet: dict[str, Any], spec: EnemyTabSpec) -> list[Dis
     return out
 
 
-def _index_to_col_letters(c: int) -> str:
-    """0->A, 25->Z, 26->AA, ..."""
-    s = ""
-    n = c + 1
-    while n > 0:
-        n, rem = divmod(n - 1, 26)
-        s = chr(ord("A") + rem) + s
-    return s
-
-
 # --- name reconciliation ----------------------------------------------------
 
 def _normalize(s: str) -> str:
@@ -445,57 +435,82 @@ def _squish(s: str) -> str:
     return s.lower()
 
 
+@dataclass(frozen=True)
+class _NameIndex:
+    """Pre-computed lookups over a region's data-tab encounter names.
+
+    Build once per region in `parse_all` so that reconciling N display blocks
+    against M data keys stays O(N + M) rather than O(N * M) re-normalizations.
+    """
+    by_normalized: dict[str, str]
+    by_squished:   dict[str, str]
+
+
+def _build_name_index(data_keys: list[str]) -> _NameIndex:
+    return _NameIndex(
+        by_normalized={_normalize(k): k for k in data_keys},
+        by_squished=  {_squish(k):    k for k in data_keys},
+    )
+
+
 def reconcile_display_to_data(
     display_name: str,
-    data_keys: list[str],
+    data_keys: list[str] | _NameIndex,
 ) -> str | None:
     """Return the data-tab encounter key matching this display name, or None.
 
-    Strategy:
-      1. Exact match on normalized strings.
-      2. Explicit alias from config.ENEMY_NAME_ALIASES.
+    Strategy (in priority order):
+      1. Exact normalized match.
+      2. Explicit alias from `config.ENEMY_NAME_ALIASES`.
       3. Whitespace-insensitive equality ('NewDelsta' == 'New Delsta').
-      4. Substring containment (data key squished is a substring of display).
-      5. Reverse substring (display squished is a substring of data key).
+      4. Longest data key that's a substring of the display name.
+      5. Display name is a substring of some data key — pick the shortest
+         such key (closest to the display name's length).
+
+    `data_keys` accepts either a raw list (built into a _NameIndex on the fly)
+    or a pre-computed `_NameIndex` for hot-path callers.
     """
+    idx = data_keys if isinstance(data_keys, _NameIndex) else _build_name_index(data_keys)
     norm_display = _normalize(display_name)
-    norm_keys = {_normalize(k): k for k in data_keys}
-    if norm_display in norm_keys:
-        return norm_keys[norm_display]
-    aliased = ENEMY_NAME_ALIASES.get(display_name) or ENEMY_NAME_ALIASES.get(norm_display)
-    if aliased and _normalize(aliased) in norm_keys:
-        return norm_keys[_normalize(aliased)]
+    if norm_display in idx.by_normalized:
+        return idx.by_normalized[norm_display]
+    aliased = ENEMY_NAME_ALIASES.get(display_name)
+    if aliased and _normalize(aliased) in idx.by_normalized:
+        return idx.by_normalized[_normalize(aliased)]
     squish_display = _squish(display_name)
-    squish_to_original: dict[str, str] = {_squish(k): k for k in data_keys}
-    if squish_display in squish_to_original:
-        return squish_to_original[squish_display]
-    candidates = [
+    if squish_display in idx.by_squished:
+        return idx.by_squished[squish_display]
+    # Substring fallback: prefer the longest data key contained in the display.
+    contained = [
         (len(sk), original)
-        for sk, original in squish_to_original.items()
+        for sk, original in idx.by_squished.items()
         if sk and sk in squish_display
     ]
-    if candidates:
-        candidates.sort(reverse=True)
-        return candidates[0][1]
-    candidates = [
-        (len(squish_display), original)
-        for sk, original in squish_to_original.items()
+    if contained:
+        return max(contained)[1]
+    # Reverse substring: display contained inside a data key — prefer the
+    # shortest such key (closest match to the display name's length).
+    containing = [
+        (len(sk), original)
+        for sk, original in idx.by_squished.items()
         if squish_display and squish_display in sk
     ]
-    if candidates:
-        candidates.sort(reverse=True)
-        return candidates[0][1]
+    if containing:
+        return min(containing)[1]
     return None
 
 
 # --- top-level orchestrator -------------------------------------------------
 
-# Map data-tab gid → region label (used to scope name reconciliation to the
-# correct data tab — Solistia displays look up Solistia data, etc.).
-_DATA_TAB_GID_BY_REGION: dict[str, int] = {}
+@dataclass
+class ParseResult:
+    """Output of `parse_all`: the merged enemies plus any unmatched display blocks."""
+    enemies: list[ParsedEnemy] = field(default_factory=list)
+    # (display_name, source_tab_name) for each block we couldn't bind to data.
+    unmatched: list[tuple[str, str]] = field(default_factory=list)
 
 
-def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> list[ParsedEnemy]:
+def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseResult:
     """Top-level: produce a list of fully-merged ParsedEnemy records.
 
     `data_tab_gids` maps region label ('Osterra' | 'Solistia' | 'NPCs') to the
@@ -517,9 +532,16 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> list[Pa
         if sheet is not None:
             npc_data = parse_npc_data_tab(sheet)
 
-    # 2. Parse display tabs.
-    parsed: list[ParsedEnemy] = []
-    unmatched_display: list[tuple[str, str]] = []
+    # 2. Pre-compute name lookups once per region so reconcile is O(1) per
+    #    display block instead of O(N) per call.
+    region_indexes = {
+        region: _build_name_index(list(encounters.keys()))
+        for region, encounters in encounters_by_region.items()
+    }
+    npc_index = _build_name_index(list(npc_data.keys()))
+
+    # 3. Walk display tabs and merge each block with its data-tab match.
+    result = ParseResult()
     for spec in ENEMIES_TABS:
         sheet = sheet_by_gid(payload, spec.gid)
         if sheet is None:
@@ -530,10 +552,9 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> list[Pa
             blocks = parse_display_tab(sheet, spec)
         for block in blocks:
             if block.is_npc:
-                # Look up the NPC by name in the flat NPC data.
-                key = reconcile_display_to_data(block.display_name, list(npc_data.keys()))
+                key = reconcile_display_to_data(block.display_name, npc_index)
                 if key is None:
-                    unmatched_display.append((block.display_name, spec.name))
+                    result.unmatched.append((block.display_name, spec.name))
                     continue
                 npc = npc_data[key]
                 rank_stats = {
@@ -543,7 +564,7 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> list[Pa
                         for stat, val in npc.stats.items()
                     ]
                 }
-                parsed.append(ParsedEnemy(
+                result.enemies.append(ParsedEnemy(
                     canonical_name=block.display_name,
                     category=block.category,
                     region=block.region,
@@ -557,15 +578,15 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> list[Pa
                 ))
                 continue
             # Ranked enemy: look up in the corresponding region's data tab.
-            region_encounters = encounters_by_region.get(block.region or "")
-            if region_encounters is None:
-                unmatched_display.append((block.display_name, spec.name))
+            region_index = region_indexes.get(block.region or "")
+            if region_index is None:
+                result.unmatched.append((block.display_name, spec.name))
                 continue
-            key = reconcile_display_to_data(block.display_name, list(region_encounters.keys()))
+            key = reconcile_display_to_data(block.display_name, region_index)
             if key is None:
-                unmatched_display.append((block.display_name, spec.name))
+                result.unmatched.append((block.display_name, spec.name))
                 continue
-            encounter = region_encounters[key]
+            encounter = encounters_by_region[block.region][key]
             rank_stats: dict[str, list[dict[str, Any]]] = {rk: [] for rk in _RANK_KEYS}
             for pos, member in enumerate(encounter.members):
                 for rank_key in _RANK_KEYS:
@@ -577,12 +598,11 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> list[Pa
                             "stat_name": stat_name,
                             "stat_value": stat_value,
                         })
-            # Drop ranks with no data (some encounters may be incomplete).
             rank_stats = {k: v for k, v in rank_stats.items() if v}
             if not rank_stats:
-                unmatched_display.append((block.display_name, spec.name))
+                result.unmatched.append((block.display_name, spec.name))
                 continue
-            parsed.append(ParsedEnemy(
+            result.enemies.append(ParsedEnemy(
                 canonical_name=block.display_name,
                 category=block.category,
                 region=block.region,
@@ -594,12 +614,7 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> list[Pa
                 rank_stats=rank_stats,
                 weaknesses_by_position=block.weaknesses_by_position,
             ))
-    if unmatched_display:
-        # Surface as an attribute on the result for the runner/verifier to log.
-        parse_all.unmatched = unmatched_display  # type: ignore[attr-defined]
-    else:
-        parse_all.unmatched = []  # type: ignore[attr-defined]
-    return parsed
+    return result
 
 
 def rank_order(rank_key: str) -> int:

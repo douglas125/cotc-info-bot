@@ -21,6 +21,7 @@ from bot.embeds import (
     TITLE_LIMIT,
     _attach_footer,
     _color_from_hex,
+    _safe_url,
     _truncate,
 )
 from config import ENEMIES_SPREADSHEET_URL
@@ -37,12 +38,12 @@ RANK_LABELS: dict[Rank, str] = {
     "EX3":     "EX 3",
     "Default": "Default",
 }
-RANK_DESCRIPTIONS: dict[Rank, str] = {
+RANK_DESCRIPTIONS: dict[Rank, str | None] = {
     "Rank1":   "Lowest difficulty",
-    "Rank2":   "",
-    "Rank3":   "",
+    "Rank2":   None,
+    "Rank3":   None,
     "EX1":     "Endgame difficulty",
-    "EX2":     "",
+    "EX2":     None,
     "EX3":     "Highest difficulty",
     "Default": "Single-stat NPC",
 }
@@ -55,26 +56,18 @@ _STAT_DISPLAY_ORDER: tuple[str, ...] = (
     "HP", "Shields", "P. Atk", "P. Def", "E. Atk", "E. Def",
     "Speed", "Crit", "CritDef", "Equip Atk",
 )
+_STAT_RANK: dict[str, int] = {s: i for i, s in enumerate(_STAT_DISPLAY_ORDER)}
 
 
 _SHEET_EDIT_URL = f"{ENEMIES_SPREADSHEET_URL}/edit"
 
 
 def _safe_enemy_url(url: str | None) -> str | None:
-    """Mirror of `bot.embeds._safe_url` but for the enemy spreadsheet."""
-    if not url:
-        return None
-    if url.startswith(("http://", "https://")):
-        return url
-    if url.startswith("#"):
-        return _SHEET_EDIT_URL + url
-    return None
+    return _safe_url(url, base_edit_url=_SHEET_EDIT_URL)
 
 
 def _stat_sort_key(stat_name: str) -> tuple[int, str]:
-    if stat_name in _STAT_DISPLAY_ORDER:
-        return (_STAT_DISPLAY_ORDER.index(stat_name), stat_name)
-    return (len(_STAT_DISPLAY_ORDER), stat_name)
+    return (_STAT_RANK.get(stat_name, len(_STAT_RANK)), stat_name)
 
 
 def available_ranks(conn: sqlite3.Connection, enemy_id: int) -> list[Rank]:
@@ -96,10 +89,10 @@ def default_rank(ranks: list[Rank]) -> Rank | None:
     return sorted(ranks, key=lambda r: RANK_ORDER.get(r, 99))[0]
 
 
-def _build_stats_field(stats_rows: list[sqlite3.Row]) -> tuple[str | None, list[str]]:
-    """Return (stats_field_value, position_labels)."""
+def _build_stats_field(stats_rows: list[sqlite3.Row]) -> str | None:
+    """Render the stats grid as a fixed-width Discord code block."""
     if not stats_rows:
-        return None, []
+        return None
     by_pos: dict[int, dict[str, str]] = {}
     pos_labels: dict[int, str] = {}
     for r in stats_rows:
@@ -108,8 +101,7 @@ def _build_stats_field(stats_rows: list[sqlite3.Row]) -> tuple[str | None, list[
             pos_labels[r["position"]] = r["member_name"]
     positions = sorted(by_pos.keys())
     if not positions:
-        return None, []
-    # Collect the union of stat names across positions, in display order.
+        return None
     stat_names: list[str] = []
     seen_stats: set[str] = set()
     for pos in positions:
@@ -118,34 +110,25 @@ def _build_stats_field(stats_rows: list[sqlite3.Row]) -> tuple[str | None, list[
                 seen_stats.add(stat)
                 stat_names.append(stat)
     stat_names.sort(key=_stat_sort_key)
-    # Build a code-block table:
-    #     STAT          POS0_LABEL   POS1_LABEL
-    #     HP            1,143,210    822,762
-    #     P. Atk        1,752        1,344
     headers = [pos_labels.get(p, f"#{p+1}") for p in positions]
-    # Truncate long names so the table stays narrow enough for Discord mobile.
     short_headers = [h if len(h) <= 14 else h[:13] + "…" for h in headers]
-    name_width = max((len(s) for s in stat_names), default=4)
-    name_width = min(name_width, 12)
+    name_width = min(max((len(s) for s in stat_names), default=4), 12)
     col_widths = [max(len(h), 7) for h in short_headers]
-    for s_i, stat in enumerate(stat_names):
+    for stat in stat_names:
         for p_i, pos in enumerate(positions):
-            v = by_pos[pos].get(stat, "—")
-            col_widths[p_i] = max(col_widths[p_i], len(v))
-    lines: list[str] = []
-    header_line = f"{'':<{name_width}}  " + "  ".join(
-        h.rjust(w) for h, w in zip(short_headers, col_widths)
-    )
-    lines.append(header_line)
+            col_widths[p_i] = max(col_widths[p_i], len(by_pos[pos].get(stat, "—")))
+    lines = [
+        f"{'':<{name_width}}  " + "  ".join(
+            h.rjust(w) for h, w in zip(short_headers, col_widths)
+        )
+    ]
     for stat in stat_names:
         cells = [
             by_pos[pos].get(stat, "—").rjust(col_widths[p_i])
             for p_i, pos in enumerate(positions)
         ]
         lines.append(f"{stat[:name_width]:<{name_width}}  " + "  ".join(cells))
-    table = "```\n" + "\n".join(lines) + "\n```"
-    pos_labels_list = [pos_labels.get(p, f"#{p+1}") for p in positions]
-    return _truncate(table, FIELD_VALUE_LIMIT), pos_labels_list
+    return _truncate("```\n" + "\n".join(lines) + "\n```", FIELD_VALUE_LIMIT)
 
 
 def _build_weaknesses_field(
@@ -222,7 +205,7 @@ def build_enemy_embed(
     weakness_rows = repo.get_enemy_weaknesses(conn, form["id"])
     rank_label = RANK_LABELS.get(rank, rank)
     embed = _new_enemy_header_embed(enemy, rank_label)
-    stats_field, _pos_labels = _build_stats_field(stats_rows)
+    stats_field = _build_stats_field(stats_rows)
     if stats_field:
         embed.add_field(name="Stats", value=stats_field, inline=False)
     weaknesses_field = _build_weaknesses_field(stats_rows, weakness_rows)

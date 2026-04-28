@@ -190,20 +190,14 @@ def _is_admin(user_id: int) -> bool:
 def _autocomplete_enemies(
     conn: sqlite3.Connection, current: str,
 ) -> list[app_commands.Choice[str]]:
-    """Return up to AUTOCOMPLETE_LIMIT choices, prefix matches first.
+    """Return up to AUTOCOMPLETE_LIMIT choices.
 
-    Choice value is the stringified enemy_id, so the command handler skips
-    free-text resolution when the user picked from the dropdown.
+    The repo query already orders prefix matches first (see
+    `repo.enemy_choices_by_name`), so we just trim and format here.
+    Choice value is the stringified enemy_id so the command handler can
+    skip free-text resolution when the user picked from the dropdown.
     """
-    rows = repo.enemy_choices_by_name(conn, current, AUTOCOMPLETE_LIMIT * 2)
-    if not rows:
-        return []
-    needle = (current or "").strip().lower()
-    def rank_key(row: sqlite3.Row) -> tuple[int, str]:
-        name = (row["canonical_name"] or "").lower()
-        prefix = 0 if not needle or name.startswith(needle) else 1
-        return (prefix, name)
-    rows = sorted(rows, key=rank_key)[:AUTOCOMPLETE_LIMIT]
+    rows = repo.enemy_choices_by_name(conn, current, AUTOCOMPLETE_LIMIT)
     out: list[app_commands.Choice[str]] = []
     for r in rows:
         category = r["category"] or ""
