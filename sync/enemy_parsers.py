@@ -36,7 +36,7 @@ from config import (
     ENEMY_NPC_TAB_GIDS,
 )
 from sync.fetch import iter_rows, sheet_by_gid
-from sync.parsers import _cell_color_hex, _cell_text, _index_to_col_letters
+from sync.parsers import _cell_bg_hex, _cell_color_hex, _cell_text, _index_to_col_letters
 
 
 # --- constants discovered by the probe -------------------------------------
@@ -80,6 +80,12 @@ _WEAKNESS_NAMES: frozenset[str] = frozenset({
 _WEAKNESS_ALIASES: dict[str, str] = {
     "Polearm": "Spear",
 }
+
+# `=VLOOKUP("MemberName", '120 NPCs Data'!...)` — captures the lookup-key
+# string. NPC display widgets stitch each position together with a VLOOKUP
+# against the flat per-creature catalog, so the first quoted arg is the
+# member's data-tab name (e.g. 'NewDelsta', 'Canalbrine 1').
+_VLOOKUP_NAME_RE = re.compile(r'^=VLOOKUP\("([^"]*)"')
 
 
 def _canonical_weakness(label: str) -> str:
@@ -126,6 +132,10 @@ class DisplayBlock:
     # weaknesses_by_position[i] = ['Sword', 'Axe', ...] in slot order.
     # Empty list = no weaknesses found for that position.
     weaknesses_by_position: list[list[str]] = field(default_factory=list)
+    # NPC-only: per-position member-name references read off the display-tab
+    # block. For ranked encounters the member names come from the data tab,
+    # so this stays empty. Indexed parallel to `weaknesses_by_position`.
+    member_names_by_position: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -277,36 +287,81 @@ def parse_npc_data_tab(sheet: dict[str, Any]) -> dict[str, NpcStat]:
 
 # --- display tab parsing ----------------------------------------------------
 
-def _detect_display_blocks(rows: list[list[dict[str, Any]]]) -> list[tuple[int, int]]:
-    """Return [(name_col, rank_col), ...] for each block on a display tab.
+# Dark-grey separator color used by every display tab to gap adjacent block
+# widgets. The cell immediately LEFT of a block-start name is on this color
+# (unless the name is at column 0 / on the very edge of the sheet).
+_BLOCK_SEPARATOR_BG = "#222222"
 
-    A block is a row-3 cell with a non-empty name cell and a sibling rank-badge
-    cell some columns later. This works for 1-, 2-, and 3-column block layouts
-    documented in the Template tab.
+
+def _detect_display_blocks(
+    rows: list[list[dict[str, Any]]],
+    use_separator_fallback: bool = False,
+) -> list[tuple[int, int, int | None]]:
+    """Return [(name_row, name_col, rank_col), ...] for each block on a tab.
+
+    Display tabs lay block widgets out as a grid: 6-ish blocks per "block
+    row", and block rows repeat every `_DISPLAY_BLOCK_HEIGHT` rows starting
+    at `_DISPLAY_NAME_ROW`. The original code only looked at the first block
+    row; that silently truncated any tab with more encounters than fit in
+    one row of widgets (the entire 120 NPCs tab + likely the busier ranked
+    tabs too).
+
+    Two block-start signals are used:
+      * **Rank-badge** (ranked Lvl-N tabs): a Rank1/2/3 or EX1/2/3 cell on
+        the name row, with the block's name in the nearest non-empty cell
+        to its LEFT.
+      * **Separator-color fallback** (NPC tabs only — opt-in): any non-empty
+        text cell whose left neighbor is on the dark `#222222` separator
+        background. NPC widgets carry no rank badge, so this is the only
+        block-detection signal available there.
+
+    `rank_col` is None for separator-detected blocks.
     """
-    if len(rows) <= _DISPLAY_NAME_ROW:
-        return []
-    name_row = rows[_DISPLAY_NAME_ROW]
-    # Locate columns that hold a rank badge (text matching Rank1/2/3 or EX1/2/3).
-    rank_cols: list[int] = []
-    for c_i, cell in enumerate(name_row):
-        if _RANK_BADGE_RE.match(_cell_text(cell)):
-            rank_cols.append(c_i)
-    blocks: list[tuple[int, int]] = []
-    for rc in rank_cols:
-        # The block's name cell is the nearest non-empty cell to the LEFT of
-        # the rank cell, on the same row.
-        name_col: int | None = None
-        for left in range(rc - 1, -1, -1):
-            if left >= len(name_row):
-                continue
-            t = _cell_text(name_row[left])
-            if t and not _RANK_BADGE_RE.match(t) and not _is_display_aux_label(t):
-                name_col = left
-                break
-        if name_col is None:
+    blocks: list[tuple[int, int, int | None]] = []
+    for name_row_idx in range(_DISPLAY_NAME_ROW, len(rows), _DISPLAY_BLOCK_HEIGHT):
+        name_row = rows[name_row_idx]
+        # Skip rows that have no text at all — cheap optimization for tabs
+        # whose data ends well before the nominal grid does.
+        if not any(_cell_text(c) for c in name_row):
             continue
-        blocks.append((name_col, rc))
+
+        # Pass 1: rank-badge detection (ranked tabs).
+        rank_cols: list[int] = [
+            c_i for c_i, cell in enumerate(name_row)
+            if _RANK_BADGE_RE.match(_cell_text(cell))
+        ]
+        ranked_name_cols: set[int] = set()
+        for rc in rank_cols:
+            name_col: int | None = None
+            for left in range(rc - 1, -1, -1):
+                if left >= len(name_row):
+                    continue
+                t = _cell_text(name_row[left])
+                if t and not _RANK_BADGE_RE.match(t) and not _is_display_aux_label(t):
+                    name_col = left
+                    break
+            if name_col is None:
+                continue
+            blocks.append((name_row_idx, name_col, rc))
+            ranked_name_cols.add(name_col)
+
+        # Pass 2: separator-color fallback (NPC tabs).
+        if not use_separator_fallback:
+            continue
+        for c_i, cell in enumerate(name_row):
+            if c_i in ranked_name_cols:
+                continue
+            text = _cell_text(cell)
+            if not text or _RANK_BADGE_RE.match(text) or _is_display_aux_label(text):
+                continue
+            # Block-start signal: cell to the LEFT is on the dark separator
+            # background. Cells at column 0 are accepted unconditionally
+            # (no left neighbor to check).
+            if c_i > 0:
+                left_bg = _cell_bg_hex(name_row[c_i - 1])
+                if left_bg != _BLOCK_SEPARATOR_BG:
+                    continue
+            blocks.append((name_row_idx, c_i, None))
     return blocks
 
 
@@ -320,23 +375,26 @@ def _formula(cell: dict[str, Any]) -> str:
 
 
 def _extract_weaknesses_for_block(
-    rows: list[list[dict[str, Any]]], name_col: int,
+    rows: list[list[dict[str, Any]]], name_row: int, name_col: int,
 ) -> list[list[str]]:
     """Read the per-position weakness lists from a display block.
 
     Block weakness cells are formula-named-range references like '=Sword'
-    living in the rightward part of the block, on rows 6, 7, 8 (one row per
-    encounter position). Stat-row labels (=HP, =Atk) and lookups (=B4) live
-    in the same column range — we filter them by whitelist.
+    living in the rightward part of the block. They sit on the three rows
+    starting at `name_row + 3` (one row per encounter position). Stat-row
+    labels (=HP, =Atk) and lookups (=B4) live in the same column range — we
+    filter them by whitelist.
     """
     out: list[list[str]] = []
     # Block widths vary (10..12 cols depending on layout). 12 is a safe upper
     # bound — extra columns are dark separators with empty formulas.
     col_window = range(name_col, name_col + 12)
-    # Scan three rows (rows 6, 7, 8) — that covers every observed layout (1-,
-    # 2-, and 3-position encounters). Stop at the first row with no weaknesses.
+    # Scan three rows — that covers every observed layout (1-, 2-, and
+    # 3-position encounters; the 5-position 120 NPCs widgets only ever fill
+    # three rows on the display surface). Stop at the first row with no
+    # weaknesses.
     for offset in range(3):
-        row_idx = _DISPLAY_NAME_ROW + 3 + offset  # rows 6, 7, 8
+        row_idx = name_row + 3 + offset
         if row_idx >= len(rows):
             break
         row = rows[row_idx]
@@ -357,61 +415,99 @@ def _extract_weaknesses_for_block(
     return out
 
 
+def _extract_npc_member_names(
+    rows: list[list[dict[str, Any]]],
+    name_row: int,
+    name_col: int,
+    encounter_name: str,
+) -> list[str]:
+    """Harvest per-position member-name references from an NPC display block.
+
+    On the 120 NPCs display tab the layout for a block at `(name_row, name_col)`
+    puts per-position stats in columns `name_col + 1 .. name_col + N`. The
+    first useful per-position info appears on two rows:
+
+      * `name_row + 3` (member-name strip): for single-position widgets the
+        formattedValue here is the resolved member name (e.g. 'New Delsta');
+        for multi-position widgets it is just a position index label
+        ('1', '2', '3', ...) which we discard.
+      * `name_row + 4` (HP row): the formula carries either
+        `=VLOOKUP("<member-name>", '120 NPCs Data'!...)` — most common case,
+        the lookup arg is the catalog name we need — or a direct cell ref
+        like `='120 NPCs Data'!D10` in which case the member name isn't
+        recoverable from the formula text.
+
+    Strategy per column:
+      1. Try the VLOOKUP formula on the HP row — most reliable.
+      2. Fall back to the formattedValue on the member-name row, but only if
+         it isn't a bare integer (which would be a position-index label).
+      3. Stop at the first column that yields nothing — the per-position
+         strip is contiguous from `name_col + 1`, so a gap marks the end.
+
+    If no member is found via either signal, fall back to a single-position
+    list with the encounter name itself — this catches direct-cell-ref
+    widgets like `Cropdale` whose only member happens to share the encounter
+    name.
+    """
+    name_strip_row = name_row + 3
+    hp_row = name_row + 4
+    name_strip = rows[name_strip_row] if name_strip_row < len(rows) else []
+    hp_strip = rows[hp_row] if hp_row < len(rows) else []
+    names: list[str] = []
+    for c_i in range(name_col + 1, name_col + 11):
+        member: str | None = None
+        if c_i < len(hp_strip):
+            m = _VLOOKUP_NAME_RE.match(_formula(hp_strip[c_i]))
+            if m:
+                member = m.group(1)
+        if member is None and c_i < len(name_strip):
+            text = _cell_text(name_strip[c_i])
+            if text and not text.replace(",", "").isdigit():
+                member = text
+        if member is None:
+            break
+        names.append(member)
+    if not names:
+        names = [encounter_name]
+    return names
+
+
 def parse_display_tab(sheet: dict[str, Any], spec: EnemyTabSpec) -> list[DisplayBlock]:
-    """Walk a Lvl-N display tab and emit one DisplayBlock per visible enemy widget."""
+    """Walk a display tab and emit one DisplayBlock per visible enemy widget.
+
+    Handles both ranked tabs (rank-badge block detection) and the 120 NPCs
+    tab (separator-color fallback). For NPC blocks the per-position member
+    names are also harvested from row +3 — the merge step in `parse_all`
+    needs them to look up each member in `120 NPCs Data` independently.
+    """
     rows = iter_rows(sheet)
     out: list[DisplayBlock] = []
     is_npc = spec.gid in ENEMY_NPC_TAB_GIDS
-    for name_col, _rank_col in _detect_display_blocks(rows):
-        cell = rows[_DISPLAY_NAME_ROW][name_col]
+    detected = _detect_display_blocks(rows, use_separator_fallback=is_npc)
+    for name_row, name_col, _rank_col in detected:
+        cell = rows[name_row][name_col]
         name = _cell_text(cell)
         if not name:
             continue
         color = _cell_color_hex(cell)
         col_letter = _index_to_col_letters(name_col)
-        anchor = f"#gid={spec.gid}&range={col_letter}{_DISPLAY_NAME_ROW + 1}"
-        weaknesses = _extract_weaknesses_for_block(rows, name_col)
+        anchor = f"#gid={spec.gid}&range={col_letter}{name_row + 1}"
+        weaknesses = _extract_weaknesses_for_block(rows, name_row, name_col)
+        member_names = (
+            _extract_npc_member_names(rows, name_row, name_col, name)
+            if is_npc else []
+        )
         out.append(DisplayBlock(
             display_name=name,
             category=spec.category,
             region=spec.region,
             sheet_gid=spec.gid,
-            source_row=_DISPLAY_NAME_ROW,
+            source_row=name_row,
             name_color_hex=color,
             hyperlink_url=anchor,
             is_npc=is_npc,
             weaknesses_by_position=weaknesses,
-        ))
-    return out
-
-
-def parse_npc_display_tab(sheet: dict[str, Any], spec: EnemyTabSpec) -> list[DisplayBlock]:
-    """`120 NPCs` doesn't have rank badges — each visible widget is just a name
-    at row 3 with a separator pattern. We harvest every non-empty cell at
-    `_DISPLAY_NAME_ROW` whose left neighbor is a dark-bg gap."""
-    rows = iter_rows(sheet)
-    if len(rows) <= _DISPLAY_NAME_ROW:
-        return []
-    name_row = rows[_DISPLAY_NAME_ROW]
-    out: list[DisplayBlock] = []
-    for c_i, cell in enumerate(name_row):
-        text = _cell_text(cell)
-        if not text:
-            continue
-        # Skip if this looks like a continuation cell (we want only block-start cells).
-        # The signal: the cell to the LEFT is empty/dark. We keep this lenient
-        # because the probe showed that block widths vary.
-        col_letter = _index_to_col_letters(c_i)
-        anchor = f"#gid={spec.gid}&range={col_letter}{_DISPLAY_NAME_ROW + 1}"
-        out.append(DisplayBlock(
-            display_name=text,
-            category=spec.category,
-            region=spec.region,
-            sheet_gid=spec.gid,
-            source_row=_DISPLAY_NAME_ROW,
-            name_color_hex=_cell_color_hex(cell),
-            hyperlink_url=anchor,
-            is_npc=True,
+            member_names_by_position=member_names,
         ))
     return out
 
@@ -552,24 +648,32 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseRe
         sheet = sheet_by_gid(payload, spec.gid)
         if sheet is None:
             continue
-        if spec.gid in ENEMY_NPC_TAB_GIDS:
-            blocks = parse_npc_display_tab(sheet, spec)
-        else:
-            blocks = parse_display_tab(sheet, spec)
+        blocks = parse_display_tab(sheet, spec)
         for block in blocks:
             if block.is_npc:
-                key = reconcile_display_to_data(block.display_name, npc_index)
-                if key is None:
-                    result.unmatched.append((block.display_name, spec.name))
+                # NPC encounters are multi-position: the display block lists
+                # each member by name, and `120 NPCs Data` is a flat catalog
+                # of individual creatures keyed by name. Look up each member
+                # independently and stitch the result into one ParsedEnemy.
+                member_names = block.member_names_by_position or [block.display_name]
+                stats_rows: list[dict[str, Any]] = []
+                for pos, member_display in enumerate(member_names):
+                    key = reconcile_display_to_data(member_display, npc_index)
+                    if key is None:
+                        result.unmatched.append((member_display, spec.name))
+                        continue
+                    npc = npc_data[key]
+                    for stat, val in npc.stats.items():
+                        stats_rows.append({
+                            "position": pos,
+                            "member_name": npc.npc_name,
+                            "stat_name": stat,
+                            "stat_value": val,
+                        })
+                if not stats_rows:
+                    # No member resolved — drop the encounter entirely so the
+                    # bot doesn't surface a stats-less /enemy entry.
                     continue
-                npc = npc_data[key]
-                rank_stats = {
-                    "Default": [
-                        {"position": 0, "member_name": npc.npc_name,
-                         "stat_name": stat, "stat_value": val}
-                        for stat, val in npc.stats.items()
-                    ]
-                }
                 result.enemies.append(ParsedEnemy(
                     canonical_name=block.display_name,
                     category=block.category,
@@ -579,7 +683,7 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseRe
                     name_color_hex=block.name_color_hex,
                     hyperlink_url=block.hyperlink_url,
                     is_npc=True,
-                    rank_stats=rank_stats,
+                    rank_stats={"Default": stats_rows},
                     weaknesses_by_position=block.weaknesses_by_position,
                 ))
                 continue
