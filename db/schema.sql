@@ -125,7 +125,7 @@ CREATE INDEX IF NOT EXISTS ix_feedback_user_time
 CREATE TABLE IF NOT EXISTS command_usage_daily (
     command_name  TEXT NOT NULL,            -- 'character' | 'enemy'
     usage_date    TEXT NOT NULL,            -- 'YYYY-MM-DD' (UTC)
-    count         INTEGER NOT NULL DEFAULT 0,
+    count         INTEGER NOT NULL,
     PRIMARY KEY (command_name, usage_date)
 );
 

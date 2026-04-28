@@ -300,6 +300,13 @@ def _parse_iso(ts: str) -> datetime:
     return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
+def _record_command_usage(conn: sqlite3.Connection, command_name: str) -> None:
+    try:
+        repo.increment_command_usage(conn, command_name)
+    except sqlite3.Error:
+        logger.exception("failed to record /%s usage", command_name)
+
+
 # ----------------------------------------------------------------------------
 # Registration
 # ----------------------------------------------------------------------------
@@ -311,10 +318,7 @@ def register(tree: app_commands.CommandTree) -> None:
     @app_commands.describe(name="Start typing a character name to see suggestions.")
     async def character_cmd(interaction: discord.Interaction, name: str) -> None:
         conn = bot_db.conn()
-        try:
-            repo.increment_command_usage(conn, "character")
-        except sqlite3.Error:
-            logger.exception("failed to record /character usage")
+        _record_command_usage(conn, "character")
         form_id = _resolve_form_id(conn, name)
         if form_id is None:
             await interaction.response.send_message(
@@ -340,10 +344,7 @@ def register(tree: app_commands.CommandTree) -> None:
     @app_commands.describe(name="Start typing an enemy name to see suggestions.")
     async def enemy_cmd(interaction: discord.Interaction, name: str) -> None:
         conn = bot_db.conn()
-        try:
-            repo.increment_command_usage(conn, "enemy")
-        except sqlite3.Error:
-            logger.exception("failed to record /enemy usage")
+        _record_command_usage(conn, "enemy")
         enemy_id = _resolve_enemy_id(conn, name)
         if enemy_id is None:
             await interaction.response.send_message(
