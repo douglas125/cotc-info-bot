@@ -472,6 +472,11 @@ def test_build_section_actives_splits_overflowing_kit(tmp_db_path: Path) -> None
     repo.insert_skills(conn, form_id, skills)
 
     embed = embeds.build_section_embed(conn, form_id, "actives")
+    expected_bullets = [
+        embeds._format_skill_line(row)
+        for row in repo.get_skills(conn, form_id)
+        if (row["kind"] or "") == "active"
+    ]
     conn.close()
     assert embed is not None
 
@@ -485,14 +490,7 @@ def test_build_section_actives_splits_overflowing_kit(tmp_db_path: Path) -> None
         assert f.value.startswith("• ")
         assert "…" not in f.value
 
-    # Round-trip: joining all the Active chunks reproduces the full bullet
-    # list, in order, with no skill dropped.
     rejoined = "\n".join(f.value for f in active_fields)
-    expected_bullets = [
-        embeds._format_skill_line(row) for row in repo.get_skills(
-            repo.connect(tmp_db_path), form_id,
-        ) if (row["kind"] or "") == "active"
-    ]
     assert rejoined == "\n".join(expected_bullets)
 
 
