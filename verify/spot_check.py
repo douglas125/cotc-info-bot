@@ -1,20 +1,18 @@
-"""Spot-check live DB against the user-provided Lloris EX3 screenshot.
+"""Spot-check the live DB against the user-provided enemy screenshots.
 
-Run after `python -m sync.cli`. Exits non-zero if the EX3 stats don't match
-the screenshot. This is the proof artifact for the PR.
+Run after `python -m sync.cli`. Exits non-zero if either of the two
+proof-points (Lloris EX3 stats, Lyblac EX3 weaknesses) doesn't match.
 """
 from __future__ import annotations
 
 import sys
-from typing import Any
 
-from config import DB_PATH
 from db import repo
 
 
-# Expected values from the user-provided Sly Leader Lloris EX3 screenshot.
+# --- Sly Leader Lloris EX3 (Solistia Lvl 25) -------------------------------
 # Position 0 = Leader Lloris, Position 1 = Mini Lloris.
-EXPECTED: dict[int, dict[str, str]] = {
+LLORIS_EX3_STATS: dict[int, dict[str, str]] = {
     0: {
         "Shields":   "30",
         "HP":        "1,143,210",
@@ -40,62 +38,90 @@ EXPECTED: dict[int, dict[str, str]] = {
         "Equip Atk": "275",
     },
 }
+LLORIS_EX3_WEAKNESSES: dict[int, list[str]] = {
+    0: ["Axe", "Bow", "Ice", "Wind", "Dark"],         # Leader Lloris
+    1: ["Dagger", "Bow", "Ice", "Lightning", "Dark"], # Mini Lloris
+}
+
+# --- Lyblac EX3 (Lvl 75 Osterra) — from the second user screenshot ---------
+LYBLAC_EX3_WEAKNESSES: dict[int, list[str]] = {
+    0: ["Sword", "Dagger", "Wind", "Light"],
+}
+
+
+def _check_stats(conn, name: str, rank: str,
+                 expected: dict[int, dict[str, str]]) -> list[str]:
+    enemy = conn.execute(
+        "SELECT id FROM enemies WHERE canonical_name = ?", (name,),
+    ).fetchone()
+    if enemy is None:
+        return [f"{name!r} not in DB"]
+    form = conn.execute(
+        "SELECT id FROM enemy_forms WHERE enemy_id = ? AND rank = ?",
+        (enemy["id"], rank),
+    ).fetchone()
+    if form is None:
+        return [f"{name!r} has no {rank} form"]
+    actual: dict[int, dict[str, str]] = {}
+    for r in conn.execute(
+        "SELECT position, stat_name, stat_value FROM enemy_member_stats "
+        "WHERE form_id = ? ORDER BY position, id", (form["id"],),
+    ):
+        actual.setdefault(r["position"], {})[r["stat_name"]] = r["stat_value"]
+    fails: list[str] = []
+    for pos, stats in expected.items():
+        for stat, exp in stats.items():
+            got = actual.get(pos, {}).get(stat, "<missing>")
+            if got.replace(",", "") != exp.replace(",", ""):
+                fails.append(
+                    f"{name} {rank} pos{pos} {stat!r}: expected {exp!r}, got {got!r}"
+                )
+    return fails
+
+
+def _check_weaknesses(conn, name: str, rank: str,
+                      expected: dict[int, list[str]]) -> list[str]:
+    enemy = conn.execute(
+        "SELECT id FROM enemies WHERE canonical_name = ?", (name,),
+    ).fetchone()
+    if enemy is None:
+        return [f"{name!r} not in DB"]
+    form = conn.execute(
+        "SELECT id FROM enemy_forms WHERE enemy_id = ? AND rank = ?",
+        (enemy["id"], rank),
+    ).fetchone()
+    if form is None:
+        return [f"{name!r} has no {rank} form"]
+    actual: dict[int, list[str]] = {}
+    for r in conn.execute(
+        "SELECT position, weakness_label FROM enemy_weaknesses "
+        "WHERE form_id = ? ORDER BY position, slot_order", (form["id"],),
+    ):
+        actual.setdefault(r["position"], []).append(r["weakness_label"])
+    fails: list[str] = []
+    for pos, exp_list in expected.items():
+        got_list = actual.get(pos, [])
+        if got_list != exp_list:
+            fails.append(
+                f"{name} {rank} pos{pos} weaknesses: expected {exp_list}, got {got_list}"
+            )
+    return fails
 
 
 def main() -> int:
     conn = repo.connect()
     repo.bootstrap(conn)
-    enemy = conn.execute(
-        "SELECT id, canonical_name, category FROM enemies "
-        "WHERE canonical_name = 'Sly Leader Lloris'"
-    ).fetchone()
-    if enemy is None:
-        print("FAIL: 'Sly Leader Lloris' not in DB. Did /refresh complete?")
-        return 1
-    form = conn.execute(
-        "SELECT id FROM enemy_forms WHERE enemy_id = ? AND rank = 'EX3'", (enemy["id"],)
-    ).fetchone()
-    if form is None:
-        print(f"FAIL: 'Sly Leader Lloris' has no EX3 form. enemy_id={enemy['id']}")
-        return 1
-    rows = list(conn.execute(
-        "SELECT position, member_name, stat_name, stat_value "
-        "FROM enemy_member_stats WHERE form_id = ? ORDER BY position, id",
-        (form["id"],),
-    ))
+    fails: list[str] = []
+    fails += _check_stats(conn, "Sly Leader Lloris", "EX3", LLORIS_EX3_STATS)
+    fails += _check_weaknesses(conn, "Sly Leader Lloris", "EX3", LLORIS_EX3_WEAKNESSES)
+    fails += _check_weaknesses(conn, "Lyblac", "EX3", LYBLAC_EX3_WEAKNESSES)
 
-    actual: dict[int, dict[str, str]] = {}
-    member_names: dict[int, str] = {}
-    for r in rows:
-        actual.setdefault(r["position"], {})[r["stat_name"]] = r["stat_value"]
-        member_names.setdefault(r["position"], r["member_name"] or "?")
-
-    failures: list[str] = []
-    for pos, expected_stats in EXPECTED.items():
-        if pos not in actual:
-            failures.append(f"position {pos} missing from DB")
-            continue
-        for stat, expected_val in expected_stats.items():
-            got = actual[pos].get(stat, "<missing>")
-            # Some screenshot values are formatted ('1,143,210') while data tab
-            # values may be plain ('1143210'). Normalize commas for compare.
-            if got.replace(",", "") != expected_val.replace(",", ""):
-                failures.append(
-                    f"position {pos} ({member_names.get(pos, '?')}) "
-                    f"stat {stat!r}: expected {expected_val!r}, got {got!r}"
-                )
-
-    print(f"Sly Leader Lloris EX3 spot check (form_id={form['id']})")
-    print(f"  position 0 ({member_names.get(0, '?')}): {len(actual.get(0, {}))} stats")
-    print(f"  position 1 ({member_names.get(1, '?')}): {len(actual.get(1, {}))} stats")
-    if failures:
-        print()
+    if fails:
         print("FAIL:")
-        for f in failures:
+        for f in fails:
             print(f"  - {f}")
         return 1
-    print()
-    print("PASS — all 20 stat cells match the user-provided screenshot.")
+    print("PASS — Lloris EX3 stats + weaknesses and Lyblac EX3 weaknesses match the user screenshots.")
     return 0
 
 

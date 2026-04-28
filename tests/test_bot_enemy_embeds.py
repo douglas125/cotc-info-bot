@@ -59,15 +59,30 @@ def test_build_enemy_embed_renders_stats_grid(tmp_db_path: Path) -> None:
     assert "EX 3" in embed.title
     # Description shows category + region.
     assert "Solistia" in (embed.description or "")
-    # Stats field
     fields = {f.name: f.value for f in embed.fields}
     assert "Stats" in fields
     assert "1,143,210" in fields["Stats"]
     assert "822,762" in fields["Stats"]
-    # Break shields field
-    assert "Break Shields" in fields
-    assert "30" in fields["Break Shields"]
-    assert "18" in fields["Break Shields"]
+    # Weaknesses field (combines break-shield count + weakness labels per position)
+    assert "Weaknesses" in fields
+    assert "30" in fields["Weaknesses"]
+    assert "18" in fields["Weaknesses"]
+
+
+def test_build_enemy_embed_renders_weakness_labels(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    enemy_id = _seed_lloris(conn)
+    # Seed weaknesses on the form too.
+    form = repo.get_enemy_form_by_rank(conn, enemy_id, "EX3")
+    repo.insert_enemy_weaknesses(conn, form["id"], [
+        ["Axe", "Bow", "Ice", "Wind", "Dark"],
+        ["Dagger", "Bow", "Ice", "Lightning", "Dark"],
+    ])
+    embed = enemy_embeds.build_enemy_embed(conn, enemy_id, "EX3")
+    assert embed is not None
+    weaknesses_field = next(f for f in embed.fields if f.name == "Weaknesses")
+    for label in ("Axe", "Bow", "Ice", "Wind", "Dark", "Dagger", "Lightning"):
+        assert label in weaknesses_field.value
 
 
 def test_build_enemy_embed_returns_none_for_missing_enemy(tmp_db_path: Path) -> None:

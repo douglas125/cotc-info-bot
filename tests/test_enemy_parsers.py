@@ -188,15 +188,19 @@ def test_parse_npc_data_tab_extracts_flat_rows() -> None:
 
 # --- parse_display_tab -----------------------------------------------------
 
+def _formula_cell(formula: str) -> dict[str, Any]:
+    return {"userEnteredValue": {"formulaValue": formula}}
+
+
 def test_parse_display_tab_finds_block_with_rank_badge() -> None:
     """A row 3 cell with a rank badge plus a sibling name to its left becomes a block."""
     spec = EnemyTabSpec(gid=999, name="Test Lvl", category="Test", region="Osterra")
     rows: list[list[dict[str, Any]]] = [
-        [_cell() for _ in range(10)],
-        [_cell() for _ in range(10)],
-        [_cell() for _ in range(10)],
+        [_cell() for _ in range(12)],
+        [_cell() for _ in range(12)],
+        [_cell() for _ in range(12)],
         [_cell(), _cell("Sly Leader Lloris"), _cell(), _cell(), _cell("EX3"),
-         _cell(), _cell(), _cell(), _cell(), _cell()],
+         _cell(), _cell(), _cell(), _cell(), _cell(), _cell(), _cell()],
     ]
     blocks = parse_display_tab(_sheet_from_rows(rows, gid=999), spec)
     assert len(blocks) == 1
@@ -206,6 +210,97 @@ def test_parse_display_tab_finds_block_with_rank_badge() -> None:
     assert b.region == "Osterra"
     assert b.is_npc is False
     assert b.hyperlink_url == "#gid=999&range=B4"
+
+
+def test_parse_display_tab_extracts_weakness_formulas_single_position() -> None:
+    """1-position block: weaknesses on row 6, formula cells like '=Sword'."""
+    spec = EnemyTabSpec(gid=999, name="Lvl 75", category="Lvl 75", region="Osterra")
+    blank = lambda: [_cell() for _ in range(12)]
+    rows: list[list[dict[str, Any]]] = [
+        blank(), blank(), blank(),
+        # row 3: name + EX3 badge
+        [_cell(), _cell("Lyblac"), _cell(), _cell("EX3"), _cell(),
+         _cell(), _cell(), _cell(), _cell(), _cell(), _cell(), _cell()],
+        blank(),
+        blank(),
+        # row 6: weakness row — formulas at cols 5..8
+        [_cell(), _cell(), _cell(), _cell(), _cell(),
+         _formula_cell("=Sword"), _formula_cell("=Dagger"),
+         _formula_cell("=Wind"), _formula_cell("=Light"),
+         _cell(), _cell(), _cell()],
+    ]
+    blocks = parse_display_tab(_sheet_from_rows(rows, gid=999), spec)
+    assert len(blocks) == 1
+    assert blocks[0].weaknesses_by_position == [["Sword", "Dagger", "Wind", "Light"]]
+
+
+def test_parse_display_tab_extracts_weakness_formulas_two_positions() -> None:
+    """2-position block: row 6 = position 0, row 7 = position 1."""
+    spec = EnemyTabSpec(gid=999, name="Solistia Lvl 25", category="Solistia Lvl 25",
+                       region="Solistia")
+    blank = lambda: [_cell() for _ in range(12)]
+    rows: list[list[dict[str, Any]]] = [
+        blank(), blank(), blank(),
+        [_cell(), _cell("Sly Leader Lloris"), _cell(), _cell(), _cell("EX3"),
+         _cell(), _cell(), _cell(), _cell(), _cell(), _cell(), _cell()],
+        blank(),
+        blank(),
+        # row 6: position 0 weaknesses
+        [_cell(), _cell(), _cell(), _cell(), _cell(), _cell(),
+         _formula_cell("=Axe"), _formula_cell("=Bow"),
+         _formula_cell("=Ice"), _formula_cell("=Wind"),
+         _formula_cell("=Dark"), _cell()],
+        # row 7: position 1 weaknesses
+        [_cell(), _cell(), _cell(), _cell(), _cell(), _cell(),
+         _formula_cell("=Dagger"), _formula_cell("=Bow"),
+         _formula_cell("=Ice"), _formula_cell("=Lightning"),
+         _formula_cell("=Dark"), _cell()],
+    ]
+    blocks = parse_display_tab(_sheet_from_rows(rows, gid=999), spec)
+    assert len(blocks) == 1
+    assert blocks[0].weaknesses_by_position == [
+        ["Axe", "Bow", "Ice", "Wind", "Dark"],
+        ["Dagger", "Bow", "Ice", "Lightning", "Dark"],
+    ]
+
+
+def test_parse_display_tab_filters_out_stat_label_formulas() -> None:
+    """`=HP`, `=Atk`, `=B4` etc live in the same column range and must NOT be
+    picked up as weaknesses."""
+    spec = EnemyTabSpec(gid=999, name="X", category="X", region="Osterra")
+    blank = lambda: [_cell() for _ in range(12)]
+    rows: list[list[dict[str, Any]]] = [
+        blank(), blank(), blank(),
+        [_cell(), _cell("Test"), _cell(), _cell("EX3"), _cell(),
+         _cell(), _cell(), _cell(), _cell(), _cell(), _cell(), _cell()],
+        blank(),
+        blank(),
+        # row 6: mix of stat labels (=HP, =B4) and a real weakness (=Sword)
+        [_cell(), _formula_cell("=HP"), _cell(), _cell(), _cell(),
+         _formula_cell("=B4"), _formula_cell("=Sword"),
+         _formula_cell("=Atk"), _cell(), _cell(), _cell(), _cell()],
+    ]
+    blocks = parse_display_tab(_sheet_from_rows(rows, gid=999), spec)
+    assert len(blocks) == 1
+    assert blocks[0].weaknesses_by_position == [["Sword"]]
+
+
+def test_parse_display_tab_normalizes_polearm_to_spear() -> None:
+    """The named-range `=Polearm` and `=Spear` refer to the same icon — collapse."""
+    spec = EnemyTabSpec(gid=999, name="X", category="X", region="Osterra")
+    blank = lambda: [_cell() for _ in range(12)]
+    rows: list[list[dict[str, Any]]] = [
+        blank(), blank(), blank(),
+        [_cell(), _cell("Test"), _cell(), _cell("EX3"), _cell(),
+         _cell(), _cell(), _cell(), _cell(), _cell(), _cell(), _cell()],
+        blank(),
+        blank(),
+        [_cell(), _cell(), _cell(), _cell(), _cell(),
+         _formula_cell("=Polearm"), _cell(), _cell(),
+         _cell(), _cell(), _cell(), _cell()],
+    ]
+    blocks = parse_display_tab(_sheet_from_rows(rows, gid=999), spec)
+    assert blocks[0].weaknesses_by_position == [["Spear"]]
 
 
 def test_parse_npc_display_tab_takes_every_row3_cell() -> None:

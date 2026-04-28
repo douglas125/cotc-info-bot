@@ -239,6 +239,9 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                         rank_order=rank_order(rank_key),
                     )
                     repo.insert_enemy_member_stats(conn, form_id, stat_rows)
+                    repo.insert_enemy_weaknesses(
+                        conn, form_id, enemy.weaknesses_by_position,
+                    )
 
             progress("Rebuilding enemy FTS index...")
             repo.rebuild_enemy_fts(conn)

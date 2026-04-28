@@ -62,6 +62,28 @@ _DISPLAY_BLOCK_HEIGHT = 13  # rows 3..15 are the block body
 
 _RANK_BADGE_RE = re.compile(r"^\s*(rank\s*[123]|ex\s*[123])\s*$", re.IGNORECASE)
 
+# Display-tab weakness icons are formula-named-range references like '=Sword'.
+# We whitelist what counts as a weakness so we don't accidentally pick up
+# stat-row labels (=HP, =Atk) or member-name lookups (=B4, =M4) sitting in
+# the same column range.
+_WEAKNESS_NAMES: frozenset[str] = frozenset({
+    # Weapons
+    "Sword", "Spear", "Polearm", "Dagger", "Axe", "Bow", "Staff", "Tome", "Fan",
+    # Elements (no Earth element in CotC — Lightning fills that slot)
+    "Fire", "Ice", "Wind", "Lightning", "Light", "Dark",
+})
+
+# Spreadsheet uses 'Polearm' interchangeably with 'Spear' (same weapon icon).
+# Normalize to a single canonical name so the embed and any /search filter
+# don't have two entries for the same weakness.
+_WEAKNESS_ALIASES: dict[str, str] = {
+    "Polearm": "Spear",
+}
+
+
+def _canonical_weakness(label: str) -> str:
+    return _WEAKNESS_ALIASES.get(label, label)
+
 
 # --- data classes -----------------------------------------------------------
 
@@ -100,6 +122,9 @@ class DisplayBlock:
     name_color_hex: str | None
     hyperlink_url: str | None
     is_npc: bool
+    # weaknesses_by_position[i] = ['Sword', 'Axe', ...] in slot order.
+    # Empty list = no weaknesses found for that position.
+    weaknesses_by_position: list[list[str]] = field(default_factory=list)
 
 
 @dataclass
@@ -115,6 +140,9 @@ class ParsedEnemy:
     is_npc: bool
     # rank_key -> list of {position, member_name, stat_name, stat_value}
     rank_stats: dict[str, list[dict[str, Any]]]
+    # weaknesses_by_position[i] = ['Sword', ...] — same for every rank since
+    # the display tab encodes one weakness set per encounter, not per rank.
+    weaknesses_by_position: list[list[str]] = field(default_factory=list)
 
 
 # --- data tab parsing -------------------------------------------------------
@@ -281,6 +309,48 @@ def _detect_display_blocks(rows: list[list[dict[str, Any]]]) -> list[tuple[int, 
     return blocks
 
 
+def _formula(cell: dict[str, Any]) -> str:
+    return ((cell.get("userEnteredValue") or {}).get("formulaValue") or "")
+
+
+def _extract_weaknesses_for_block(
+    rows: list[list[dict[str, Any]]], name_col: int,
+) -> list[list[str]]:
+    """Read the per-position weakness lists from a display block.
+
+    Block weakness cells are formula-named-range references like '=Sword'
+    living in the rightward part of the block, on rows 6, 7, 8 (one row per
+    encounter position). Stat-row labels (=HP, =Atk) and lookups (=B4) live
+    in the same column range — we filter them by whitelist.
+    """
+    out: list[list[str]] = []
+    # Block widths vary (10..12 cols depending on layout). 12 is a safe upper
+    # bound — extra columns are dark separators with empty formulas.
+    col_window = range(name_col, name_col + 12)
+    # Scan three rows (rows 6, 7, 8) — that covers every observed layout (1-,
+    # 2-, and 3-position encounters). Stop at the first row with no weaknesses.
+    for offset in range(3):
+        row_idx = _DISPLAY_NAME_ROW + 3 + offset  # rows 6, 7, 8
+        if row_idx >= len(rows):
+            break
+        row = rows[row_idx]
+        weaknesses: list[str] = []
+        for c_i in col_window:
+            if c_i >= len(row):
+                break
+            f = _formula(row[c_i])
+            if not f.startswith("="):
+                continue
+            label = f[1:].strip()
+            if label in _WEAKNESS_NAMES:
+                weaknesses.append(_canonical_weakness(label))
+        if weaknesses:
+            out.append(weaknesses)
+        else:
+            break
+    return out
+
+
 def parse_display_tab(sheet: dict[str, Any], spec: EnemyTabSpec) -> list[DisplayBlock]:
     """Walk a Lvl-N display tab and emit one DisplayBlock per visible enemy widget."""
     rows = iter_rows(sheet)
@@ -292,9 +362,9 @@ def parse_display_tab(sheet: dict[str, Any], spec: EnemyTabSpec) -> list[Display
         if not name:
             continue
         color = _cell_color_hex(cell)
-        # Synthesize a hyperlink anchor pointing to the name cell.
         col_letter = _index_to_col_letters(name_col)
         anchor = f"#gid={spec.gid}&range={col_letter}{_DISPLAY_NAME_ROW + 1}"
+        weaknesses = _extract_weaknesses_for_block(rows, name_col)
         out.append(DisplayBlock(
             display_name=name,
             category=spec.category,
@@ -304,6 +374,7 @@ def parse_display_tab(sheet: dict[str, Any], spec: EnemyTabSpec) -> list[Display
             name_color_hex=color,
             hyperlink_url=anchor,
             is_npc=is_npc,
+            weaknesses_by_position=weaknesses,
         ))
     return out
 
@@ -482,6 +553,7 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> list[Pa
                     hyperlink_url=block.hyperlink_url,
                     is_npc=True,
                     rank_stats=rank_stats,
+                    weaknesses_by_position=block.weaknesses_by_position,
                 ))
                 continue
             # Ranked enemy: look up in the corresponding region's data tab.
@@ -520,6 +592,7 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> list[Pa
                 hyperlink_url=block.hyperlink_url,
                 is_npc=False,
                 rank_stats=rank_stats,
+                weaknesses_by_position=block.weaknesses_by_position,
             ))
     if unmatched_display:
         # Surface as an attribute on the result for the runner/verifier to log.

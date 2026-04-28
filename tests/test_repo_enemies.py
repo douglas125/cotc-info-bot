@@ -115,6 +115,36 @@ def test_enemy_choices_by_name_prefix_first(tmp_db_path: Path) -> None:
     conn.close()
 
 
+def test_insert_and_get_enemy_weaknesses(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    enemy_id = _seed_lloris(conn)
+    form = repo.get_enemy_form_by_rank(conn, enemy_id, "EX3")
+    repo.insert_enemy_weaknesses(conn, form["id"], [
+        ["Axe", "Bow", "Ice", "Wind", "Dark"],
+        ["Dagger", "Bow", "Ice", "Lightning", "Dark"],
+    ])
+    rows = repo.get_enemy_weaknesses(conn, form["id"])
+    by_pos: dict[int, list[str]] = {}
+    for r in rows:
+        by_pos.setdefault(r["position"], []).append(r["weakness_label"])
+    assert by_pos[0] == ["Axe", "Bow", "Ice", "Wind", "Dark"]
+    assert by_pos[1] == ["Dagger", "Bow", "Ice", "Lightning", "Dark"]
+    # Slot order is stable.
+    pos0_slots = [r["slot_order"] for r in rows if r["position"] == 0]
+    assert pos0_slots == [0, 1, 2, 3, 4]
+    conn.close()
+
+
+def test_insert_enemy_weaknesses_handles_empty(tmp_db_path: Path) -> None:
+    """Empty weaknesses (e.g. NPCs) should be a no-op, not an error."""
+    conn = repo.connect(tmp_db_path)
+    enemy_id = _seed_lloris(conn)
+    form = repo.get_enemy_form_by_rank(conn, enemy_id, "EX3")
+    repo.insert_enemy_weaknesses(conn, form["id"], [])
+    assert repo.get_enemy_weaknesses(conn, form["id"]) == []
+    conn.close()
+
+
 def test_clear_enemy_tables_leaves_characters_intact(tmp_db_path: Path) -> None:
     """Regression: splitting clear_data_tables means clear_enemy_tables MUST NOT
     wipe the character side, and vice versa."""
@@ -131,6 +161,7 @@ def test_clear_enemy_tables_leaves_characters_intact(tmp_db_path: Path) -> None:
     assert conn.execute("SELECT COUNT(*) FROM enemies").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM enemy_forms").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM enemy_member_stats").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM enemy_weaknesses").fetchone()[0] == 0
     # Characters intact.
     assert conn.execute("SELECT COUNT(*) FROM characters").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM character_forms").fetchone()[0] == 1

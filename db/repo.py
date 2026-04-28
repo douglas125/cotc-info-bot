@@ -181,6 +181,7 @@ def clear_enemy_tables(conn: sqlite3.Connection) -> None:
     """Wipe all enemy data in dependency order. Keep sync history."""
     for tbl in (
         "enemies_fts",
+        "enemy_weaknesses",
         "enemy_member_stats",
         "enemy_forms",
         "enemies",
@@ -420,7 +421,7 @@ def counts(conn: sqlite3.Connection) -> dict[str, int]:
     out = {}
     for tbl in ("characters", "character_forms", "skills", "equipment",
                 "character_affinities",
-                "enemies", "enemy_forms", "enemy_member_stats"):
+                "enemies", "enemy_forms", "enemy_member_stats", "enemy_weaknesses"):
         out[tbl] = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
     return out
 
@@ -492,6 +493,26 @@ def insert_enemy_member_stats(
     )
 
 
+def insert_enemy_weaknesses(
+    conn: sqlite3.Connection,
+    form_id: int,
+    weaknesses_by_position: list[list[str]],
+) -> None:
+    """Bulk insert. `weaknesses_by_position[i]` = ['Sword', 'Wind', ...] in slot order."""
+    rows = [
+        (form_id, pos, label, slot)
+        for pos, labels in enumerate(weaknesses_by_position)
+        for slot, label in enumerate(labels)
+    ]
+    if not rows:
+        return
+    conn.executemany(
+        "INSERT INTO enemy_weaknesses(form_id, position, weakness_label, slot_order) "
+        "VALUES (?, ?, ?, ?)",
+        rows,
+    )
+
+
 def rebuild_enemy_fts(conn: sqlite3.Connection) -> None:
     """Repopulate the enemy FTS index from the relational tables."""
     conn.execute("DELETE FROM enemies_fts")
@@ -543,6 +564,18 @@ def get_enemy_member_stats(
         "SELECT position, member_name, stat_name, stat_value "
         "FROM enemy_member_stats WHERE form_id = ? "
         "ORDER BY position, id",
+        (form_id,),
+    ))
+
+
+def get_enemy_weaknesses(
+    conn: sqlite3.Connection, form_id: int,
+) -> list[sqlite3.Row]:
+    """Return weakness rows ordered by (position, slot_order)."""
+    return list(conn.execute(
+        "SELECT position, weakness_label, slot_order "
+        "FROM enemy_weaknesses WHERE form_id = ? "
+        "ORDER BY position, slot_order",
         (form_id,),
     ))
 

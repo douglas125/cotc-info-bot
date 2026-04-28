@@ -119,12 +119,11 @@ in `bot/`; entry point is `python -m bot`.
 **Commands:**
 - `/character name:<autocomplete>` — full embed (kit, affinities, A4
   accessories, profile, sync footer).
-- `/enemy name:<autocomplete>` — stats grid + break-shield count for one
-  encounter at a chosen rank. Dropdown swaps among the enemy's available
-  ranks (Rank1..EX3 for ranked enemies; NPCs are single-rank with no
-  dropdown). Per-position weakness icons aren't API-readable — the embed
-  links back to the spreadsheet for them. Source: the second enemy sheet
-  (Adversary Log CotC), see `INFO_SOURCES.md`.
+- `/enemy name:<autocomplete>` — stats grid + per-position break-shield
+  count + weakness labels for one encounter at a chosen rank. Dropdown
+  swaps among the enemy's available ranks (Rank1..EX3 for ranked
+  enemies; NPCs are single-rank with no dropdown). Source: the second
+  enemy sheet (Adversary Log CotC), see `INFO_SOURCES.md`.
 - `/search role weapon rarity weakness text` — top-10 list, all params
   optional, all autocompletes pull from the live DB.
 - `/refresh` — admin-gated; re-runs `sync.runner.run_sync` off the event

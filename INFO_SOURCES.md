@@ -104,12 +104,14 @@ alias map.
 
 ### What the API exposes vs. doesn't (enemy sheet)
 
-Same v4 endpoint, same field mask. Two notable enemy-specific gaps:
+Same v4 endpoint, same field mask. One enemy-specific gap:
 
-- ❌ Weakness icons in the visible blocks are inserted images (Insert >
-  Image > In cell), **not** `=IMAGE("url")` formulas. The Sheets API does
-  not return them. The `/enemy` embed surfaces the per-position break-
-  shield count and a "see sheet" link instead of decoded icons.
+- ✅ Weakness icons look like inserted images visually but are actually
+  **named-range formulas** (`=Sword`, `=Wind`, `=Dark`, …) — fully
+  API-readable through `userEnteredValue.formulaValue`. The parser strips
+  the leading `=` and whitelists the result against
+  `sync.enemy_parsers._WEAKNESS_NAMES`. `Polearm` and `Spear` reference
+  the same icon — collapse to `Spear` via `_WEAKNESS_ALIASES`.
 - ❌ Fight notes (the "/Silence" timestamped strategy text in the
   screenshot) are Google Sheets **comments** — a separate threaded
   discussion API (`spreadsheets.comments.list`), not returned by

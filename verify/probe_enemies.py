@@ -59,6 +59,11 @@ def _is_image_formula(cell: dict[str, Any]) -> bool:
     return f.upper().startswith("=IMAGE(")
 
 
+def _formula(cell: dict[str, Any]) -> str:
+    uev = cell.get("userEnteredValue") or {}
+    return uev.get("formulaValue") or ""
+
+
 def _safe_filename(s: str) -> str:
     out = re.sub(r"[^\w\-. ]+", "_", s)
     return out.strip().replace(" ", "_") or "tab"
@@ -92,7 +97,9 @@ def _dump_tab_grid(out_path: Path, sheet: dict[str, Any], rows_cap: int = 200, c
             note_flag = "Y" if note else "N"
             dv = cell.get("dataValidation")
             dv_flag = "Y" if dv else "N"
-            cells.append(f"[{c_i:>2}] {text!r:<22s} bg={bg or '-':<7s} hl={has_hl} img={img} note={note_flag} dv={dv_flag}")
+            f = _formula(cell)
+            f_short = (f[:30] + "…") if len(f) > 30 else f
+            cells.append(f"[{c_i:>2}] {text!r:<22s} f={f_short!r:<14s} bg={bg or '-':<7s} hl={has_hl} img={img} note={note_flag} dv={dv_flag}")
             if note:
                 notes_log.append(f"  r{r_i} c{c_i}: {note!r}")
             if dv:

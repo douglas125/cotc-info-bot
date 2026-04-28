@@ -192,6 +192,54 @@ def check_lloris_ex3_against_screenshot(conn) -> tuple[bool, str]:
     return True, "Lloris EX3 HP/Shields match the user screenshot"
 
 
+def check_weaknesses_present(conn) -> tuple[bool, str]:
+    """Most ranked enemies should have at least one weakness row per form."""
+    n_forms = conn.execute(
+        "SELECT COUNT(*) FROM enemy_forms f "
+        "JOIN enemies e ON e.id = f.enemy_id WHERE e.is_npc = 0"
+    ).fetchone()[0]
+    if n_forms == 0:
+        return False, "no ranked enemy_forms"
+    n_with_weak = conn.execute(
+        "SELECT COUNT(*) FROM enemy_forms f "
+        "JOIN enemies e ON e.id = f.enemy_id "
+        "WHERE e.is_npc = 0 AND EXISTS ("
+        "  SELECT 1 FROM enemy_weaknesses w WHERE w.form_id = f.id)"
+    ).fetchone()[0]
+    pct = n_with_weak * 100.0 / n_forms
+    if pct < 70:
+        return False, (
+            f"only {n_with_weak}/{n_forms} ranked forms have weaknesses ({pct:.0f}%)"
+        )
+    return True, f"{n_with_weak}/{n_forms} ranked forms have weaknesses ({pct:.0f}%)"
+
+
+def check_lloris_ex3_weaknesses(conn) -> tuple[bool, str]:
+    """Per the screenshot: Leader Lloris EX3 = Axe/Bow/Ice/Wind/Dark."""
+    rows = list(conn.execute(
+        "SELECT w.position, w.weakness_label "
+        "FROM enemies e "
+        "JOIN enemy_forms f ON f.enemy_id = e.id AND f.rank = 'EX3' "
+        "JOIN enemy_weaknesses w ON w.form_id = f.id "
+        "WHERE e.canonical_name = 'Sly Leader Lloris' "
+        "ORDER BY w.position, w.slot_order"
+    ))
+    by_pos: dict[int, list[str]] = {}
+    for r in rows:
+        by_pos.setdefault(r["position"], []).append(r["weakness_label"])
+    expected = {
+        0: ["Axe", "Bow", "Ice", "Wind", "Dark"],
+        1: ["Dagger", "Bow", "Ice", "Lightning", "Dark"],
+    }
+    for pos, exp in expected.items():
+        if by_pos.get(pos) != exp:
+            return False, (
+                f"Lloris EX3 pos{pos} weaknesses: expected {exp}, "
+                f"got {by_pos.get(pos)}"
+            )
+    return True, "Lloris EX3 weaknesses match the screenshot (10 labels)"
+
+
 # --- runner -----------------------------------------------------------------
 
 def main() -> int:
@@ -207,7 +255,9 @@ def main() -> int:
         ("NPC single-rank shape",         lambda: check_npc_single_rank(conn)),
         ("stats present + HP sanity",     lambda: check_stats_present(conn)),
         ("FTS searchable",                lambda: check_fts_searchable(conn)),
-        ("Lloris EX3 vs screenshot",      lambda: check_lloris_ex3_against_screenshot(conn)),
+        ("Lloris EX3 stats vs screenshot", lambda: check_lloris_ex3_against_screenshot(conn)),
+        ("weaknesses present per form",    lambda: check_weaknesses_present(conn)),
+        ("Lloris EX3 weaknesses vs screenshot", lambda: check_lloris_ex3_weaknesses(conn)),
     ]
     ok = True
     for name, fn in checks:

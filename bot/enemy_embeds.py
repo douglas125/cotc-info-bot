@@ -148,26 +148,42 @@ def _build_stats_field(stats_rows: list[sqlite3.Row]) -> tuple[str | None, list[
     return _truncate(table, FIELD_VALUE_LIMIT), pos_labels_list
 
 
-def _build_break_shields_line(stats_rows: list[sqlite3.Row]) -> str | None:
-    """Render the break-shield count per position as a one-liner.
+def _build_weaknesses_field(
+    stats_rows: list[sqlite3.Row],
+    weakness_rows: list[sqlite3.Row],
+) -> str | None:
+    """Render per-position break-shield count + weakness icons-as-text.
 
-    Per the enemy-icon API limitation (inserted images aren't returned by the
-    Sheets API), we surface the shield count and direct users to the sheet
-    for the icon list.
+    Weakness names come from the display tab's named-range formulas (e.g.
+    `=Sword`, `=Wind`) — not from inserted images, which the Sheets API
+    can't see. Format: `**Leader Lloris** — ×30 · Axe · Bow · Ice · Wind · Dark`.
     """
-    by_pos: dict[int, str] = {}
-    pos_labels: dict[int, str] = {}
+    shields_by_pos: dict[int, str] = {}
+    member_by_pos: dict[int, str] = {}
     for r in stats_rows:
         if r["stat_name"] == "Shields":
-            by_pos[r["position"]] = r["stat_value"]
-        if r["position"] not in pos_labels and r["member_name"]:
-            pos_labels[r["position"]] = r["member_name"]
-    if not by_pos:
+            shields_by_pos[r["position"]] = r["stat_value"]
+        if r["position"] not in member_by_pos and r["member_name"]:
+            member_by_pos[r["position"]] = r["member_name"]
+    weaknesses_by_pos: dict[int, list[str]] = {}
+    for r in weakness_rows:
+        weaknesses_by_pos.setdefault(r["position"], []).append(r["weakness_label"])
+    positions = sorted(set(shields_by_pos) | set(weaknesses_by_pos))
+    if not positions:
         return None
     parts: list[str] = []
-    for p in sorted(by_pos):
-        label = pos_labels.get(p, f"#{p+1}")
-        parts.append(f"**{label}** — ×{by_pos[p]} shields")
+    for p in positions:
+        label = member_by_pos.get(p, f"#{p+1}")
+        head = f"**{label}**"
+        bits: list[str] = []
+        if p in shields_by_pos:
+            bits.append(f"×{shields_by_pos[p]}")
+        if p in weaknesses_by_pos:
+            bits.append(" · ".join(weaknesses_by_pos[p]))
+        if bits:
+            parts.append(f"{head} — " + " · ".join(bits))
+        else:
+            parts.append(head)
     return _truncate("\n".join(parts), FIELD_VALUE_LIMIT)
 
 
@@ -203,20 +219,17 @@ def build_enemy_embed(
     if form is None:
         return None
     stats_rows = repo.get_enemy_member_stats(conn, form["id"])
+    weakness_rows = repo.get_enemy_weaknesses(conn, form["id"])
     rank_label = RANK_LABELS.get(rank, rank)
     embed = _new_enemy_header_embed(enemy, rank_label)
     stats_field, _pos_labels = _build_stats_field(stats_rows)
     if stats_field:
         embed.add_field(name="Stats", value=stats_field, inline=False)
-    shields_field = _build_break_shields_line(stats_rows)
-    if shields_field:
-        sheet_url = _safe_enemy_url(enemy["hyperlink_url"])
-        suffix = ""
-        if sheet_url:
-            suffix = f"\n\n[Open in spreadsheet for weakness icons]({sheet_url})"
+    weaknesses_field = _build_weaknesses_field(stats_rows, weakness_rows)
+    if weaknesses_field:
         embed.add_field(
-            name="Break Shields",
-            value=_truncate(shields_field + suffix, FIELD_VALUE_LIMIT),
+            name="Weaknesses",
+            value=weaknesses_field,
             inline=False,
         )
     last_sync = repo.latest_sync_run(conn)

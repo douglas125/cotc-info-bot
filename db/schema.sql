@@ -175,6 +175,17 @@ CREATE TABLE IF NOT EXISTS enemy_member_stats (
 );
 CREATE INDEX IF NOT EXISTS ix_enemy_stats_form ON enemy_member_stats(form_id);
 
+-- Weakness icons live in the display tabs as named-range formulas like
+-- '=Sword', '=Wind', '=Dark'. We pull the label from `userEnteredValue.formulaValue`.
+CREATE TABLE IF NOT EXISTS enemy_weaknesses (
+    id              INTEGER PRIMARY KEY,
+    form_id         INTEGER NOT NULL REFERENCES enemy_forms(id) ON DELETE CASCADE,
+    position        INTEGER NOT NULL,
+    weakness_label  TEXT NOT NULL,         -- 'Sword'|'Axe'|'Fire'|'Ice'|...
+    slot_order      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_enemy_weak_form ON enemy_weaknesses(form_id);
+
 -- Free-text search across enemy canonical names, categories, and member names.
 CREATE VIRTUAL TABLE IF NOT EXISTS enemies_fts USING fts5(
     enemy_id UNINDEXED,
