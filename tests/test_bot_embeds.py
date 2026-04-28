@@ -142,29 +142,39 @@ def test_build_section_actives_basic_shape(tmp_db_path: Path) -> None:
     assert embed.url is not None and embed.url.startswith("https://")
     # No artwork: the image-source code path was removed.
     assert embed.thumbnail.url is None
-    assert embed.image.url is None
+    assert embed.image.url == f"attachment://character_{form_id}_actives.png"
+    assert not embed.fields
 
-    field_names = [f.name for f in embed.fields]
-    assert "Active" in field_names
-    # Latent belongs to the Passives section, not Actives.
-    assert "Latent" not in field_names
-    active_field = next(f for f in embed.fields if f.name == "Active")
-    assert "Fireball" in active_field.value
-    assert "Hellfire" in active_field.value
+
+def test_build_character_message_includes_rendered_attachment(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed(conn)
+    message = embeds.build_character_message(conn, form_id, "actives")
+    conn.close()
+
+    assert message is not None
+    assert message.file is not None
+    assert message.file.filename == f"character_{form_id}_actives.png"
+    assert message.embed.image.url == f"attachment://character_{form_id}_actives.png"
 
 
 def test_build_section_passives_includes_latent(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     form_id = _seed(conn)
     embed = embeds.build_section_embed(conn, form_id, "passives")
+    skills = repo.get_skills(conn, form_id)
     conn.close()
 
     assert embed is not None
-    field_names = [f.name for f in embed.fields]
-    assert "Latent" in field_names
-    latent_field = next(f for f in embed.fields if f.name == "Latent")
-    assert "init 2t" in latent_field.value
-    assert "cd 3t" in latent_field.value
+    assert embed.image.url == f"attachment://character_{form_id}_passives.png"
+    sections = embeds._plain_skill_sections(
+        skills,
+        embeds.PASSIVE_KIND_ORDER,
+        "Passive Skills",
+        "No passive skills recorded for this form.",
+    )
+    latent = next(section for section in sections if section.title == "Latent")
+    assert any("init 2t" in line and "cd 3t" in line for line in latent.lines)
 
 
 def test_skill_line_has_no_slot_number_or_b_prefix(tmp_db_path: Path) -> None:
@@ -172,16 +182,21 @@ def test_skill_line_has_no_slot_number_or_b_prefix(tmp_db_path: Path) -> None:
     must render as "1*" not "B1*"."""
     conn = repo.connect(tmp_db_path)
     form_id = _seed_full_kit(conn)
-    embed = embeds.build_section_embed(conn, form_id, "actives")
+    skills = repo.get_skills(conn, form_id)
     conn.close()
-    active_field = next(f for f in embed.fields if f.name == "Active")
+    active_lines = [
+        embeds._plain_skill_line(row)
+        for row in skills
+        if (row["kind"] or "") == "active"
+    ]
+    active_text = "\n".join(active_lines)
     # No "**N.**" leading index pattern.
     import re as _re
-    assert not _re.search(r"\*\*\d+\.\*\*", active_field.value)
+    assert not _re.search(r"\*\*\d+\.\*\*", active_text)
     # Board markers render without the "B" prefix.
-    assert "`B1⭐`" not in active_field.value
-    assert "`B2⭐`" not in active_field.value
-    assert "`1⭐`" in active_field.value or "`2⭐`" in active_field.value
+    assert "B1*" not in active_text
+    assert "B2*" not in active_text
+    assert "1*" in active_text or "2*" in active_text
 
 
 def test_build_section_a4_basic_shape(tmp_db_path: Path) -> None:
@@ -192,12 +207,8 @@ def test_build_section_a4_basic_shape(tmp_db_path: Path) -> None:
 
     assert embed is not None
     assert "Cyrus" in embed.title
-    field_names = [f.name for f in embed.fields]
-    assert "A4 Accessory" in field_names
-    assert "Active" not in field_names
-    a4_field = next(f for f in embed.fields if f.name == "A4 Accessory")
-    assert "Scholar's Tome" in a4_field.value
-    assert "exclusive" in a4_field.value
+    assert embed.image.url == f"attachment://character_{form_id}_a4.png"
+    assert not embed.fields
 
 
 def test_build_section_a4_handles_no_equipment(tmp_db_path: Path) -> None:
@@ -206,8 +217,8 @@ def test_build_section_a4_handles_no_equipment(tmp_db_path: Path) -> None:
     form_id = repo.insert_form(conn, character_id=ch, display_name="NoGear", rarity="3*")
     embed = embeds.build_section_embed(conn, form_id, "a4")
     conn.close()
-    a4_field = next(f for f in embed.fields if f.name == "A4 Accessory")
-    assert "no a4 accessory" in a4_field.value.lower()
+    assert embed is not None
+    assert embed.image.url == f"attachment://character_{form_id}_a4.png"
 
 
 def test_build_section_info_basic_shape(tmp_db_path: Path) -> None:
@@ -218,14 +229,8 @@ def test_build_section_info_basic_shape(tmp_db_path: Path) -> None:
 
     assert embed is not None
     assert "Cyrus" in embed.title
-    field_names = [f.name for f in embed.fields]
-    assert "Weakness" in field_names
-    assert "Element" in field_names
-    assert "Weapon" in field_names
-    assert "Profile" in field_names
-    assert "Character Art" in field_names
-    art_field = next(f for f in embed.fields if f.name == "Character Art")
-    assert "spreadsheet" in art_field.value.lower()
+    assert embed.image.url == f"attachment://character_{form_id}_info.png"
+    assert not embed.fields
 
 
 def test_build_section_returns_none_for_missing_form(tmp_db_path: Path) -> None:
@@ -235,7 +240,7 @@ def test_build_section_returns_none_for_missing_form(tmp_db_path: Path) -> None:
     assert embed is None
 
 
-def test_build_section_actives_respects_field_limits(tmp_db_path: Path) -> None:
+def test_build_section_actives_renders_long_skill_attachment(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     ch = repo.upsert_character(conn, canonical_name="LongDude", base_role="r", base_weapon="w")
     form_id = repo.insert_form(conn, character_id=ch, display_name="LongDude", rarity="5*")
@@ -248,22 +253,22 @@ def test_build_section_actives_respects_field_limits(tmp_db_path: Path) -> None:
          "power_min": None, "power_max": None, "hits": None}
         for i in range(1, 31)
     ])
-    embed = embeds.build_section_embed(conn, form_id, "actives")
+    message = embeds.build_character_message(conn, form_id, "actives")
     conn.close()
-    for f in embed.fields:
-        assert len(f.value) <= embeds.FIELD_VALUE_LIMIT
-        assert len(f.name) <= embeds.FIELD_NAME_LIMIT
+    assert message is not None
+    assert message.file is not None
+    assert message.file.filename == f"character_{form_id}_actives.png"
 
 
 def test_build_section_ultimate_folds_tiers(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     form_id = _seed_full_kit(conn)
-    embed = embeds.build_section_embed(conn, form_id, "ultimate")
+    rows = [s for s in repo.get_skills(conn, form_id) if (s["kind"] or "") == "ultimate"]
     conn.close()
-    ult = next(f for f in embed.fields if f.name == "Ultimate")
-    assert "Lv1" in ult.value
-    assert "Lv10" in ult.value
-    assert "Lv20" in ult.value
+    lines = "\n".join(embeds._plain_ultimate_lines(rows))
+    assert "Lv1" in lines
+    assert "Lv10" in lines
+    assert "Lv20" in lines
 
 
 def test_collapse_ultimates_handles_solo_row() -> None:
@@ -355,11 +360,11 @@ def test_header_description_has_no_unescaped_star(tmp_db_path: Path) -> None:
     (Discord parses ``*X*`` as italic, mangling the rarity readout)."""
     conn = repo.connect(tmp_db_path)
     form_id = _seed(conn)
-    embed = embeds.build_section_embed(conn, form_id, "actives")
+    form = repo.get_form(conn, form_id)
     conn.close()
-    assert embed is not None and embed.description is not None
-    assert "5*" not in embed.description
-    assert "5⭐" in embed.description
+    header = "\n".join(embeds._character_header_lines(form))
+    assert "5*" not in header
+    assert "5⭐" in header
 
 
 def test_header_description_tags_sea_and_ex(tmp_db_path: Path) -> None:
@@ -371,13 +376,13 @@ def test_header_description_tags_sea_and_ex(tmp_db_path: Path) -> None:
         conn, character_id=ch, display_name="Lynette EX", rarity="5*",
         variant_kind="ex", server="sea",
     )
-    embed = embeds.build_section_embed(conn, form_id, "actives")
+    form = repo.get_form(conn, form_id)
     conn.close()
-    assert embed is not None and embed.description is not None
-    assert "EX form" in embed.description
-    assert "SEA only" in embed.description
-    assert "Thief" in embed.description
-    assert "Dagger" in embed.description
+    header = "\n".join(embeds._character_header_lines(form))
+    assert "EX form" in header
+    assert "SEA only" in header
+    assert "Thief" in header
+    assert "Dagger" in header
 
 
 def test_feedback_results_embed(tmp_db_path: Path) -> None:
