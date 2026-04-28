@@ -67,7 +67,7 @@ character_sheet/
 ├── bot/                         # Discord bot (`python -m bot`)
 │   ├── __main__.py              # entrypoint; cold-start sync if DB empty
 │   ├── client.py                # discord.Client + CommandTree wiring
-│   ├── commands.py              # /character, /search, /affinities, /refresh
+│   ├── commands.py              # /character, /search, /refresh
 │   ├── embeds.py                # pure embed builders (testable, no runtime)
 │   └── db.py                    # per-call connection (mirrors app.py)
 ├── sync/
@@ -119,7 +119,6 @@ in `bot/`; entry point is `python -m bot`.
   accessories, profile, sync footer).
 - `/search role weapon rarity weakness text` — top-10 list, all params
   optional, all autocompletes pull from the live DB.
-- `/affinities name:<autocomplete>` — quick weakness check.
 - `/refresh` — admin-gated; re-runs `sync.runner.run_sync` off the event
   loop. Refuses if a refresh is already in flight.
 

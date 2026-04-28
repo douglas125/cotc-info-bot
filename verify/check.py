@@ -302,13 +302,16 @@ def check_sea_kit_precedence(payload: dict, conn) -> list[tuple[bool, str]]:
     they're typically SEA-only characters with no Index entry yet.
     """
     out: list[tuple[bool, str]] = []
-    n_sea = conn.execute(
-        "SELECT COUNT(*) FROM character_forms WHERE server='sea'"
-    ).fetchone()[0]
-    out.append((n_sea == 0,
-                f"no server='sea' duplicate forms: {n_sea}"
-                + (" (run sync to clear stale rows from a previous version)"
-                   if n_sea > 0 else "")))
+    # Regression guard: no display_name should appear as both a global and a
+    # sea form (would mean a SEA-only block leaked through despite a matching
+    # Index entry).
+    dupes = [r[0] for r in conn.execute(
+        "SELECT display_name FROM character_forms "
+        "GROUP BY LOWER(display_name) "
+        "HAVING COUNT(DISTINCT server) > 1"
+    )]
+    out.append((not dupes,
+                f"no cross-server display_name duplicates: {dupes or 'ok'}"))
 
     sea_sheet = sheet_by_gid(payload, SEA_GID)
     if sea_sheet is None:
@@ -406,7 +409,7 @@ def check_spot_characters(payload: dict, conn) -> list[tuple[bool, str]]:
     out: list[tuple[bool, str]] = []
     # Use canonical (Index) names — the runner attaches role-tab data to these.
     targets = ["Fiore", "Lionel", "Therion", "Cyrus", "EX Cyrus", "H'aanit",
-               "Tressa", "Clauser"]
+               "Tressa", "Clauser", "Lynette EX"]
     for name in targets:
         ch = conn.execute(
             "SELECT id FROM characters WHERE canonical_name = ?", (name,)
@@ -417,12 +420,12 @@ def check_spot_characters(payload: dict, conn) -> list[tuple[bool, str]]:
         skills_n = conn.execute(
             "SELECT COUNT(*) FROM skills s "
             "JOIN character_forms cf ON cf.id = s.form_id "
-            "WHERE cf.character_id = ? AND cf.server='global'", (ch["id"],),
+            "WHERE cf.character_id = ?", (ch["id"],),
         ).fetchone()[0]
         eq_n = conn.execute(
             "SELECT COUNT(*) FROM equipment e "
             "JOIN character_forms cf ON cf.id = e.form_id "
-            "WHERE cf.character_id = ? AND cf.server='global'", (ch["id"],),
+            "WHERE cf.character_id = ?", (ch["id"],),
         ).fetchone()[0]
         out.append((skills_n >= 3,
                     f"spot-character '{name}': skills={skills_n}, equipment={eq_n}"))

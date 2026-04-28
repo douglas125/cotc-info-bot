@@ -40,9 +40,26 @@ def test_levenshtein_is_case_insensitive() -> None:
     ("EX2 Erika", "ex2"),
     ("Saint of Twin Blazes", "alt"),
     ("Black Maiden (Alt)", "alt"),
+    ("Lynette EX", "ex"),
+    ("Castti EX2", "ex2"),
+    ("Lynette ex", "ex"),
+    (" Lynette EX ", "ex"),
 ])
 def test_variant_kind_for(name: str, expected: str) -> None:
     assert _variant_kind_for(name) == expected
+
+
+@pytest.mark.parametrize("name,base", [
+    ("Lynette EX", "Lynette"),
+    ("EX Lynette", "Lynette"),
+    ("Lynette EX2", "Lynette"),
+    ("EX2 Lynette", "Lynette"),
+    ("Lynette", "Lynette"),
+    ("ex lynette", "lynette"),
+])
+def test_strip_ex_affix(name: str, base: str) -> None:
+    from sync.runner import _strip_ex_affix
+    assert _strip_ex_affix(name) == base
 
 
 # --- _select_block_for ------------------------------------------------------
@@ -277,5 +294,69 @@ def test_run_sync_sea_kit_takes_precedence_and_emits_one_form(
         )]
         assert any("WARRIOR_ROLE_TAB_KIT" in (d or "") for d in therion_descs), \
             f"non-SEA character lost role-tab kit: {therion_descs!r}"
+    finally:
+        conn.close()
+
+
+def _build_payload_with_sea_only_ex() -> dict:
+    """Lynette in the Index + warrior role tab, Lynette EX only in the SEA tab."""
+    sheets = [
+        _index_sheet_with(("Lynette", "warrior")),
+        _sheet(WARRIORS_5_GID, "Warriors 5",
+               _block_rows("Lynette", "BASE_KIT")),
+        _sheet(SEA_GID, "SEA/GL Unique Kits",
+               _block_rows("Lynette EX", "EX_KIT_FROM_SEA")),
+    ]
+    used = {s["properties"]["sheetId"] for s in sheets}
+    for tab in TABS:
+        if tab.gid not in used:
+            sheets.append(_sheet(tab.gid, tab.name, [[_idx_cell()]]))
+    return {"sheets": sheets}
+
+
+def test_run_sync_creates_form_for_sea_only_block(
+    tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SEA-only EX variants (e.g. Lynette EX) must surface as their own form
+    even though they aren't listed in the Characters Index."""
+    payload = _build_payload_with_sea_only_ex()
+    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key: payload)
+    monkeypatch.setattr("db.repo.DB_PATH", tmp_db_path)
+
+    summary = runner_mod.run_sync("dummy-key")
+    assert summary["status"] == "ok"
+
+    conn = sqlite3.connect(tmp_db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT f.id, f.display_name, f.rarity, f.variant_kind, f.server, "
+            "       f.sheet_gid, c.base_role, c.base_weapon "
+            "FROM character_forms f "
+            "JOIN characters c ON c.id = f.character_id "
+            "WHERE f.display_name = 'Lynette EX'"
+        ).fetchone()
+        assert row is not None, "Lynette EX should have been created from the SEA tab"
+        assert row["rarity"] == "5*"
+        assert row["variant_kind"] == "ex"
+        assert row["server"] == "sea"
+        assert row["sheet_gid"] == SEA_GID
+        # Role/weapon copied from the base 'Lynette' character.
+        assert row["base_role"] == "warrior"
+        assert row["base_weapon"] == "sword"
+
+        descs = [r["description"] for r in conn.execute(
+            "SELECT description FROM skills WHERE form_id = ?", (row["id"],),
+        )]
+        assert any("EX_KIT_FROM_SEA" in (d or "") for d in descs), \
+            f"SEA-only kit didn't make it onto the new form: {descs!r}"
+
+        # Base 'Lynette' still exists with its role-tab kit untouched.
+        base_descs = [r["description"] for r in conn.execute(
+            "SELECT s.description FROM skills s "
+            "JOIN character_forms cf ON cf.id = s.form_id "
+            "WHERE cf.display_name = 'Lynette'"
+        )]
+        assert any("BASE_KIT" in (d or "") for d in base_descs)
     finally:
         conn.close()

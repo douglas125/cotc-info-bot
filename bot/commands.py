@@ -1,4 +1,4 @@
-"""Slash command definitions: /character, /search, /affinities, /refresh.
+"""Slash command definitions: /character, /search, /refresh.
 
 Registers everything onto a `discord.app_commands.CommandTree` so the bot
 client's `on_ready` can sync once at startup.
@@ -23,6 +23,32 @@ logger = logging.getLogger(__name__)
 
 AUTOCOMPLETE_LIMIT = 25  # Discord's hard cap on choice list size.
 
+
+def _ex_swap_variants(s: str) -> list[str]:
+    """Return the input plus EX/EX2 prefix↔suffix swaps, deduped (case-insensitive)."""
+    s = (s or "").strip()
+    if not s:
+        return []
+    out = [s]
+    low = s.lower()
+    for prefix, suffix in (("ex2 ", " ex2"), ("ex ", " ex")):
+        if low.startswith(prefix):
+            rest = s[len(prefix):].strip()
+            if rest:
+                out.append(f"{rest}{suffix.upper()}")
+        elif low.endswith(suffix):
+            rest = s[: -len(suffix)].strip()
+            if rest:
+                out.append(f"{prefix.upper()}{rest}")
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for v in out:
+        k = v.lower()
+        if k not in seen:
+            seen.add(k)
+            deduped.append(v)
+    return deduped
+
 # Module-level lock so two admins hitting /refresh at once don't dogpile the
 # Sheets API. Created lazily to avoid binding to a different event loop than
 # the bot eventually runs on (tests, REPL, etc.).
@@ -37,7 +63,7 @@ def _lock() -> asyncio.Lock:
 
 
 # ----------------------------------------------------------------------------
-# Form-name autocomplete (used by /character and /affinities)
+# Form-name autocomplete (used by /character)
 # ----------------------------------------------------------------------------
 
 def _autocomplete_forms(conn: sqlite3.Connection, current: str) -> list[app_commands.Choice[str]]:
@@ -49,19 +75,31 @@ def _autocomplete_forms(conn: sqlite3.Connection, current: str) -> list[app_comm
     """
     current = (current or "").strip().lower()
     if current:
-        prefix_like = current.replace("%", r"\%") + "%"
-        sub_like = "%" + current.replace("%", r"\%") + "%"
+        # EX prefix↔suffix variants so typing "Castti EX" also matches stored
+        # "EX Castti" (and vice versa). Original input ranks first.
+        variants = [v.lower() for v in _ex_swap_variants(current)] or [current]
+        like_clauses: list[str] = []
+        params: list[Any] = []
+        for v in variants:
+            v_esc = v.replace("%", r"\%")
+            like_clauses.append("LOWER(f.display_name) LIKE ? ESCAPE '\\'")
+            params.append(v_esc + "%")
+            like_clauses.append("LOWER(f.display_name) LIKE ? ESCAPE '\\'")
+            params.append("%" + v_esc + "%")
+        # Rank: prefix-on-original-input first.
+        primary_prefix = variants[0].replace("%", r"\%") + "%"
+        params.append(primary_prefix)
+        params.append(AUTOCOMPLETE_LIMIT)
         rows = list(conn.execute(
             "SELECT f.id, f.display_name, f.rarity, c.base_role "
             "FROM character_forms f "
             "JOIN characters c ON c.id = f.character_id "
-            "WHERE LOWER(f.display_name) LIKE ? ESCAPE '\\' "
-            "   OR LOWER(f.display_name) LIKE ? ESCAPE '\\' "
+            f"WHERE {' OR '.join(like_clauses)} "
             "ORDER BY "
             "   CASE WHEN LOWER(f.display_name) LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END, "
             "   f.rarity DESC, f.display_name "
             "LIMIT ?",
-            (prefix_like, sub_like, prefix_like, AUTOCOMPLETE_LIMIT),
+            params,
         ))
     else:
         rows = list(conn.execute(
@@ -75,7 +113,8 @@ def _autocomplete_forms(conn: sqlite3.Connection, current: str) -> list[app_comm
 
     out: list[app_commands.Choice[str]] = []
     for r in rows:
-        label = f"{r['display_name']} ({r['rarity'] or '?'} · {r['base_role'] or '?'})"
+        rarity_disp = embeds._rarity_label(r["rarity"]) if r["rarity"] else "?"
+        label = f"{r['display_name']} ({rarity_disp} · {r['base_role'] or '?'})"
         # Discord caps choice name at 100 chars.
         if len(label) > 100:
             label = label[:99] + "…"
@@ -99,22 +138,27 @@ def _resolve_form_id(conn: sqlite3.Connection, name_or_id: str) -> int | None:
             return candidate
 
     # Free-text fallback: exact display_name match (case-insensitive), or
-    # leftmost prefix match if exact misses.
-    row = conn.execute(
-        "SELECT id FROM character_forms "
-        "WHERE LOWER(display_name) = LOWER(?) "
-        "ORDER BY rarity DESC LIMIT 1",
-        (raw,),
-    ).fetchone()
-    if row:
-        return row["id"]
-    row = conn.execute(
-        "SELECT id FROM character_forms "
-        "WHERE LOWER(display_name) LIKE LOWER(?) ESCAPE '\\' "
-        "ORDER BY rarity DESC, display_name LIMIT 1",
-        (raw.replace("%", r"\%") + "%",),
-    ).fetchone()
-    return row["id"] if row else None
+    # leftmost prefix match if exact misses. Try EX prefix↔suffix swap
+    # variants too so "Castti EX" resolves to stored "EX Castti".
+    for variant in _ex_swap_variants(raw):
+        row = conn.execute(
+            "SELECT id FROM character_forms "
+            "WHERE LOWER(display_name) = LOWER(?) "
+            "ORDER BY rarity DESC LIMIT 1",
+            (variant,),
+        ).fetchone()
+        if row:
+            return row["id"]
+    for variant in _ex_swap_variants(raw):
+        row = conn.execute(
+            "SELECT id FROM character_forms "
+            "WHERE LOWER(display_name) LIKE LOWER(?) ESCAPE '\\' "
+            "ORDER BY rarity DESC, display_name LIMIT 1",
+            (variant.replace("%", r"\%") + "%",),
+        ).fetchone()
+        if row:
+            return row["id"]
+    return None
 
 
 # ----------------------------------------------------------------------------
@@ -167,40 +211,6 @@ def register(tree: app_commands.CommandTree) -> None:
 
     @character_cmd.autocomplete("name")
     async def _character_ac(interaction: discord.Interaction, current: str):
-        return _autocomplete_forms(bot_db.conn(), current)
-
-    @tree.command(name="affinities", description="Quick weakness/element/weapon lookup for a CotC unit.")
-    @app_commands.describe(name="Start typing a character name to see suggestions.")
-    async def affinities_cmd(interaction: discord.Interaction, name: str) -> None:
-        conn = bot_db.conn()
-        form_id = _resolve_form_id(conn, name)
-        if form_id is None:
-            await interaction.response.send_message(
-                f"No character matches `{name}`.", ephemeral=True,
-            )
-            return
-        form = repo.get_form(conn, form_id)
-        affs = repo.get_affinities(conn, form_id)
-        if not form:
-            await interaction.response.send_message("Not found.", ephemeral=True)
-            return
-        embed = discord.Embed(
-            title=f"{embeds._rarity_prefix(form['rarity'])} {form['display_name']}".strip(),
-            description=f"{(form['base_role'] or '?').title()} · {(form['base_weapon'] or '?').title()}",
-        )
-        groups = embeds._affinity_groups(affs)
-        if not groups:
-            embed.add_field(name="Affinities", value="_none recorded_", inline=False)
-        else:
-            for kind in ("weapon", "element", "weakness", "trait"):
-                if kind in groups:
-                    embed.add_field(
-                        name=kind.title(), value=", ".join(groups[kind]), inline=True,
-                    )
-        await interaction.response.send_message(embed=embed)
-
-    @affinities_cmd.autocomplete("name")
-    async def _affinities_ac(interaction: discord.Interaction, current: str):
         return _autocomplete_forms(bot_db.conn(), current)
 
     @tree.command(name="search", description="Filter CotC units by role, weapon, rarity, weakness, or free text.")

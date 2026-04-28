@@ -99,6 +99,59 @@ def test_resolve_form_id_returns_none_for_unknown(tmp_db_path: Path) -> None:
     conn.close()
 
 
+def _seed_ex_pair(conn) -> tuple[int, int]:
+    """Seed an Index-style 'EX Castti' (prefix) and SEA-style 'Lynette EX' (suffix)."""
+    ch_a = repo.upsert_character(conn, canonical_name="EX Castti",
+                                  base_role="apothecary", base_weapon="axe")
+    fid_a = repo.insert_form(conn, character_id=ch_a, display_name="EX Castti",
+                              rarity="5*", variant_kind="ex")
+    ch_b = repo.upsert_character(conn, canonical_name="Lynette EX",
+                                  base_role="dancer", base_weapon="fan")
+    fid_b = repo.insert_form(conn, character_id=ch_b, display_name="Lynette EX",
+                              rarity="5*", variant_kind="ex", server="sea")
+    return fid_a, fid_b
+
+
+def test_ex_swap_variants() -> None:
+    assert bot_commands._ex_swap_variants("Castti EX") == ["Castti EX", "EX Castti"]
+    assert bot_commands._ex_swap_variants("EX Castti") == ["EX Castti", "Castti EX"]
+    assert bot_commands._ex_swap_variants("Erika EX2") == ["Erika EX2", "EX2 Erika"]
+    assert bot_commands._ex_swap_variants("EX2 Erika") == ["EX2 Erika", "Erika EX2"]
+    # No EX token → no swap.
+    assert bot_commands._ex_swap_variants("Cyrus") == ["Cyrus"]
+    assert bot_commands._ex_swap_variants("") == []
+    assert bot_commands._ex_swap_variants("   ") == []
+
+
+def test_autocomplete_swaps_ex_position(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    fid_castti, fid_lynette = _seed_ex_pair(conn)
+
+    # Typed suffix → matches stored prefix-form 'EX Castti'.
+    by_castti_suffix = bot_commands._autocomplete_forms(conn, current="Castti EX")
+    assert any(int(c.value) == fid_castti for c in by_castti_suffix), \
+        f"'Castti EX' should match stored 'EX Castti': {[c.name for c in by_castti_suffix]}"
+
+    # Typed prefix → matches stored suffix-form 'Lynette EX'.
+    by_lynette_prefix = bot_commands._autocomplete_forms(conn, current="EX Lynette")
+    assert any(int(c.value) == fid_lynette for c in by_lynette_prefix), \
+        f"'EX Lynette' should match stored 'Lynette EX': {[c.name for c in by_lynette_prefix]}"
+
+    conn.close()
+
+
+def test_resolve_form_id_swaps_ex_position(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    fid_castti, fid_lynette = _seed_ex_pair(conn)
+
+    assert bot_commands._resolve_form_id(conn, "Castti EX") == fid_castti
+    assert bot_commands._resolve_form_id(conn, "EX Lynette") == fid_lynette
+    # Original spellings still resolve directly.
+    assert bot_commands._resolve_form_id(conn, "EX Castti") == fid_castti
+    assert bot_commands._resolve_form_id(conn, "Lynette EX") == fid_lynette
+    conn.close()
+
+
 def test_filter_choices_caps_and_filters() -> None:
     values = [f"role-{i:02d}" for i in range(40)]
     out = bot_commands._filter_choices(values, current="")

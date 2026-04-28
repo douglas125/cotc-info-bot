@@ -137,7 +137,7 @@ def test_build_section_skills_basic_shape(tmp_db_path: Path) -> None:
 
     assert embed is not None
     assert "Cyrus" in embed.title
-    assert "★★★★★" in embed.title
+    assert "⭐⭐⭐⭐⭐" in embed.title
     assert embed.color is not None and embed.color.value == 0xCC0000
     assert embed.url is not None and embed.url.startswith("https://")
     # No artwork: the image-source code path was removed.
@@ -305,9 +305,47 @@ def test_color_from_hex_handles_garbage() -> None:
 
 
 def test_rarity_prefix() -> None:
-    assert embeds._rarity_prefix("5*") == "★★★★★"
-    assert embeds._rarity_prefix("4*") == "★★★★"
-    assert embeds._rarity_prefix("3*") == "★★★"
-    assert embeds._rarity_prefix("free35") == "★★★→★★★★★"
+    assert embeds._rarity_prefix("5*") == "⭐⭐⭐⭐⭐"
+    assert embeds._rarity_prefix("4*") == "⭐⭐⭐⭐"
+    assert embeds._rarity_prefix("3*") == "⭐⭐⭐"
+    assert embeds._rarity_prefix("free35") == "⭐⭐⭐→⭐⭐⭐⭐⭐"
     assert embeds._rarity_prefix(None) == ""
     assert embeds._rarity_prefix("???") == ""
+
+
+def test_rarity_label() -> None:
+    assert embeds._rarity_label("5*") == "5⭐"
+    assert embeds._rarity_label("4*") == "4⭐"
+    assert embeds._rarity_label("3*") == "3⭐"
+    assert embeds._rarity_label("free35") == "3⭐→5⭐"
+    assert embeds._rarity_label(None) == "?"
+
+
+def test_header_description_has_no_unescaped_star(tmp_db_path: Path) -> None:
+    """Regression: rarity in the description must not contain a bare ``*``
+    (Discord parses ``*X*`` as italic, mangling the rarity readout)."""
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed(conn)
+    embed = embeds.build_section_embed(conn, form_id, "skills")
+    conn.close()
+    assert embed is not None and embed.description is not None
+    assert "5*" not in embed.description
+    assert "5⭐" in embed.description
+
+
+def test_header_description_tags_sea_and_ex(tmp_db_path: Path) -> None:
+    """SEA-only EX form should advertise both qualifiers in the description."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="Lynette EX",
+                                base_role="dancer", base_weapon="fan")
+    form_id = repo.insert_form(
+        conn, character_id=ch, display_name="Lynette EX", rarity="5*",
+        variant_kind="ex", server="sea",
+    )
+    embed = embeds.build_section_embed(conn, form_id, "skills")
+    conn.close()
+    assert embed is not None and embed.description is not None
+    assert "EX form" in embed.description
+    assert "SEA only" in embed.description
+    assert "Dancer" in embed.description
+    assert "Fan" in embed.description

@@ -71,15 +71,26 @@ def _color_from_hex(hex_color: str | None) -> discord.Color | None:
 
 
 def _rarity_prefix(rarity: str | None) -> str:
+    """Star glyphs for the embed title. ⭐ instead of ``*`` so Discord doesn't
+    parse it as italic markdown."""
     if rarity == "5*":
-        return "★★★★★"
+        return "⭐⭐⭐⭐⭐"
     if rarity == "4*":
-        return "★★★★"
+        return "⭐⭐⭐⭐"
     if rarity == "3*":
-        return "★★★"
+        return "⭐⭐⭐"
     if rarity == "free35":
-        return "★★★→★★★★★"
+        return "⭐⭐⭐→⭐⭐⭐⭐⭐"
     return ""
+
+
+def _rarity_label(rarity: str | None) -> str:
+    """Compact rarity label (``5⭐``) for description and search lines."""
+    if rarity in ("5*", "4*", "3*"):
+        return f"{rarity[0]}⭐"
+    if rarity == "free35":
+        return "3⭐→5⭐"
+    return rarity or "?"
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -96,7 +107,7 @@ def _format_skill_line(s: sqlite3.Row) -> str:
     if s["sp_cost"] is not None:
         bits.append(f"`{s['sp_cost']} SP`")
     if s["learn_board"]:
-        bits.append(f"[{s['learn_board']}*]")
+        bits.append(f"`B{s['learn_board']}⭐`")
     if s["tier_level"]:
         bits.append(f"`Lv{s['tier_level']}`")
     name = s["name"] or ""
@@ -202,14 +213,27 @@ def _new_header_embed(form: sqlite3.Row) -> discord.Embed:
         url=_safe_url(form["hyperlink_url"]),
         color=_color_from_hex(form["name_color_hex"]),
     )
-    role = form["base_role"] or "?"
-    weapon = form["base_weapon"] or "?"
-    server = form["server"] or "global"
-    rarity_disp = rarity or "?"
-    embed.description = _truncate(
-        f"**{role.title()}** · **{weapon.title()}** · {rarity_disp} · `{server}`",
-        EMBED_DESCRIPTION_LIMIT,
-    )
+    role = (form["base_role"] or "?").title()
+    weapon = (form["base_weapon"] or "?").title()
+    primary = f"**{role}** · **{weapon}** · {_rarity_label(rarity)}"
+
+    tags: list[str] = []
+    variant = form["variant_kind"] or "base"
+    if variant == "ex":
+        tags.append("EX form")
+    elif variant == "ex2":
+        tags.append("EX2 form")
+    elif variant == "alt":
+        tags.append("alt form")
+    if (form["server"] or "global") == "sea":
+        tags.append("SEA only")
+
+    if tags:
+        embed.description = _truncate(
+            f"{primary}\n*{' · '.join(tags)}*", EMBED_DESCRIPTION_LIMIT,
+        )
+    else:
+        embed.description = _truncate(primary, EMBED_DESCRIPTION_LIMIT)
     return embed
 
 
@@ -357,10 +381,11 @@ def search_results_to_embed(rows: list[Any], *, query_summary: str) -> discord.E
     shown = rows[:10]
     lines = []
     for r in shown:
-        rarity = r["rarity"] or "?"
+        role = (r["base_role"] or "?").title()
+        weapon = (r["base_weapon"] or "?").title()
         lines.append(
             f"• **{r['display_name']}** — "
-            f"{r['base_role'] or '?'}/{r['base_weapon'] or '?'} · {rarity}"
+            f"{role} · {weapon} · {_rarity_label(r['rarity'])}"
         )
     embed.add_field(
         name="Top results",
