@@ -119,5 +119,5 @@ Same v4 endpoint, same field mask. One enemy-specific gap:
 
 ## Git remote
 
-- Repo: <https://github.com/douglas125/cotc-character-search>
+- Repo: <https://github.com/douglas125/cotc-info-bot>
 - Branch: `main` (protected; PR-only).
