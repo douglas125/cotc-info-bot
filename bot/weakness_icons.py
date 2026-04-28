@@ -1,11 +1,8 @@
-"""Shared weakness icon loading and inline text tokenization."""
+"""Shared weakness icon loading for generated enemy panels."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-import re
-from typing import Iterator
 
 from PIL import Image
 
@@ -32,27 +29,6 @@ ICON_FILES: dict[str, str] = {
 }
 
 _CANONICAL_BY_LOWER = {label.lower(): label for label in ICON_FILES}
-_LABEL_PATTERN = re.compile(
-    r"(?<![A-Za-z])("
-    + "|".join(re.escape(label) for label in sorted(ICON_FILES, key=len, reverse=True))
-    + r")(?![A-Za-z])",
-    re.IGNORECASE,
-)
-
-
-@dataclass(frozen=True)
-class IconToken:
-    label: str
-
-
-@dataclass(frozen=True)
-class TextToken:
-    text: str
-
-
-InlineToken = IconToken | TextToken
-
-
 def canonical_label(label: str) -> str | None:
     return _CANONICAL_BY_LOWER.get((label or "").strip().lower())
 
@@ -76,19 +52,3 @@ def _load_icon_cached(label: str, size: int) -> Image.Image | None:
 def load_icon(label: str, size: int = ICON_SIZE) -> Image.Image | None:
     icon = _load_icon_cached(label, size)
     return icon.copy() if icon is not None else None
-
-
-def inline_tokens(text: str) -> Iterator[InlineToken]:
-    """Yield text/icon tokens for whole weakness labels in a string."""
-    pos = 0
-    for match in _LABEL_PATTERN.finditer(text or ""):
-        if match.start() > pos:
-            yield TextToken(text[pos:match.start()])
-        canonical = canonical_label(match.group(1))
-        if canonical is None:
-            yield TextToken(match.group(1))
-        else:
-            yield IconToken(canonical)
-        pos = match.end()
-    if pos < len(text or ""):
-        yield TextToken((text or "")[pos:])

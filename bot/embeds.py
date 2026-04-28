@@ -10,14 +10,11 @@ section is a self-contained embed; the dropdown swaps which one is shown.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from io import BytesIO
 import sqlite3
 from typing import Any, Literal
 
 import discord
 
-from bot import character_images
 from config import SPREADSHEET_ID
 from db import repo
 
@@ -46,12 +43,6 @@ SECTION_DESCRIPTIONS: dict[Section, str] = {
     "info": "Affinities, release info, source link",
 }
 DEFAULT_SECTION: Section = "actives"
-
-
-@dataclass(frozen=True)
-class CharacterMessage:
-    embed: discord.Embed
-    file: discord.File | None = None
 
 
 def _safe_url(url: str | None, base_edit_url: str = _SHEET_BASE_URL) -> str | None:
@@ -218,7 +209,7 @@ def _format_ultimate_block(rows: list[sqlite3.Row]) -> str:
     return _truncate("\n".join(parts), FIELD_VALUE_LIMIT)
 
 
-def _new_header_embed(form: sqlite3.Row, *, include_description: bool = True) -> discord.Embed:
+def _new_header_embed(form: sqlite3.Row) -> discord.Embed:
     rarity = form["rarity"]
     title_raw = f"{_rarity_prefix(rarity)} {form['display_name']}".strip()
     embed = discord.Embed(
@@ -226,9 +217,6 @@ def _new_header_embed(form: sqlite3.Row, *, include_description: bool = True) ->
         url=_safe_url(form["hyperlink_url"]),
         color=_color_from_hex(form["name_color_hex"]),
     )
-    if not include_description:
-        return embed
-
     role = (form["base_role"] or "?").title()
     weapon = (form["base_weapon"] or "?").title()
     primary = f"**{role}** · **{weapon}** · {_rarity_label(rarity)}"
@@ -358,200 +346,47 @@ def _build_info_section(
     return embed
 
 
-def _plain_skill_line(s: sqlite3.Row) -> str:
-    bits: list[str] = []
-    if s["sp_cost"] is not None:
-        bits.append(f"{s['sp_cost']} SP")
-    if s["learn_board"]:
-        bits.append(f"{s['learn_board']}*")
-    if s["tier_level"]:
-        bits.append(f"Lv{s['tier_level']}")
-    if s["name"]:
-        bits.append(str(s["name"]))
-
-    desc = " ".join((s["description"] or "").split())
-    if s["kind"] == "latent" and (s["initial_use"] or s["cooldown"]):
-        prefix = []
-        if s["initial_use"]:
-            prefix.append(f"init {s['initial_use']}t")
-        if s["cooldown"]:
-            prefix.append(f"cd {s['cooldown']}t")
-        desc = f"[{' / '.join(prefix)}] {desc}"
-
-    head = " | ".join(bits)
-    if desc and head:
-        return f"- {head} - {desc}"
-    if desc:
-        return f"- {desc}"
-    if head:
-        return f"- {head}"
-    return "-"
-
-
-def _plain_skill_sections(
-    skills: list[sqlite3.Row],
-    kind_order: tuple[str, ...],
-    empty_title: str,
-    empty_message: str,
-) -> list[character_images.PanelSection]:
-    by_kind = _group_by_kind(skills)
-    sections: list[character_images.PanelSection] = []
-    for kind in kind_order:
-        rows = by_kind.get(kind)
-        if not rows:
-            continue
-        sections.append(character_images.PanelSection(
-            title=SKILL_KIND_TITLES[kind],
-            lines=[_plain_skill_line(row) for row in rows],
-        ))
-    if not sections:
-        sections.append(character_images.PanelSection(empty_title, [empty_message]))
-    return sections
-
-
-def _plain_ultimate_lines(rows: list[sqlite3.Row]) -> list[str]:
-    groups = _collapse_ultimates(rows)
-    if not groups:
-        return ["No ultimate recorded for this form (may be unreleased)."]
-    lines: list[str] = []
-    for group in groups:
-        tiers = group["tiers"]
-        if len(tiers) <= 1:
-            lines.append(group["headline"] or "-")
-            continue
-        for tier_level, desc in tiers:
-            tag = f"Lv{tier_level}" if tier_level else "-"
-            lines.append(f"{tag} - {desc}")
-    return lines
-
-
-def _character_header_lines(form: sqlite3.Row) -> list[str]:
-    rarity = form["rarity"]
-    role = (form["base_role"] or "?").title()
-    weapon = (form["base_weapon"] or "?").title()
-    lines = [f"{role} - {weapon} - {_rarity_label(rarity)}"]
-
-    tags: list[str] = []
-    variant = form["variant_kind"] or "base"
-    if variant == "ex":
-        tags.append("EX form")
-    elif variant == "ex2":
-        tags.append("EX2 form")
-    elif variant == "alt":
-        tags.append("alt form")
-    if (form["server"] or "global") == "sea":
-        tags.append("SEA only")
-    if tags:
-        lines.append(" - ".join(tags))
-    return lines
-
-
-def _character_filename(form_id: int, section: Section) -> str:
-    return f"character_{form_id}_{section}.png"
-
-
-def _build_character_parts(
-    conn: sqlite3.Connection,
-    form_id: int,
-    section: Section,
-) -> tuple[discord.Embed, list[str], list[character_images.PanelSection]] | None:
-    form = repo.get_form(conn, form_id)
-    if not form:
-        return None
-
-    embed = _new_header_embed(form, include_description=False)
-    header_lines = _character_header_lines(form)
-
-    if section == "actives":
-        sections = _plain_skill_sections(
-            repo.get_skills(conn, form_id), ACTIVE_KIND_ORDER,
-            "Active Skills", "No active skills recorded for this form.",
-        )
-    elif section == "passives":
-        sections = _plain_skill_sections(
-            repo.get_skills(conn, form_id), PASSIVE_KIND_ORDER,
-            "Passive Skills", "No passive skills recorded for this form.",
-        )
-    elif section == "ultimate":
-        rows = [s for s in repo.get_skills(conn, form_id) if (s["kind"] or "") == "ultimate"]
-        sections = [character_images.PanelSection("Ultimate", _plain_ultimate_lines(rows))]
-    elif section == "a4":
-        equipment = repo.get_equipment(conn, form_id)
-        lines: list[str] = []
-        for item in equipment:
-            badge = " (exclusive)" if item["is_exclusive"] else ""
-            line = f"- {item['name']}{badge}"
-            if item["description"]:
-                line += f" - {item['description']}"
-            lines.append(line)
-        if not lines:
-            lines = ["No A4 accessory recorded for this form."]
-        sections = [character_images.PanelSection("A4 Accessory", lines)]
-    elif section == "info":
-        affs = _affinity_groups(repo.get_affinities(conn, form_id))
-        lines = []
-        for kind in ("weapon", "element", "weakness", "trait"):
-            if kind in affs:
-                lines.append(f"{kind.title()}: {', '.join(affs[kind])}")
-        sections = [character_images.PanelSection("Affinities", lines or ["No affinities recorded."])]
-
-        profile = repo.get_profile(conn, form_id)
-        if profile and profile["self_buffs_text"]:
-            sections.append(character_images.PanelSection("Profile", [profile["self_buffs_text"]]))
-        if _safe_url(form["hyperlink_url"]):
-            sections.append(character_images.PanelSection(
-                "Character Art",
-                ["Open the spreadsheet link in the title to view pixel art and splash art."],
-            ))
-    else:
-        return None
-
-    _attach_footer(embed, repo.latest_sync_run(conn))
-    return embed, header_lines, sections
-
-
 def build_section_embed(
     conn: sqlite3.Connection, form_id: int, section: Section,
 ) -> discord.Embed | None:
     """Build the embed for one dropdown section.
 
     Returns None if the form_id no longer exists (caller should fall back
-    to a "not found" message). The section body is rendered into an image
-    attachment; this helper sets the attachment URL for tests and callers
-    that only need to inspect the embed shape. Runtime sends should use
-    `build_character_message` so the referenced file is attached.
+    to a "not found" message). Each section reuses the common header
+    (title / URL / color / role-weapon-rarity description) so the user
+    never loses context when switching options.
     """
-    parts = _build_character_parts(conn, form_id, section)
-    if parts is None:
+    form = repo.get_form(conn, form_id)
+    if not form:
         return None
-    embed, header_lines, sections = parts
-    rendered = character_images.render_character_panel(
-        filename=_character_filename(form_id, section),
-        header_lines=header_lines,
-        sections=sections,
-    )
-    embed.set_image(url=f"attachment://{rendered.filename}")
+
+    last_sync = repo.latest_sync_run(conn)
+
+    if section == "actives":
+        embed = _build_skill_kinds_section(
+            form, repo.get_skills(conn, form_id), ACTIVE_KIND_ORDER,
+            "Active Skills", "_No active skills recorded for this form._",
+        )
+    elif section == "passives":
+        embed = _build_skill_kinds_section(
+            form, repo.get_skills(conn, form_id), PASSIVE_KIND_ORDER,
+            "Passive Skills", "_No passive skills recorded for this form._",
+        )
+    elif section == "ultimate":
+        embed = _build_ultimate_section(form, repo.get_skills(conn, form_id))
+    elif section == "a4":
+        embed = _build_a4_section(form, repo.get_equipment(conn, form_id))
+    elif section == "info":
+        embed = _build_info_section(
+            form,
+            repo.get_profile(conn, form_id),
+            repo.get_affinities(conn, form_id),
+        )
+    else:
+        return None
+
+    _attach_footer(embed, last_sync)
     return embed
-
-
-def build_character_message(
-    conn: sqlite3.Connection, form_id: int, section: Section,
-) -> CharacterMessage | None:
-    """Build the `/character` embed plus the rendered section attachment."""
-    parts = _build_character_parts(conn, form_id, section)
-    if parts is None:
-        return None
-    embed, header_lines, sections = parts
-    rendered = character_images.render_character_panel(
-        filename=_character_filename(form_id, section),
-        header_lines=header_lines,
-        sections=sections,
-    )
-    embed.set_image(url=f"attachment://{rendered.filename}")
-    return CharacterMessage(
-        embed=embed,
-        file=discord.File(BytesIO(rendered.data), filename=rendered.filename),
-    )
 
 
 def search_results_to_embed(rows: list[Any], *, query_summary: str) -> discord.Embed:
