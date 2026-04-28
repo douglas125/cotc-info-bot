@@ -232,9 +232,10 @@ decision, not a maintenance chore.
 
 ### Reading usage stats
 
-There is no slash command for this; query SQLite directly. On Railway, run
-`sqlite3 /data/cotc.sqlite ...`; locally, `data/cotc.sqlite`. All counters
+There is no slash command for this; query SQLite directly. All counters
 are keyed UTC.
+
+**Locally** (where the `sqlite3` CLI is on $PATH):
 
 ```bash
 # Grand total invocations across all time and commands
@@ -252,6 +253,42 @@ sqlite3 -header -column data/cotc.sqlite \
      FROM command_usage_daily
     ORDER BY usage_date DESC, command_name;"
 ```
+
+**On Railway** (the deployed bot). Two gotchas that aren't obvious — both
+hit during initial verification, and the recipe below is what actually
+worked:
+
+1. The `python:3.11-slim` image has no `sqlite3` CLI. Use the Python
+   `sqlite3` module instead.
+2. `railway ssh <args>` joins argv and re-parses through the remote
+   `sh -c`, so passing SQL with `COUNT(*)` directly blows up the remote
+   shell on the unmatched paren. Piping a script via stdin
+   (`cat q.py | railway ssh python3 -`) doesn't help either — the remote
+   end allocates a TTY and Python lands in the REPL instead of reading
+   stdin.
+
+The pattern that survives both layers: base64-encode the script locally
+and pass a single quoted arg to `python3 -c`:
+
+```bash
+SCRIPT='import sqlite3
+c = sqlite3.connect("/data/cotc.sqlite")
+print("total:", c.execute(
+    "SELECT COALESCE(SUM(count), 0) FROM command_usage_daily"
+).fetchone()[0])
+for r in c.execute(
+    "SELECT command_name, SUM(count) FROM command_usage_daily "
+    "GROUP BY command_name ORDER BY command_name"
+):
+    print(r)
+'
+B64=$(printf '%s' "$SCRIPT" | base64 -w0)
+railway ssh "python3 -c 'import base64; exec(base64.b64decode(\"$B64\"))'"
+```
+
+The outer double quotes are bash; the inner single quotes are the remote
+`sh`. Together they keep parens, semicolons, and quotes inside the
+script intact across both shells.
 
 When you add a new table that holds user/community state (anything not
 derivable from a sheet), default to *not* listing it in either wipe loop,
