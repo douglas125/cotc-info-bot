@@ -14,18 +14,17 @@ from bot.views import CharacterView, _SectionSelect  # noqa: E402
 def test_character_view_default_section() -> None:
     view = CharacterView(form_id=42)
     assert view.form_id == 42
-    assert view.section == embeds.DEFAULT_SECTION
-    # One Select with three options.
     selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
     assert len(selects) == 1
     sel = selects[0]
     values = [o.value for o in sel.options]
     assert values == list(embeds.SECTIONS)
+    default_opt = next(o for o in sel.options if o.default)
+    assert default_opt.value == embeds.DEFAULT_SECTION
 
 
 def test_character_view_custom_section() -> None:
     view = CharacterView(form_id=42, section="info")
-    assert view.section == "info"
     sel = next(c for c in view.children if isinstance(c, discord.ui.Select))
     info_opt = next(o for o in sel.options if o.value == "info")
     assert info_opt.default is True

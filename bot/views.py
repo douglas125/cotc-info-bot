@@ -20,6 +20,10 @@ from bot import embeds
 
 logger = logging.getLogger(__name__)
 
+FORM_REMOVED_MSG = (
+    "That form was removed by a recent refresh — re-run `/character`."
+)
+
 
 class _SectionSelect(discord.ui.Select["CharacterView"]):
     def __init__(self, current: embeds.Section) -> None:
@@ -44,18 +48,13 @@ class _SectionSelect(discord.ui.Select["CharacterView"]):
         if view is None:
             await interaction.response.defer()
             return
-        section = self.values[0]
-        if section not in embeds.SECTIONS:
-            await interaction.response.defer()
-            return
-        view.section = section  # type: ignore[assignment]
+        section: embeds.Section = self.values[0]  # type: ignore[assignment]
 
         conn = bot_db.conn()
         embed = embeds.build_section_embed(conn, view.form_id, section)
         if embed is None:
             await interaction.response.send_message(
-                "That form was removed by a recent refresh — re-run `/character`.",
-                ephemeral=True,
+                FORM_REMOVED_MSG, ephemeral=True,
             )
             return
 
@@ -76,5 +75,4 @@ class CharacterView(discord.ui.View):
     def __init__(self, form_id: int, section: embeds.Section = embeds.DEFAULT_SECTION) -> None:
         super().__init__(timeout=180)
         self.form_id = form_id
-        self.section = section
         self.add_item(_SectionSelect(current=section))
