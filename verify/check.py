@@ -364,6 +364,32 @@ def check_sea_kit_precedence(payload: dict, conn) -> list[tuple[bool, str]]:
     # something is structurally wrong with the parser or alias map.
     threshold_ok = matched >= 0.8 * len(blocks) if blocks else False
     out.append((threshold_ok, msg))
+
+    sea_missing_role_weapon = [r["display_name"] for r in conn.execute(
+        "SELECT cf.display_name "
+        "FROM character_forms cf "
+        "JOIN characters c ON c.id = cf.character_id "
+        "WHERE cf.server = 'sea' "
+        "AND (c.base_role IS NULL OR c.base_weapon IS NULL)"
+    )]
+    out.append((not sea_missing_role_weapon,
+                "SEA-only forms have inferred role/weapon: "
+                f"{sea_missing_role_weapon or 'ok'}"))
+
+    lynette_ex = conn.execute(
+        "SELECT c.base_role, c.base_weapon "
+        "FROM characters c "
+        "JOIN character_forms cf ON cf.character_id = c.id "
+        "WHERE cf.display_name = 'Lynette EX' AND cf.server = 'sea' "
+        "LIMIT 1"
+    ).fetchone()
+    lynette_ok = (
+        lynette_ex is not None
+        and lynette_ex["base_role"] == "thief"
+        and lynette_ex["base_weapon"] == "dagger"
+    )
+    got = dict(lynette_ex) if lynette_ex else None
+    out.append((lynette_ok, f"Lynette EX SEA role/weapon: {got}"))
     return out
 
 

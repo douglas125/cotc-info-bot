@@ -8,9 +8,9 @@ from typing import Any, Callable
 from config import (
     ENEMIES_SPREADSHEET_ID,
     ENEMY_DATA_TAB_GIDS,
-    NAME_ALIASES,
     ROLE_TABS,
     TABS_BY_GID,
+    WEAPON_TO_ROLE,
     canonicalize_name,
 )
 from db import repo
@@ -20,6 +20,7 @@ from sync.parsers import (
     Anchor,
     IndexEntry,
     SEA_GID,
+    infer_weapon_from_block,
     parse_anchor,
     parse_index,
     parse_role_tab,
@@ -121,6 +122,7 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
         with repo.transaction(conn):
             repo.clear_character_tables(conn)
             index_name_keys: set[str] = set()
+            used_role_blocks: set[tuple[int, int, str]] = set()
             for entry in index_entries:
                 ch_id = repo.upsert_character(
                     conn, canonical_name=entry.canonical_name,
@@ -160,6 +162,10 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                             splash_art_url=block.splash_art_url,
                             self_buffs_text=block.self_buffs_text,
                         )
+                    if block.sheet_gid != SEA_GID:
+                        used_role_blocks.add(
+                            (block.sheet_gid, block.source_row, block.display_name)
+                        )
 
             # Second pass: SEA blocks with no matching Index entry. These are
             # SEA-only EX variants (e.g. "Lynette EX") that the Index hasn't
@@ -169,14 +175,8 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                 canon_key = canonicalize_name(block.display_name).lower()
                 if key in index_name_keys or canon_key in index_name_keys:
                     continue
-                base_name = _strip_ex_affix(block.display_name)
-                base_row = conn.execute(
-                    "SELECT base_role, base_weapon FROM characters "
-                    "WHERE LOWER(canonical_name) = LOWER(?)",
-                    (base_name,),
-                ).fetchone()
-                base_role = base_row["base_role"] if base_row else None
-                base_weapon = base_row["base_weapon"] if base_row else None
+                base_weapon = infer_weapon_from_block(block)
+                base_role = WEAPON_TO_ROLE.get(base_weapon) if base_weapon else None
                 ch_id = repo.upsert_character(
                     conn, canonical_name=block.display_name,
                     base_role=base_role, base_weapon=base_weapon,
@@ -205,6 +205,51 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                         self_buffs_text=block.self_buffs_text,
                     )
                 index_name_keys.add(key)
+
+            # Third pass: EX/EX2 forms that exist as complete role-tab blocks
+            # before the Index catches up. The role tab itself is authoritative
+            # for role/weapon here; keep this limited to variant forms so a
+            # stray base-name typo remains visible in verify.check.
+            for tab in ROLE_TABS:
+                for block in blocks_by_tab.get(tab.gid, []):
+                    block_key = (block.sheet_gid, block.source_row, block.display_name)
+                    if block_key in used_role_blocks:
+                        continue
+                    key = block.display_name.lower()
+                    canon_key = canonicalize_name(block.display_name).lower()
+                    if key in index_name_keys or canon_key in index_name_keys:
+                        continue
+                    variant_kind = _variant_kind_for(block.display_name)
+                    if variant_kind not in {"ex", "ex2"}:
+                        continue
+                    ch_id = repo.upsert_character(
+                        conn, canonical_name=block.display_name,
+                        base_role=tab.role, base_weapon=tab.weapon,
+                    )
+                    form_id = repo.insert_form(
+                        conn,
+                        character_id=ch_id,
+                        display_name=block.display_name,
+                        rarity="5*" if tab.rarity_band == "5*" else None,
+                        variant_kind=variant_kind,
+                        server="global",
+                        sheet_gid=block.sheet_gid,
+                        source_row=block.source_row,
+                    )
+                    if block.level_cap is not None:
+                        conn.execute(
+                            "UPDATE character_forms SET level_cap = ? WHERE id = ?",
+                            (block.level_cap, form_id),
+                        )
+                    repo.insert_skills(conn, form_id, block.skills)
+                    repo.insert_equipment(conn, form_id, block.equipment)
+                    if block.splash_art_url or block.self_buffs_text:
+                        repo.upsert_profile(
+                            conn, form_id,
+                            splash_art_url=block.splash_art_url,
+                            self_buffs_text=block.self_buffs_text,
+                        )
+                    index_name_keys.add(key)
 
             progress("Rebuilding character FTS index...")
             repo.rebuild_fts(conn)
@@ -329,16 +374,3 @@ def _variant_kind_for(name: str) -> str:
     if "saint of" in n or "(alt)" in n:
         return "alt"
     return "base"
-
-
-def _strip_ex_affix(name: str) -> str:
-    """Return the base character name with any EX/EX2 prefix or suffix removed."""
-    n = name.strip()
-    low = n.lower()
-    for affix in ("ex2 ", "ex "):
-        if low.startswith(affix):
-            return n[len(affix):].strip()
-    for affix in (" ex2", " ex"):
-        if low.endswith(affix):
-            return n[: -len(affix)].strip()
-    return n
