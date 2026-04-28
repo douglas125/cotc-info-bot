@@ -49,7 +49,7 @@ def _seed_lloris(conn, *, with_ex3: bool = True, with_default_npc: bool = False)
     return enemy_id
 
 
-def test_build_enemy_embed_renders_stats_grid(tmp_db_path: Path) -> None:
+def test_build_enemy_embed_renders_per_member_stat_fields(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     enemy_id = _seed_lloris(conn)
     embed = enemy_embeds.build_enemy_embed(conn, enemy_id, "EX3")
@@ -59,11 +59,16 @@ def test_build_enemy_embed_renders_stats_grid(tmp_db_path: Path) -> None:
     assert "EX 3" in embed.title
     # Description shows category + region.
     assert "Solistia" in (embed.description or "")
-    fields = {f.name: f.value for f in embed.fields}
-    assert "Stats" in fields
-    assert "1,143,210" in fields["Stats"]
-    assert "822,762" in fields["Stats"]
+    fields = {f.name: f for f in embed.fields}
+    assert "Leader Lloris" in fields
+    assert "Mini Lloris" in fields
+    assert "1,143,210" in fields["Leader Lloris"].value
+    assert "822,762" in fields["Mini Lloris"].value
+    # Multi-member encounters render inline so Discord packs them in rows.
+    assert fields["Leader Lloris"].inline is True
+    assert fields["Mini Lloris"].inline is True
     assert "Weaknesses" not in fields
+    assert "Stats" not in fields
     assert embed.image.url is None
 
 
@@ -98,7 +103,7 @@ def test_build_enemy_embed_returns_none_for_missing_rank(tmp_db_path: Path) -> N
 
 
 def test_stats_field_fits_in_discord_field_limit(tmp_db_path: Path) -> None:
-    """An encounter with 3 members × 10 stats must still fit under 1024 chars."""
+    """A 6-member encounter (Yunnie EX 3 shape) must still fit per-field."""
     conn = repo.connect(tmp_db_path)
     enemy_id = repo.upsert_enemy(
         conn, canonical_name="Big Encounter", category="Lvl 75",
@@ -106,19 +111,94 @@ def test_stats_field_fits_in_discord_field_limit(tmp_db_path: Path) -> None:
         name_color_hex=None, hyperlink_url=None, is_npc=False,
     )
     f = repo.insert_enemy_form(conn, enemy_id=enemy_id, rank="EX3", rank_order=6)
+    member_names = ("Yunnie", "Hunter", "Thief", "Merchant",
+                    "Warrior", "Apothecary")
+    stat_names = ("HP", "Shields", "P. Atk", "P. Def", "E. Atk",
+                  "E. Def", "Speed", "Crit", "CritDef", "Equip Atk")
     rows = []
-    for pos in range(3):
-        for stat in ("HP", "Shields", "P. Atk", "P. Def", "E. Atk",
-                     "E. Def", "Speed", "Crit", "CritDef", "Equip Atk"):
+    for pos, member in enumerate(member_names):
+        for stat in stat_names:
             rows.append({
-                "position": pos, "member_name": f"Member{pos}",
+                "position": pos, "member_name": member,
                 "stat_name": stat, "stat_value": str(1234567 + pos),
             })
     repo.insert_enemy_member_stats(conn, f, rows)
     embed = enemy_embeds.build_enemy_embed(conn, enemy_id, "EX3")
     assert embed is not None
-    stats_field = next(f for f in embed.fields if f.name == "Stats")
-    assert len(stats_field.value) <= enemy_embeds.FIELD_VALUE_LIMIT
+    member_fields = [
+        field for field in embed.fields if field.name in member_names
+    ]
+    assert len(member_fields) == len(member_names)
+    for field in member_fields:
+        assert field.inline is True
+        assert len(field.value) <= enemy_embeds.FIELD_VALUE_LIMIT
+        for stat in stat_names:
+            assert stat in field.value
+    # Numeric stat values render with thousands separators.
+    yunnie_field = next(f for f in member_fields if f.name == "Yunnie")
+    assert "1,234,567" in yunnie_field.value
+
+
+def test_default_npc_renders_single_non_inline_field(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    enemy_id = _seed_lloris(conn, with_ex3=False, with_default_npc=True)
+    embed = enemy_embeds.build_enemy_embed(conn, enemy_id, "Default")
+    assert embed is not None
+    member_fields = [f for f in embed.fields if f.name == "Leader Lloris"]
+    assert len(member_fields) == 1
+    assert member_fields[0].inline is False
+    # Single-member 1000 still gets a separator.
+    assert "1,000" in member_fields[0].value
+
+
+def test_long_member_names_truncate_to_avoid_inline_wrap(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    enemy_id = repo.upsert_enemy(
+        conn, canonical_name="Verbose", category="Lvl 1",
+        region="Osterra", sheet_gid=3, source_row=3,
+        name_color_hex=None, hyperlink_url=None, is_npc=False,
+    )
+    f = repo.insert_enemy_form(conn, enemy_id=enemy_id, rank="EX3", rank_order=6)
+    long_name = "Extraordinary Apothecary"
+    repo.insert_enemy_member_stats(conn, f, [
+        {"position": 0, "member_name": long_name,
+         "stat_name": "HP", "stat_value": "100"},
+        {"position": 1, "member_name": "Short",
+         "stat_name": "HP", "stat_value": "50"},
+    ])
+    embed = enemy_embeds.build_enemy_embed(conn, enemy_id, "EX3")
+    assert embed is not None
+    field_names = [f.name for f in embed.fields]
+    assert long_name not in field_names  # untruncated form must not appear
+    assert any(
+        n.startswith("Extraordinary") and n.endswith("…")
+        and len(n) <= enemy_embeds._MEMBER_NAME_DISPLAY_LIMIT
+        for n in field_names
+    )
+    assert "Short" in field_names
+
+
+def test_non_numeric_stat_values_pass_through(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    enemy_id = repo.upsert_enemy(
+        conn, canonical_name="Quirky", category="Lvl 1",
+        region="Osterra", sheet_gid=2, source_row=3,
+        name_color_hex=None, hyperlink_url=None, is_npc=False,
+    )
+    f = repo.insert_enemy_form(conn, enemy_id=enemy_id, rank="EX3", rank_order=6)
+    repo.insert_enemy_member_stats(conn, f, [
+        {"position": 0, "member_name": "Q", "stat_name": "HP", "stat_value": "-"},
+        {"position": 0, "member_name": "Q", "stat_name": "Shields",
+         "stat_value": "???"},
+        {"position": 0, "member_name": "Q", "stat_name": "P. Atk",
+         "stat_value": "1500"},
+    ])
+    embed = enemy_embeds.build_enemy_embed(conn, enemy_id, "EX3")
+    assert embed is not None
+    field = next(field for field in embed.fields if field.name == "Q")
+    assert "-" in field.value
+    assert "???" in field.value
+    assert "1,500" in field.value
 
 
 def test_safe_enemy_url_prefixes_anchor() -> None:
