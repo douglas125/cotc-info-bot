@@ -98,3 +98,18 @@ CREATE VIRTUAL TABLE IF NOT EXISTS characters_fts USING fts5(
     equipment_text,
     tokenize = 'unicode61 remove_diacritics 2'
 );
+
+-- Community-submitted corrections / inconsistency reports. Survives /refresh
+-- (intentionally NOT in repo.clear_data_tables); cleared via /feedback_clear.
+CREATE TABLE IF NOT EXISTS feedback_submissions (
+    id              INTEGER PRIMARY KEY,
+    submitted_at    TEXT NOT NULL,        -- ISO-8601 UTC
+    user_id         INTEGER NOT NULL,     -- Discord user ID
+    username        TEXT NOT NULL,        -- display name at submission time
+    guild_id        INTEGER,              -- NULL in DMs
+    feedback_text   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_feedback_submitted
+    ON feedback_submissions(submitted_at DESC);
+CREATE INDEX IF NOT EXISTS ix_feedback_user_time
+    ON feedback_submissions(user_id, submitted_at DESC);

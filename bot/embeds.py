@@ -422,3 +422,22 @@ def search_results_to_embed(rows: list[Any], *, query_summary: str) -> discord.E
     if len(rows) > len(shown):
         embed.set_footer(text=f"showing {len(shown)} of {len(rows)} — narrow filters to see more")
     return embed
+
+
+def feedback_results_to_embed(rows: list[Any]) -> discord.Embed:
+    """Render the admin /feedback_list result. `rows` are sqlite3.Rows from list_feedback."""
+    embed = discord.Embed(
+        title=f"Latest {len(rows)} feedback submission(s)",
+        color=discord.Color.blurple(),
+    )
+    for r in rows:
+        body = r["feedback_text"] or "—"
+        embed.add_field(
+            name=_truncate(
+                f"#{r['id']} · {r['username']} · {r['submitted_at']}",
+                FIELD_NAME_LIMIT,
+            ),
+            value=_truncate(body, FIELD_VALUE_LIMIT),
+            inline=False,
+        )
+    return embed

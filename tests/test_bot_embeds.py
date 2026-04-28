@@ -378,3 +378,26 @@ def test_header_description_tags_sea_and_ex(tmp_db_path: Path) -> None:
     assert "SEA only" in embed.description
     assert "Dancer" in embed.description
     assert "Fan" in embed.description
+
+
+def test_feedback_results_embed(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    repo.insert_feedback(conn, user_id=1, username="alice", guild_id=None,
+                         feedback_text="kit description wrong on Castti")
+    rows = repo.list_feedback(conn)
+    conn.close()
+    embed = embeds.feedback_results_to_embed(rows)
+    assert "1 feedback submission" in embed.title
+    assert any("alice" in f.name for f in embed.fields)
+    assert any("Castti" in f.value for f in embed.fields)
+
+
+def test_feedback_results_embed_truncates_long_body(tmp_db_path: Path) -> None:
+    """The 2000-char body must be trimmed to Discord's per-field 1024 cap."""
+    conn = repo.connect(tmp_db_path)
+    repo.insert_feedback(conn, user_id=1, username="alice", guild_id=None,
+                         feedback_text="x" * 2000)
+    rows = repo.list_feedback(conn)
+    conn.close()
+    embed = embeds.feedback_results_to_embed(rows)
+    assert len(embed.fields[0].value) <= embeds.FIELD_VALUE_LIMIT
