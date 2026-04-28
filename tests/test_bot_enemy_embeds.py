@@ -151,6 +151,33 @@ def test_default_npc_renders_single_non_inline_field(tmp_db_path: Path) -> None:
     assert "1,000" in member_fields[0].value
 
 
+def test_long_member_names_truncate_to_avoid_inline_wrap(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    enemy_id = repo.upsert_enemy(
+        conn, canonical_name="Verbose", category="Lvl 1",
+        region="Osterra", sheet_gid=3, source_row=3,
+        name_color_hex=None, hyperlink_url=None, is_npc=False,
+    )
+    f = repo.insert_enemy_form(conn, enemy_id=enemy_id, rank="EX3", rank_order=6)
+    long_name = "Extraordinary Apothecary"
+    repo.insert_enemy_member_stats(conn, f, [
+        {"position": 0, "member_name": long_name,
+         "stat_name": "HP", "stat_value": "100"},
+        {"position": 1, "member_name": "Short",
+         "stat_name": "HP", "stat_value": "50"},
+    ])
+    embed = enemy_embeds.build_enemy_embed(conn, enemy_id, "EX3")
+    assert embed is not None
+    field_names = [f.name for f in embed.fields]
+    assert long_name not in field_names  # untruncated form must not appear
+    assert any(
+        n.startswith("Extraordinary") and n.endswith("…")
+        and len(n) <= enemy_embeds._MEMBER_NAME_DISPLAY_LIMIT
+        for n in field_names
+    )
+    assert "Short" in field_names
+
+
 def test_non_numeric_stat_values_pass_through(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     enemy_id = repo.upsert_enemy(

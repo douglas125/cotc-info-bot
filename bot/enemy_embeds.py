@@ -70,6 +70,13 @@ _STAT_DISPLAY_ORDER: tuple[str, ...] = (
 )
 _STAT_RANK: dict[str, int] = {s: i for i, s in enumerate(_STAT_DISPLAY_ORDER)}
 _SHEET_EDIT_URL = f"{ENEMIES_SPREADSHEET_URL}/edit"
+_MEMBER_NAME_DISPLAY_LIMIT = 14
+
+
+def _shorten_member_name(name: str) -> str:
+    if len(name) <= _MEMBER_NAME_DISPLAY_LIMIT:
+        return name
+    return name[: _MEMBER_NAME_DISPLAY_LIMIT - 1] + "…"
 
 
 def _safe_enemy_url(url: str | None) -> str | None:
@@ -137,7 +144,8 @@ def _build_member_stat_fields(
             f"{s:<{name_width}}  {v:>{value_width}}" for s, v in formatted
         )
         value = _truncate("```\n" + body + "\n```", FIELD_VALUE_LIMIT)
-        name = pos_labels.get(pos, f"#{pos + 1}")[:FIELD_NAME_LIMIT]
+        raw_name = pos_labels.get(pos, f"#{pos + 1}")
+        name = _shorten_member_name(raw_name)[:FIELD_NAME_LIMIT]
         fields.append((name, value, inline))
     return fields
 
