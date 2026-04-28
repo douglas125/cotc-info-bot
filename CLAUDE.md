@@ -16,7 +16,7 @@ weapon, and free-text against skills/equipment via slash commands.
 
 ## Git workflow (mandatory)
 
-Repo: `douglas125/cotc-character-search` (private, default branch `main`).
+Repo: `douglas125/cotc-info-bot` (default branch `main`).
 
 For every change, follow this flow:
 
