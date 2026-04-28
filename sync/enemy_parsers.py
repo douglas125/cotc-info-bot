@@ -297,25 +297,13 @@ def _detect_display_blocks(
     rows: list[list[dict[str, Any]]],
     use_separator_fallback: bool = False,
 ) -> list[tuple[int, int, int | None]]:
-    """Return [(name_row, name_col, rank_col), ...] for each block on a tab.
+    """Return `(name_row, name_col, rank_col)` for every block widget.
 
-    Display tabs lay block widgets out as a grid: 6-ish blocks per "block
-    row", and block rows repeat every `_DISPLAY_BLOCK_HEIGHT` rows starting
-    at `_DISPLAY_NAME_ROW`. The original code only looked at the first block
-    row; that silently truncated any tab with more encounters than fit in
-    one row of widgets (the entire 120 NPCs tab + likely the busier ranked
-    tabs too).
-
-    Two block-start signals are used:
-      * **Rank-badge** (ranked Lvl-N tabs): a Rank1/2/3 or EX1/2/3 cell on
-        the name row, with the block's name in the nearest non-empty cell
-        to its LEFT.
-      * **Separator-color fallback** (NPC tabs only — opt-in): any non-empty
-        text cell whose left neighbor is on the dark `#222222` separator
-        background. NPC widgets carry no rank badge, so this is the only
-        block-detection signal available there.
-
-    `rank_col` is None for separator-detected blocks.
+    Block-rows repeat every `_DISPLAY_BLOCK_HEIGHT` rows from
+    `_DISPLAY_NAME_ROW`; iterating the whole stride is required because
+    busier tabs (notably 120 NPCs and Lvl 50/75) carry more encounters
+    than fit in one row of widgets. The separator-color fallback exists
+    only for the NPC tab, which is the one display tab with no rank badges.
     """
     blocks: list[tuple[int, int, int | None]] = []
     for name_row_idx in range(_DISPLAY_NAME_ROW, len(rows), _DISPLAY_BLOCK_HEIGHT):
@@ -421,33 +409,14 @@ def _extract_npc_member_names(
     name_col: int,
     encounter_name: str,
 ) -> list[str]:
-    """Harvest per-position member-name references from an NPC display block.
+    """Resolve each NPC widget position to a `120 NPCs Data` catalog key.
 
-    On the 120 NPCs display tab the layout for a block at `(name_row, name_col)`
-    puts per-position stats in columns `name_col + 1 .. name_col + N`. The
-    first useful per-position info appears on two rows:
-
-      * `name_row + 3` (member-name strip): for single-position widgets the
-        formattedValue here is the resolved member name (e.g. 'New Delsta');
-        for multi-position widgets it is just a position index label
-        ('1', '2', '3', ...) which we discard.
-      * `name_row + 4` (HP row): the formula carries either
-        `=VLOOKUP("<member-name>", '120 NPCs Data'!...)` — most common case,
-        the lookup arg is the catalog name we need — or a direct cell ref
-        like `='120 NPCs Data'!D10` in which case the member name isn't
-        recoverable from the formula text.
-
-    Strategy per column:
-      1. Try the VLOOKUP formula on the HP row — most reliable.
-      2. Fall back to the formattedValue on the member-name row, but only if
-         it isn't a bare integer (which would be a position-index label).
-      3. Stop at the first column that yields nothing — the per-position
-         strip is contiguous from `name_col + 1`, so a gap marks the end.
-
-    If no member is found via either signal, fall back to a single-position
-    list with the encounter name itself — this catches direct-cell-ref
-    widgets like `Cropdale` whose only member happens to share the encounter
-    name.
+    Three sources, in priority: the HP-row VLOOKUP arg (works for nearly
+    every multi-position widget), the member-name-row formattedValue
+    (works for single-position widgets where the cell holds the literal
+    name rather than a numeric index label), and finally the encounter
+    name itself — the last covers `Cropdale`-style widgets whose stats
+    come from a direct-cell ref the formula text doesn't expose.
     """
     name_strip_row = name_row + 3
     hp_row = name_row + 4

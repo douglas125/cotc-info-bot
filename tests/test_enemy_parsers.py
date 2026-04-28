@@ -329,11 +329,7 @@ def test_parse_display_tab_normalizes_polearm_to_spear() -> None:
 # NPC even when the encounter pulled multiple catalog rows via VLOOKUP.
 
 _NPC_GID = 2117870435  # gid of the 120 NPCs display tab; in ENEMY_NPC_TAB_GIDS.
-
-
-def _separator_cell() -> dict[str, Any]:
-    """Dark-grey separator cell that sits between adjacent display blocks."""
-    return _cell(bg="#222222")
+_SEPARATOR_BG = "#222222"
 
 
 def test_parse_display_tab_npc_single_member_picks_formatted_name() -> None:
@@ -344,7 +340,7 @@ def test_parse_display_tab_npc_single_member_picks_formatted_name() -> None:
     rows: list[list[dict[str, Any]]] = [
         blank(), blank(), blank(),
         # row 3: encounter names with a #222222 separator at col 0 (block-start signal).
-        [_separator_cell(), _cell("New Delsta"),
+        [_cell(bg=_SEPARATOR_BG), _cell("New Delsta"),
          _cell(), _cell(), _cell(), _cell(), _cell(), _cell(),
          _cell(), _cell(), _cell(), _cell()],
         blank(),
@@ -376,7 +372,7 @@ def test_parse_display_tab_npc_multi_member_uses_vlookup_formulas() -> None:
     blank = lambda: [_cell() for _ in range(36)]
     # Block at name_col=23 with #222222 separator at col 22.
     name_row = [_cell() for _ in range(36)]
-    name_row[22] = _separator_cell()
+    name_row[22] = _cell(bg=_SEPARATOR_BG)
     name_row[23] = _cell("Canalbrine")
     # Row 6: per-position labels + shield count + weakness formulas for pos 0.
     member_strip = [_cell() for _ in range(36)]
@@ -431,7 +427,7 @@ def test_parse_display_tab_npc_direct_cell_ref_falls_back_to_encounter_name() ->
     blank = lambda: [_cell() for _ in range(12)]
     rows: list[list[dict[str, Any]]] = [
         blank(), blank(), blank(),
-        [_separator_cell(), _cell("Cropdale"),
+        [_cell(bg=_SEPARATOR_BG), _cell("Cropdale"),
          _cell(), _cell(), _cell(), _cell(), _cell(), _cell(),
          _cell(), _cell(), _cell(), _cell()],
         blank(),
@@ -483,11 +479,11 @@ def test_detect_display_blocks_npc_separator_fallback() -> None:
     blank = lambda: [_cell() for _ in range(36)]
     name_row = [_cell() for _ in range(36)]
     # Three blocks: at cols 1, 12, 23 — each preceded by a #222222 separator.
-    name_row[0] = _separator_cell()
+    name_row[0] = _cell(bg=_SEPARATOR_BG)
     name_row[1] = _cell("New Delsta")
-    name_row[11] = _separator_cell()
+    name_row[11] = _cell(bg=_SEPARATOR_BG)
     name_row[12] = _cell("Toto'haha")
-    name_row[22] = _separator_cell()
+    name_row[22] = _cell(bg=_SEPARATOR_BG)
     name_row[23] = _cell("Canalbrine")
     rows: list[list[dict[str, Any]]] = [
         blank(), blank(), blank(),
@@ -499,9 +495,6 @@ def test_detect_display_blocks_npc_separator_fallback() -> None:
     detected = _detect_display_blocks(rows, use_separator_fallback=True)
     name_cols = sorted(c for _, c, _ in detected)
     assert name_cols == [1, 12, 23]
-    # Cells without a separator-bg left neighbor must NOT be picked up: a name
-    # cell next to a plain-white cell should be ignored to avoid false hits on
-    # in-block text (e.g. position labels or sub-grid headers).
 
 
 def test_detect_display_blocks_npc_separator_rejects_non_separator_neighbors() -> None:
@@ -510,7 +503,7 @@ def test_detect_display_blocks_npc_separator_rejects_non_separator_neighbors() -
     block-start from an in-block label."""
     blank = lambda: [_cell() for _ in range(12)]
     name_row = [_cell() for _ in range(12)]
-    name_row[0] = _separator_cell()
+    name_row[0] = _cell(bg=_SEPARATOR_BG)
     name_row[1] = _cell("New Delsta")  # legit block (left neighbor is separator)
     # col 5 has text but its left neighbor is plain — should NOT be a block.
     name_row[4] = _cell(bg="#ffffff")
@@ -527,7 +520,7 @@ def test_parse_all_npc_multi_member_persists_per_position_stats() -> None:
     # Display tab: one Canalbrine block with 3 members (VLOOKUPs in HP row).
     blank = lambda: [_cell() for _ in range(36)]
     name_row = [_cell() for _ in range(36)]
-    name_row[22] = _separator_cell()
+    name_row[22] = _cell(bg=_SEPARATOR_BG)
     name_row[23] = _cell("Canalbrine")
     member_strip = [_cell() for _ in range(36)]
     member_strip[24] = _cell("1")
