@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS skills (
     description     TEXT,
     power_min       INTEGER,
     power_max       INTEGER,
-    hits            INTEGER
+    hits            INTEGER,
+    max_uses         INTEGER,        -- ex: max number of uses per battle
+    unlock_condition TEXT            -- ex: condition text gating the skill
 );
 CREATE INDEX IF NOT EXISTS ix_skills_form ON skills(form_id);
 

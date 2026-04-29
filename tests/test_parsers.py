@@ -9,6 +9,7 @@ from sync.parsers import (
     FormBlock,
     _color_dict_to_hex,
     _classify_skill_kind,
+    _extract_ex_meta,
     _image_url_from_cell,
     _parse_skill_description,
     infer_weapon_from_block,
@@ -191,7 +192,7 @@ def test_canonicalize_name_passthrough_for_unknown() -> None:
 def test_canonicalize_name_known_aliases() -> None:
     assert canonicalize_name("Fior") == "Fiore"
     assert canonicalize_name("Krauser") == "Clauser"
-    assert canonicalize_name("Araune") == "Alaune"
+    assert canonicalize_name("Alaune") == "Araune"
     assert canonicalize_name("Elrica") == "Erika"
 
 
@@ -295,11 +296,19 @@ def test_parse_role_tab_handles_short_rows() -> None:
 def _row(*, sp: str = "", kind: str = "", desc: str = "",
          passive_desc: str = "", latent_desc: str = "",
          icon17: str = "", icon19: str = "",
-         equipment: str = "") -> list[dict]:
+         equipment: str = "",
+         ex_uses: int | None = None, ex_cond: str = "",
+         ex_anchor_col: int = 8) -> list[dict]:
     """Build a 26-wide synthetic role-tab row that mirrors the live layout:
     col 0=name, col 5=kind/board (or section divider, or latent text),
     col 6=SP cost OR passive description, col 7=active/special/ex/tp desc,
-    cols 17/19=latent icon counters, col 21=equipment, col 25=profile."""
+    cols 17/19=latent icon counters, col 21=equipment, col 25=profile.
+
+    EX rows additionally carry the use-count anchor `#` at col 8, the
+    integer at col 9, and the unlock condition at col 11. Pass
+    ``ex_anchor_col=13`` to exercise the SEA/GL EX-Ophilia layout where
+    the cluster is shifted five columns right.
+    """
     cells = [_cell()] * 26
     if sp:
         cells[6] = _cell(sp)
@@ -317,6 +326,11 @@ def _row(*, sp: str = "", kind: str = "", desc: str = "",
         cells[19] = _cell(icon19)
     if equipment:
         cells[21] = _cell(equipment)
+    if ex_uses is not None:
+        cells[ex_anchor_col] = _cell("#")
+        cells[ex_anchor_col + 1] = _cell(str(ex_uses))
+    if ex_cond:
+        cells[ex_anchor_col + 3] = _cell(ex_cond)
     return cells
 
 
@@ -325,6 +339,29 @@ def _section_divider(name: str) -> list[dict]:
     cells = [_cell()] * 26
     cells[5] = _cell(name)
     return cells
+
+
+def test_extract_ex_meta_canonical_layout() -> None:
+    """Canonical EX cluster: '#' at col 8, integer at col 9, condition at col 11."""
+    row = [_cell()] * 26
+    row[8] = _cell("#")
+    row[9] = _cell("1")
+    row[11] = _cell('4+ Allies have "Cursed State"')
+    assert _extract_ex_meta(row) == (1, '4+ Allies have "Cursed State"')
+
+
+def test_extract_ex_meta_shifted_layout_for_sea_outlier() -> None:
+    """SEA/GL EX-Ophilia row shifts the cluster five columns right."""
+    row = [_cell()] * 26
+    row[13] = _cell("#")
+    row[14] = _cell("3")
+    row[16] = _cell("No Condition")
+    assert _extract_ex_meta(row) == (3, "No Condition")
+
+
+def test_extract_ex_meta_returns_none_when_anchor_absent() -> None:
+    """A row without a '#' anchor returns (None, None)."""
+    assert _extract_ex_meta([_cell()] * 26) == (None, None)
 
 
 def test_parse_role_tab_castti_shape_classifies_sections_correctly() -> None:
@@ -363,8 +400,11 @@ def test_parse_role_tab_castti_shape_classifies_sections_correctly() -> None:
     rows.append(_row(kind="5*", sp="70", desc="5x single-target Axe (5x 65~120 Power)"))
     # TP / divine — consumes SP
     rows.append(_row(kind="TP", sp="40", desc="1x single-target Axe (1x 260~450 Power)"))
-    # EX — no SP cost (the parser must drop any SP cell value here)
-    rows.append(_row(kind="EX", sp="99", desc="All Allies 15% Atk Up + 15% Axe Damage Up for 5 turns"))
+    # EX — no SP cost (the parser must drop any SP cell value here);
+    # carries max-uses anchor `#`/`2` at cols 8/9 and unlock condition at col 11.
+    rows.append(_row(kind="EX", sp="99",
+                     desc="All Allies 15% Atk Up + 15% Axe Damage Up for 5 turns",
+                     ex_uses=2, ex_cond="Self has 6+ Buff/Debuff icons"))
     # Special section divider, then 3 ultimate-tier rows
     rows.append(_section_divider("Special"))
     rows.append(_row(kind="Lv1",  desc="All Allies Heal + Recover 50 SP for 2 turns"))
@@ -388,10 +428,16 @@ def test_parse_role_tab_castti_shape_classifies_sections_correctly() -> None:
     assert len(blocks) == 1
     castti = blocks[0]
 
-    # 1. Exactly one EX skill, no SP cost.
+    # 1. Exactly one EX skill, no SP cost. Captures max_uses + unlock condition.
     ex = [s for s in castti.skills if s["kind"] == "ex"]
     assert len(ex) == 1
     assert ex[0]["sp_cost"] is None
+    assert ex[0]["max_uses"] == 2
+    assert ex[0]["unlock_condition"] == "Self has 6+ Buff/Debuff icons"
+    # Non-EX skills carry None for both EX-only fields so the schema is uniform.
+    non_ex = [s for s in castti.skills if s["kind"] != "ex"]
+    assert all(s["max_uses"] is None for s in non_ex)
+    assert all(s["unlock_condition"] is None for s in non_ex)
 
     # 2. Three ultimate rows (the 3 tiers of the one Special skill), no SP cost.
     ult = [s for s in castti.skills if s["kind"] == "ultimate"]

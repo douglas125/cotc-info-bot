@@ -86,6 +86,8 @@ def _seed_full_kit(conn) -> int:
         "learn_board": None, "tier_level": None, "initial_use": None, "cooldown": None,
         "description": "All allies +15% Atk Up for 5t",
         "power_min": None, "power_max": None, "hits": None,
+        "max_uses": 1,
+        "unlock_condition": '4+ Allies have "Cursed State"',
     })
     for tl, hs in [(1, 50), (10, 100), (20, 150)]:
         rows.append({
@@ -207,6 +209,20 @@ def test_build_section_actives_tp_field_has_no_redundant_tp_badge(tmp_db_path: P
     assert "`TP`" not in tp_field.value
     # Passive-section TP description must not appear in the actives view.
     assert "Deep Wound" not in tp_field.value
+
+
+def test_build_section_actives_ex_field_shows_uses_and_unlock(tmp_db_path: Path) -> None:
+    """EX bullets should carry a `# N` badge for max-uses-per-battle and an
+    italicized 'Unlock: <condition>' suffix that mirrors the spreadsheet's
+    locked-icon column."""
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed_full_kit(conn)
+    embed = embeds.build_section_embed(conn, form_id, "actives")
+    conn.close()
+
+    ex_field = next(f for f in embed.fields if f.name == "EX")
+    assert "`# 1`" in ex_field.value
+    assert '*Unlock: 4+ Allies have "Cursed State"*' in ex_field.value
 
 
 def test_skill_line_has_no_slot_number_or_b_prefix(tmp_db_path: Path) -> None:

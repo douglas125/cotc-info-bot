@@ -116,6 +116,8 @@ def _format_skill_line(s: sqlite3.Row) -> str:
         bits.append("`TP`")
     if s["tier_level"]:
         bits.append(f"`Lv{s['tier_level']}`")
+    if s["kind"] == "ex" and s["max_uses"] is not None:
+        bits.append(f"`# {s['max_uses']}`")
     name = s["name"] or ""
     if name:
         bits.append(f"**{name}**")
@@ -127,6 +129,9 @@ def _format_skill_line(s: sqlite3.Row) -> str:
         if s["cooldown"]:
             prefix.append(f"cd {s['cooldown']}t")
         desc = f"[{' / '.join(prefix)}] {desc}"
+    elif s["kind"] == "ex" and s["unlock_condition"]:
+        cond = " ".join(s["unlock_condition"].split())
+        desc = f"{desc} — *Unlock: {cond}*" if desc else f"*Unlock: {cond}*"
     head = " ".join(bits).strip()
     if desc:
         return f"• {head} — {desc}" if head else f"• {desc}"
