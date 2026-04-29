@@ -461,6 +461,51 @@ def test_feedback_results_embed_truncates_long_body(tmp_db_path: Path) -> None:
     assert len(embed.fields[0].value) <= embeds.FIELD_VALUE_LIMIT
 
 
+def test_feedback_results_embed_includes_usage_block(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    repo.insert_feedback(conn, user_id=1, username="alice", guild_id=None,
+                         feedback_text="kit description wrong on Castti")
+    repo.increment_command_usage(conn, "character", usage_date="2026-04-29")
+    repo.increment_command_usage(conn, "character", usage_date="2026-04-29")
+    repo.increment_command_usage(conn, "enemy",     usage_date="2026-04-28")
+    rows = repo.list_feedback(conn)
+    usage = repo.usage_in_window(conn, days=10, today="2026-04-29")
+    conn.close()
+    embed = embeds.feedback_results_to_embed(rows, usage_rows=usage, usage_days=10)
+    usage_field = next(f for f in embed.fields if f.name.startswith("Usage"))
+    assert "last 10 days" in usage_field.name
+    assert "2026-04-29" in usage_field.value
+    assert "character 2" in usage_field.value
+    assert "2026-04-28" in usage_field.value
+    assert "enemy 1" in usage_field.value
+    # Feedback fields still rendered after the usage block.
+    assert any("alice" in f.name for f in embed.fields)
+
+
+def test_feedback_results_embed_handles_no_feedback(tmp_db_path: Path) -> None:
+    """With no submissions, the embed still shows usage and a placeholder."""
+    conn = repo.connect(tmp_db_path)
+    repo.increment_command_usage(conn, "enemy", usage_date="2026-04-29")
+    usage = repo.usage_in_window(conn, days=10, today="2026-04-29")
+    conn.close()
+    embed = embeds.feedback_results_to_embed([], usage_rows=usage, usage_days=10)
+    assert "0 feedback submission" in embed.title
+    assert any(f.name.startswith("Usage") for f in embed.fields)
+    assert any("No feedback submissions yet" in (f.value or "") for f in embed.fields)
+
+
+def test_feedback_results_embed_handles_no_usage(tmp_db_path: Path) -> None:
+    """With no usage data yet, the usage block shows a placeholder."""
+    conn = repo.connect(tmp_db_path)
+    repo.insert_feedback(conn, user_id=1, username="alice", guild_id=None,
+                         feedback_text="hi")
+    rows = repo.list_feedback(conn)
+    conn.close()
+    embed = embeds.feedback_results_to_embed(rows, usage_rows=[], usage_days=10)
+    usage_field = next(f for f in embed.fields if f.name.startswith("Usage"))
+    assert "No /character or /enemy invocations" in usage_field.value
+
+
 def test_split_bullets_round_trips_and_respects_limit() -> None:
     """The splitter must (a) never exceed FIELD_VALUE_LIMIT per chunk,
     (b) split only between bullets — concatenating chunks with ``\\n``

@@ -5,7 +5,7 @@ import gzip
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
@@ -729,3 +729,25 @@ def increment_command_usage(
         "DO UPDATE SET count = count + 1",
         (command_name, date),
     )
+
+
+def usage_in_window(
+    conn: sqlite3.Connection,
+    *,
+    days: int = 10,
+    today: str | None = None,
+) -> list[sqlite3.Row]:
+    """Per-(usage_date, command_name) rows for the trailing `days` days (UTC, inclusive).
+
+    Newest day first, then alphabetic by command. `today` override is for tests."""
+    end = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    start = (
+        datetime.strptime(end, "%Y-%m-%d") - timedelta(days=days - 1)
+    ).strftime("%Y-%m-%d")
+    return list(conn.execute(
+        "SELECT usage_date, command_name, count "
+        "FROM command_usage_daily "
+        "WHERE usage_date >= ? AND usage_date <= ? "
+        "ORDER BY usage_date DESC, command_name",
+        (start, end),
+    ))

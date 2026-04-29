@@ -548,14 +548,14 @@ def register(tree: app_commands.CommandTree) -> None:
                 "You're not authorised to read feedback.", ephemeral=True,
             )
             return
-        rows = repo.list_feedback(bot_db.conn(), limit=limit)
-        if not rows:
-            await interaction.response.send_message(
-                "No feedback yet.", ephemeral=True,
-            )
-            return
+        conn = bot_db.conn()
+        rows = repo.list_feedback(conn, limit=limit)
+        usage_rows = repo.usage_in_window(conn, days=10)
         await interaction.response.send_message(
-            embed=embeds.feedback_results_to_embed(rows), ephemeral=True,
+            embed=embeds.feedback_results_to_embed(
+                rows, usage_rows=usage_rows, usage_days=10,
+            ),
+            ephemeral=True,
         )
 
     @tree.command(

@@ -510,12 +510,34 @@ def search_results_to_embed(rows: list[Any], *, query_summary: str) -> discord.E
     return embed
 
 
-def feedback_results_to_embed(rows: list[Any]) -> discord.Embed:
-    """Render the admin /feedback_list result. `rows` are sqlite3.Rows from list_feedback."""
+def feedback_results_to_embed(
+    rows: list[Any],
+    *,
+    usage_rows: list[Any] | None = None,
+    usage_days: int = 10,
+) -> discord.Embed:
+    """Render the admin /feedback_list result.
+
+    `rows` are sqlite3.Rows from `repo.list_feedback`. If `usage_rows` is
+    provided (from `repo.usage_in_window`), prepend a per-day usage
+    breakdown for the last `usage_days` days.
+    """
     embed = discord.Embed(
         title=f"Latest {len(rows)} feedback submission(s)",
         color=discord.Color.blurple(),
     )
+    if usage_rows is not None:
+        embed.add_field(
+            name=f"Usage (last {usage_days} days, UTC)",
+            value=_truncate(_format_usage_block(usage_rows), FIELD_VALUE_LIMIT),
+            inline=False,
+        )
+    if not rows:
+        embed.add_field(
+            name="Feedback",
+            value="_No feedback submissions yet._",
+            inline=False,
+        )
     for r in rows:
         body = r["feedback_text"] or "—"
         embed.add_field(
@@ -527,3 +549,18 @@ def feedback_results_to_embed(rows: list[Any]) -> discord.Embed:
             inline=False,
         )
     return embed
+
+
+def _format_usage_block(rows: list[Any]) -> str:
+    if not rows:
+        return "_No /character or /enemy invocations recorded yet._"
+    by_date: dict[str, dict[str, int]] = {}
+    for r in rows:
+        by_date.setdefault(r["usage_date"], {})[r["command_name"]] = r["count"]
+    lines: list[str] = []
+    for date in sorted(by_date.keys(), reverse=True):
+        per_cmd = by_date[date]
+        bits = ", ".join(f"{cmd} {per_cmd[cmd]}" for cmd in sorted(per_cmd))
+        total = sum(per_cmd.values())
+        lines.append(f"`{date}` — {bits} (total {total})")
+    return "\n".join(lines)

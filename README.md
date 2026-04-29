@@ -32,7 +32,7 @@ the result with SQLite FTS5, and lets you ask Discord:
 | `/search role weapon rarity weakness text` | anyone | Top-10 results. All five parameters are optional, all use live-DB autocomplete. `text` is FTS over skills, equipment, and names. |
 | `/refresh` | admin | Re-syncs character + enemy spreadsheets in one transaction. Refuses if a refresh is already in flight. |
 | `/feedback text:<≤2000>` | anyone | Logs a correction or inconsistency report. Rate-limited to 3 submissions / 60 s per user (persisted in SQLite, survives restarts). Reply is ephemeral. |
-| `/feedback_list [limit:1-25]` | admin | Ephemeral embed of the newest feedback rows. |
+| `/feedback_list [limit:1-25]` | admin | Ephemeral embed of the newest feedback rows plus a per-day `/character` and `/enemy` usage breakdown for the last 10 days. |
 | `/feedback_clear confirm:bool` | admin | Deletes all feedback rows. No-op unless `confirm:true`. |
 
 Admin gating is by Discord user ID — see `BOT_ADMIN_USER_IDS` below.
