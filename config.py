@@ -242,6 +242,8 @@ NAME_ALIASES: dict[str, str] = {
     "Lumis":    "Lyummis",    # JP↔EN transliteration drift; Index uses Lyummis
     "EX Lumis": "EX Lyummis", # SEA-only "EX Lumis" merges into Index "EX Lyummis"
     "Tithi":    "Titi",       # SEA spells the dancer 'Tithi'; Index has 'Titi'
+    "Nona":     "Nonya",      # community sheet sometimes spells the merchant 'Nona'
+    "Zenia":    "Zegna",      # SEA spells the apothecary 'Zenia'; Index has 'Zegna'
 }
 
 
