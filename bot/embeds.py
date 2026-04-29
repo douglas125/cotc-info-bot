@@ -117,7 +117,7 @@ def _format_skill_line(s: sqlite3.Row) -> str:
     if s["tier_level"]:
         bits.append(f"`Lv{s['tier_level']}`")
     if s["kind"] == "ex" and s["max_uses"] is not None:
-        bits.append(f"`# {s['max_uses']}`")
+        bits.append(f"`# of Uses: {s['max_uses']}`")
     name = s["name"] or ""
     if name:
         bits.append(f"**{name}**")

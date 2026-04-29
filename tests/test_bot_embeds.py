@@ -221,7 +221,7 @@ def test_build_section_actives_ex_field_shows_uses_and_unlock(tmp_db_path: Path)
     conn.close()
 
     ex_field = next(f for f in embed.fields if f.name == "EX")
-    assert "`# 1`" in ex_field.value
+    assert "`# of Uses: 1`" in ex_field.value
     assert '*Unlock: 4+ Allies have "Cursed State"*' in ex_field.value
 
 
