@@ -340,6 +340,33 @@ def test_increment_command_usage_separates_by_command_and_date(tmp_db_path: Path
     ]
 
 
+def test_usage_in_window_returns_only_last_n_days(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    # Today - 0..11 days
+    repo.increment_command_usage(conn, "character", usage_date="2026-04-29")
+    repo.increment_command_usage(conn, "enemy",     usage_date="2026-04-29")
+    repo.increment_command_usage(conn, "character", usage_date="2026-04-25")
+    repo.increment_command_usage(conn, "character", usage_date="2026-04-20")  # day 9 (in)
+    repo.increment_command_usage(conn, "character", usage_date="2026-04-19")  # day 10 (out)
+    repo.increment_command_usage(conn, "enemy",     usage_date="2026-04-10")  # way out
+    rows = repo.usage_in_window(conn, days=10, today="2026-04-29")
+    conn.close()
+    triples = [(r["usage_date"], r["command_name"], r["count"]) for r in rows]
+    assert triples == [
+        ("2026-04-29", "character", 1),
+        ("2026-04-29", "enemy",     1),
+        ("2026-04-25", "character", 1),
+        ("2026-04-20", "character", 1),
+    ]
+
+
+def test_usage_in_window_empty_when_no_data(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    rows = repo.usage_in_window(conn, days=10, today="2026-04-29")
+    conn.close()
+    assert rows == []
+
+
 def test_clear_tables_preserves_command_usage(tmp_db_path: Path) -> None:
     """The whole point of this table — counts must survive /refresh."""
     conn = repo.connect(tmp_db_path)
