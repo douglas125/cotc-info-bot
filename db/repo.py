@@ -39,24 +39,33 @@ def bootstrap(conn: sqlite3.Connection) -> None:
     _migrate_sync_runs_enemy_counts(conn)
 
 
+def _ensure_columns(
+    conn: sqlite3.Connection, table: str, pairs: tuple[tuple[str, str], ...],
+) -> None:
+    """Idempotently add missing columns to ``table``. No-op if the table
+    doesn't exist yet (the schema CREATE will handle it)."""
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if not cols:
+        return
+    for col, decl in pairs:
+        if col not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+
 def _migrate_skills_columns(conn: sqlite3.Connection) -> None:
     """In-place upgrade for older DBs whose `skills` table predates the
     learn_board / tier_level / initial_use / cooldown columns."""
     cols = {row[1] for row in conn.execute("PRAGMA table_info(skills)")}
-    if cols:
-        if "boost_level" in cols and "learn_board" not in cols:
-            conn.execute("ALTER TABLE skills RENAME COLUMN boost_level TO learn_board")
-            cols = (cols - {"boost_level"}) | {"learn_board"}
-        for col, decl in (
-            ("learn_board",      "INTEGER"),
-            ("tier_level",       "INTEGER"),
-            ("initial_use",      "INTEGER"),
-            ("cooldown",         "INTEGER"),
-            ("max_uses",         "INTEGER"),
-            ("unlock_condition", "TEXT"),
-        ):
-            if col not in cols:
-                conn.execute(f"ALTER TABLE skills ADD COLUMN {col} {decl}")
+    if cols and "boost_level" in cols and "learn_board" not in cols:
+        conn.execute("ALTER TABLE skills RENAME COLUMN boost_level TO learn_board")
+    _ensure_columns(conn, "skills", (
+        ("learn_board",      "INTEGER"),
+        ("tier_level",       "INTEGER"),
+        ("initial_use",      "INTEGER"),
+        ("cooldown",         "INTEGER"),
+        ("max_uses",         "INTEGER"),
+        ("unlock_condition", "TEXT"),
+    ))
 
     eq_cols = {row[1] for row in conn.execute("PRAGMA table_info(equipment)")}
     if eq_cols and "is_exclusive" not in eq_cols:
@@ -64,12 +73,10 @@ def _migrate_skills_columns(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_sync_runs_enemy_counts(conn: sqlite3.Connection) -> None:
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(sync_runs)")}
-    if not cols:
-        return
-    for col in ("enemies_count", "enemy_forms_count"):
-        if col not in cols:
-            conn.execute(f"ALTER TABLE sync_runs ADD COLUMN {col} INTEGER")
+    _ensure_columns(conn, "sync_runs", (
+        ("enemies_count",     "INTEGER"),
+        ("enemy_forms_count", "INTEGER"),
+    ))
 
 
 def _migrate_raw_snapshots_kind(conn: sqlite3.Connection) -> None:

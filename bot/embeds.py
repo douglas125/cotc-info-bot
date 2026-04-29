@@ -130,7 +130,7 @@ def _format_skill_line(s: sqlite3.Row) -> str:
             prefix.append(f"cd {s['cooldown']}t")
         desc = f"[{' / '.join(prefix)}] {desc}"
     elif s["kind"] == "ex" and s["unlock_condition"]:
-        cond = " ".join(s["unlock_condition"].split())
+        cond = s["unlock_condition"]
         desc = f"{desc} — *Unlock: {cond}*" if desc else f"*Unlock: {cond}*"
     head = " ".join(bits).strip()
     if desc:

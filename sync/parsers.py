@@ -663,7 +663,7 @@ def _extract_ex_meta(
         if c + 3 < len(row):
             txt = _cell_text(row[c + 3])
             if txt:
-                unlock_condition = txt
+                unlock_condition = " ".join(txt.split())
         return max_uses, unlock_condition
     return None, None
 
