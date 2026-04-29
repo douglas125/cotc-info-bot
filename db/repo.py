@@ -39,22 +39,33 @@ def bootstrap(conn: sqlite3.Connection) -> None:
     _migrate_sync_runs_enemy_counts(conn)
 
 
+def _ensure_columns(
+    conn: sqlite3.Connection, table: str, pairs: tuple[tuple[str, str], ...],
+) -> None:
+    """Idempotently add missing columns to ``table``. No-op if the table
+    doesn't exist yet (the schema CREATE will handle it)."""
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if not cols:
+        return
+    for col, decl in pairs:
+        if col not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+
 def _migrate_skills_columns(conn: sqlite3.Connection) -> None:
     """In-place upgrade for older DBs whose `skills` table predates the
     learn_board / tier_level / initial_use / cooldown columns."""
     cols = {row[1] for row in conn.execute("PRAGMA table_info(skills)")}
-    if cols:
-        if "boost_level" in cols and "learn_board" not in cols:
-            conn.execute("ALTER TABLE skills RENAME COLUMN boost_level TO learn_board")
-            cols = (cols - {"boost_level"}) | {"learn_board"}
-        for col, decl in (
-            ("learn_board", "INTEGER"),
-            ("tier_level",  "INTEGER"),
-            ("initial_use", "INTEGER"),
-            ("cooldown",    "INTEGER"),
-        ):
-            if col not in cols:
-                conn.execute(f"ALTER TABLE skills ADD COLUMN {col} {decl}")
+    if cols and "boost_level" in cols and "learn_board" not in cols:
+        conn.execute("ALTER TABLE skills RENAME COLUMN boost_level TO learn_board")
+    _ensure_columns(conn, "skills", (
+        ("learn_board",      "INTEGER"),
+        ("tier_level",       "INTEGER"),
+        ("initial_use",      "INTEGER"),
+        ("cooldown",         "INTEGER"),
+        ("max_uses",         "INTEGER"),
+        ("unlock_condition", "TEXT"),
+    ))
 
     eq_cols = {row[1] for row in conn.execute("PRAGMA table_info(equipment)")}
     if eq_cols and "is_exclusive" not in eq_cols:
@@ -62,12 +73,10 @@ def _migrate_skills_columns(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_sync_runs_enemy_counts(conn: sqlite3.Connection) -> None:
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(sync_runs)")}
-    if not cols:
-        return
-    for col in ("enemies_count", "enemy_forms_count"):
-        if col not in cols:
-            conn.execute(f"ALTER TABLE sync_runs ADD COLUMN {col} INTEGER")
+    _ensure_columns(conn, "sync_runs", (
+        ("enemies_count",     "INTEGER"),
+        ("enemy_forms_count", "INTEGER"),
+    ))
 
 
 def _migrate_raw_snapshots_kind(conn: sqlite3.Connection) -> None:
@@ -244,13 +253,15 @@ def insert_skills(conn: sqlite3.Connection, form_id: int, skills: list[dict]) ->
     conn.executemany(
         "INSERT INTO skills("
         "form_id, slot_order, name, sp_cost, kind, learn_board, tier_level, "
-        "initial_use, cooldown, description, power_min, power_max, hits"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "initial_use, cooldown, description, power_min, power_max, hits, "
+        "max_uses, unlock_condition"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             (form_id, s.get("slot_order"), s.get("name"), s.get("sp_cost"),
              s.get("kind"), s.get("learn_board"), s.get("tier_level"),
              s.get("initial_use"), s.get("cooldown"), s.get("description"),
-             s.get("power_min"), s.get("power_max"), s.get("hits"))
+             s.get("power_min"), s.get("power_max"), s.get("hits"),
+             s.get("max_uses"), s.get("unlock_condition"))
             for s in skills
         ],
     )
@@ -287,7 +298,10 @@ def rebuild_fts(conn: sqlite3.Connection) -> None:
             c.canonical_name,
             f.display_name,
             COALESCE((
-                SELECT GROUP_CONCAT(COALESCE(s.name,'') || ' ' || COALESCE(s.description,''), ' \n ')
+                SELECT GROUP_CONCAT(
+                    COALESCE(s.name,'') || ' ' || COALESCE(s.description,'') || ' ' || COALESCE(s.unlock_condition,''),
+                    ' \n '
+                )
                 FROM skills s WHERE s.form_id = f.id
             ), ''),
             COALESCE((

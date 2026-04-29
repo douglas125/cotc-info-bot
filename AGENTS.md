@@ -346,7 +346,7 @@ sheet typos or JP↔EN drift), the runner reconciles in this order:
 1. **Exact match** on the Index canonical name (most cases).
 2. **`config.NAME_ALIASES`** — explicit alias map. Add to it whenever
    verify reports an unmatched live block. Examples already in place:
-   `"Fior" → "Fiore"`, `"Krauser" → "Clauser"`, `"Araune" → "Alaune"`,
+   `"Fior" → "Fiore"`, `"Krauser" → "Clauser"`, `"Alaune" → "Araune"`,
    `"Elrica" → "Erika"`. Aliases are preferred over fuzzy because they're
    self-documenting and don't depend on edit distance.
 3. **Levenshtein distance ≤ 2** within the same role+rarity-band tab —

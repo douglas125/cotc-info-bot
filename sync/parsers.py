@@ -597,6 +597,9 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
 
         slot += 1
         parsed = _parse_skill_description(desc)
+        max_uses, unlock_condition = (None, None)
+        if kind == "ex":
+            max_uses, unlock_condition = _extract_ex_meta(r)
         skills.append({
             "slot_order": slot,
             "name": None,
@@ -610,6 +613,8 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
             "power_min": parsed.get("power_min"),
             "power_max": parsed.get("power_max"),
             "hits": parsed.get("hits"),
+            "max_uses": max_uses,
+            "unlock_condition": unlock_condition,
         })
 
     if latent_lines:
@@ -627,10 +632,40 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
             "power_min": None,
             "power_max": None,
             "hits": None,
+            "max_uses": None,
+            "unlock_condition": None,
         })
 
     block.skills = skills
     return block
+
+
+def _extract_ex_meta(
+    row: list[dict[str, Any]],
+) -> tuple[int | None, str | None]:
+    """Return (max_uses, unlock_condition) from an EX skill row.
+
+    The cluster is anchored by a literal '#' cell. In the canonical layout
+    it sits at col 8 with the integer at col 9 and the condition at col 11
+    (col 10 holds the lock icon, no text). One SEA/GL Unique Kits row
+    (EX Ophilia) shifts the cluster five columns right, so we scan for the
+    '#' instead of hardcoding the offset.
+    """
+    for c in range(8, min(16, len(row))):
+        if _cell_text(row[c]) != "#":
+            continue
+        max_uses: int | None = None
+        if c + 1 < len(row):
+            uses_txt = _cell_text(row[c + 1])
+            if uses_txt.isdigit():
+                max_uses = int(uses_txt)
+        unlock_condition: str | None = None
+        if c + 3 < len(row):
+            txt = _cell_text(row[c + 3])
+            if txt:
+                unlock_condition = " ".join(txt.split())
+        return max_uses, unlock_condition
+    return None, None
 
 
 def _scan_latent_counters(

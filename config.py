@@ -237,7 +237,7 @@ NAME_ALIASES: dict[str, str] = {
     # role-tab spelling : Index spelling
     "Fior":     "Fiore",
     "Krauser":  "Clauser",
-    "Araune":   "Alaune",     # JP↔EN transliteration drift
+    "Alaune":   "Araune",     # JP↔EN transliteration drift; Index uses Araune
     "Elrica":   "Erika",      # JP↔EN transliteration drift
     "Lumis":    "Lyummis",    # JP↔EN transliteration drift; Index uses Lyummis
     "EX Lumis": "EX Lyummis", # SEA-only "EX Lumis" merges into Index "EX Lyummis"
