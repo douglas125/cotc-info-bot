@@ -304,7 +304,7 @@ def _attach_footer(embed: discord.Embed, last_sync: sqlite3.Row | None) -> None:
     embed.set_footer(
         text=(
             f"synced {ts} · status: {last_sync['status']}\n"
-            "Errors? Suggestions? Use /feedback or ping me @Mc"
+            "Feedback welcome — use /feedback or ping @Mc"
         )
     )
 
