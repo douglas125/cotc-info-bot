@@ -459,13 +459,8 @@ def check_spot_characters(payload: dict, conn) -> list[tuple[bool, str]]:
     return out
 
 
-# Known A4 stat tuples for hand-verified characters. Keyed by canonical name.
-# Stats are listed in the order they appear in the live sheet (preserves
-# stat_order). The 4-stat entries (Serenoa, EX Temenos, Lemaire) exercise
-# the upper bound of the parser; EX Temenos's "Secrets of Sorcery" also
-# covers the negative-value case (ATK -200).
-# Note: the live sheet uses U+2019 (curly apostrophe) in accessory names
-# like "Professor’s Insignia" — match it exactly.
+# Stats are in the sheet's listed order. The live sheet uses U+2019
+# (curly apostrophe) in names like "Professor’s Insignia" — match exactly.
 _EXPECTED_A4_STATS: dict[str, tuple[str, list[tuple[str, int]]]] = {
     "Bargello":   ("Cuffs of the Family",          [("SP", 40), ("ATK", 100)]),
     "Cyrus":      ("Professor’s Insignia",    [("SP", 40), ("MAG", 60), ("MDEF", 40)]),
@@ -502,10 +497,8 @@ def check_a4_accessory_stats(conn) -> list[tuple[bool, str]]:
         out.append((ok, f"A4 stats for '{name}' / '{acc_name}': "
                         f"expected {expected_stats}, got {actual}"))
 
-    # Coverage: of the actual primary A4 accessories (excluding the
-    # "Unique Effects" pseudo-rows the parser inserts to attach status
-    # icons), how many have at least one stat? The snapshot histogram
-    # shows ~99% in the live sheet; anything below 95% is suspicious.
+    # Primary A4s almost always carry stats; <95% indicates a parser regression.
+    # Excludes "Unique Effects" pseudo-rows (those exist to anchor status icons).
     total = conn.execute(
         "SELECT COUNT(*) FROM equipment "
         "WHERE is_exclusive = 0 AND lower(name) != 'unique effects'"

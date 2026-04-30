@@ -66,6 +66,11 @@ def _cell_text(cell: dict[str, Any]) -> str:
     return (cell.get("formattedValue") or "").strip()
 
 
+def _formula(cell: dict[str, Any]) -> str:
+    """Raw `userEnteredValue.formulaValue` of a cell, or '' if absent."""
+    return ((cell.get("userEnteredValue") or {}).get("formulaValue") or "")
+
+
 _IMAGE_FORMULA_RE = re.compile(
     r"""=IMAGE\s*\(\s*["']([^"']+)["']""", re.IGNORECASE,
 )
@@ -78,8 +83,7 @@ def _image_url_from_cell(cell: dict[str, Any]) -> str | None:
     path; floating drawings and Insert>Image>In-cell artwork are not
     accessible through `spreadsheets.get`.
     """
-    uev = cell.get("userEnteredValue") or {}
-    formula = uev.get("formulaValue")
+    formula = _formula(cell)
     if formula:
         m = _IMAGE_FORMULA_RE.search(formula)
         if m:
@@ -304,20 +308,19 @@ _COL_SP        = 6   # SP cost (active rows) / desc fallback (passive rows)
 _COL_DESC      = 7   # active/special/EX/TP description
 _COL_LATENT_S  = 14  # latent-icon scan start (inclusive)
 _COL_LATENT_E  = 22  # latent-icon scan end   (inclusive)
-_COL_STAT_ICON = 20  # accessory stat icon: '=ATK'/'=SP'/... formula on stat rows
+_COL_STAT_ICON = 20
 _COL_EXCL_TAG  = 20  # "Exclusive Accessory N" / "Unique Effects"
 _COL_EQUIP     = 21  # primary A4 accessory name (block header row)
-_COL_STAT_VAL  = 21  # accessory stat numeric value on stat rows (same column as the name)
+_COL_STAT_VAL  = 21  # numeric stat value on stat rows (same column as the name)
 _COL_EQUIP_EFF = 23  # accessory effect description (row below header)
 _COL_PROFILE   = 25  # profile section header / values
 
-# A4 accessory stat names. The sheet encodes a stat boost as a small icon
-# whose underlying cell value is a formula like '=ATK'. The set below was
-# chosen by histogramming all `=NAME` formulas in col 20 across every role
-# tab and keeping only those that pair with a numeric col-21 value.
-# A naive `=*` match would pollute the table with status-effect icons
-# (`=Burning`, `=Lion`, `=Frostbite`, ...) that share the same column on
-# exclusive-accessory rows but have no numeric value.
+_TAG_EXCLUSIVE_PREFIX = "exclusive accessory"
+_TAG_UNIQUE_EFFECTS   = "unique effects"
+
+# Restricted to stat names that the live snapshot pairs with a numeric col-21
+# value. Without an allowlist, status-effect icons sharing col 20 on
+# exclusive-accessory rows (`=Burning`, `=Lion`, ...) would slip through.
 _KNOWN_STAT_NAMES = frozenset({
     "HP", "SP", "ATK", "MAG", "DEF", "MDEF", "SPD", "CRIT",
 })
@@ -328,8 +331,7 @@ def _formula_stat_name(cell: dict[str, Any]) -> str | None:
 
     Restricted to ``_KNOWN_STAT_NAMES`` so non-stat formulas don't match.
     """
-    uev = cell.get("userEnteredValue") or {}
-    formula = (uev.get("formulaValue") or "").strip()
+    formula = _formula(cell).strip()
     if len(formula) < 2 or not formula.startswith("="):
         return None
     name = formula[1:].strip().upper()
@@ -517,8 +519,8 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
             if not label:
                 continue
             label_lower = label.lower()
-            is_excl = label_lower.startswith("exclusive accessory")
-            is_unique = label_lower == "unique effects"
+            is_excl = label_lower.startswith(_TAG_EXCLUSIVE_PREFIX)
+            is_unique = label_lower == _TAG_UNIQUE_EFFECTS
             if not (is_excl or is_unique):
                 continue
             # Effect text: prefer c23 of the next row, fall back to c21

@@ -382,7 +382,7 @@ def _format_stat(stat: sqlite3.Row) -> str:
 def _build_a4_section(
     form: sqlite3.Row,
     equipment: list[sqlite3.Row],
-    stats_by_equipment: dict[int, list[sqlite3.Row]] | None = None,
+    stats_by_equipment: dict[int, list[sqlite3.Row]],
 ) -> discord.Embed:
     embed = _new_header_embed(form)
     if not equipment:
@@ -392,7 +392,6 @@ def _build_a4_section(
             inline=False,
         )
         return embed
-    stats_map = stats_by_equipment or {}
     lines = []
     for e in equipment:
         badge = " *(exclusive)*" if e["is_exclusive"] else ""
@@ -400,7 +399,7 @@ def _build_a4_section(
         if e["description"]:
             line += f" — {e['description']}"
         lines.append(line)
-        stats = stats_map.get(e["id"]) or []
+        stats = stats_by_equipment.get(e["id"]) or []
         if stats:
             lines.append(f"  _Stats: {' · '.join(_format_stat(s) for s in stats)}_")
     embed.add_field(

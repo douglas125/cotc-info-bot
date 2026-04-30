@@ -36,7 +36,9 @@ from config import (
     ENEMY_NPC_TAB_GIDS,
 )
 from sync.fetch import iter_rows, sheet_by_gid
-from sync.parsers import _cell_bg_hex, _cell_color_hex, _cell_text, _index_to_col_letters
+from sync.parsers import (
+    _cell_bg_hex, _cell_color_hex, _cell_text, _formula, _index_to_col_letters,
+)
 
 
 # --- constants discovered by the probe -------------------------------------
@@ -356,10 +358,6 @@ def _detect_display_blocks(
 def _is_display_aux_label(text: str) -> bool:
     """Return True for display metadata cells that are not enemy names."""
     return bool(_DISPLAY_AUX_LABEL_RE.match(text))
-
-
-def _formula(cell: dict[str, Any]) -> str:
-    return ((cell.get("userEnteredValue") or {}).get("formulaValue") or "")
 
 
 def _extract_weaknesses_for_block(
