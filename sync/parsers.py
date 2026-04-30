@@ -66,6 +66,11 @@ def _cell_text(cell: dict[str, Any]) -> str:
     return (cell.get("formattedValue") or "").strip()
 
 
+def _formula(cell: dict[str, Any]) -> str:
+    """Raw `userEnteredValue.formulaValue` of a cell, or '' if absent."""
+    return ((cell.get("userEnteredValue") or {}).get("formulaValue") or "")
+
+
 _IMAGE_FORMULA_RE = re.compile(
     r"""=IMAGE\s*\(\s*["']([^"']+)["']""", re.IGNORECASE,
 )
@@ -78,8 +83,7 @@ def _image_url_from_cell(cell: dict[str, Any]) -> str | None:
     path; floating drawings and Insert>Image>In-cell artwork are not
     accessible through `spreadsheets.get`.
     """
-    uev = cell.get("userEnteredValue") or {}
-    formula = uev.get("formulaValue")
+    formula = _formula(cell)
     if formula:
         m = _IMAGE_FORMULA_RE.search(formula)
         if m:
@@ -304,10 +308,71 @@ _COL_SP        = 6   # SP cost (active rows) / desc fallback (passive rows)
 _COL_DESC      = 7   # active/special/EX/TP description
 _COL_LATENT_S  = 14  # latent-icon scan start (inclusive)
 _COL_LATENT_E  = 22  # latent-icon scan end   (inclusive)
+_COL_STAT_ICON = 20
 _COL_EXCL_TAG  = 20  # "Exclusive Accessory N" / "Unique Effects"
 _COL_EQUIP     = 21  # primary A4 accessory name (block header row)
+_COL_STAT_VAL  = 21  # numeric stat value on stat rows (same column as the name)
 _COL_EQUIP_EFF = 23  # accessory effect description (row below header)
 _COL_PROFILE   = 25  # profile section header / values
+
+_TAG_EXCLUSIVE_PREFIX = "exclusive accessory"
+_TAG_UNIQUE_EFFECTS   = "unique effects"
+
+# Restricted to stat names that the live snapshot pairs with a numeric col-21
+# value. Without an allowlist, status-effect icons sharing col 20 on
+# exclusive-accessory rows (`=Burning`, `=Lion`, ...) would slip through.
+_KNOWN_STAT_NAMES = frozenset({
+    "HP", "SP", "ATK", "MAG", "DEF", "MDEF", "SPD", "CRIT",
+})
+
+
+def _formula_stat_name(cell: dict[str, Any]) -> str | None:
+    """Return e.g. 'ATK' for a cell whose formulaValue is '=ATK', else None.
+
+    Restricted to ``_KNOWN_STAT_NAMES`` so non-stat formulas don't match.
+    """
+    formula = _formula(cell).strip()
+    if len(formula) < 2 or not formula.startswith("="):
+        return None
+    name = formula[1:].strip().upper()
+    return name if name in _KNOWN_STAT_NAMES else None
+
+
+def _cell_int(cell: dict[str, Any]) -> int | None:
+    """Return the integer value of a cell, or None if not a clean integer."""
+    ev = cell.get("effectiveValue") or {}
+    if "numberValue" in ev:
+        try:
+            return int(ev["numberValue"])
+        except (TypeError, ValueError):
+            return None
+    txt = (cell.get("formattedValue") or "").strip()
+    if not txt:
+        return None
+    try:
+        return int(txt)
+    except ValueError:
+        return None
+
+
+def _scan_accessory_stats(
+    block_rows: list[list[dict[str, Any]]], start_idx: int,
+) -> list[tuple[str, int]]:
+    """Walk consecutive rows from ``start_idx`` collecting (stat_name, value)
+    pairs. Stops at the first row where col 20 isn't a known stat formula or
+    col 21 isn't a clean integer. Returns at most ~4 pairs in practice."""
+    out: list[tuple[str, int]] = []
+    for r in block_rows[start_idx:]:
+        if _COL_STAT_VAL >= len(r):
+            break
+        name = _formula_stat_name(r[_COL_STAT_ICON])
+        if not name:
+            break
+        val = _cell_int(r[_COL_STAT_VAL])
+        if val is None:
+            break
+        out.append((name, val))
+    return out
 
 # The sheet calls the unit's ultimate "Special"; both labels collapse to
 # kind="ultimate". TP rows are the unit's divine skill (still consumes SP).
@@ -431,8 +496,9 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
 
     # A4 accessories: header c21 is the primary accessory; "Exclusive
     # Accessory N" / "Unique Effects" markers in col 20 demarcate extra
-    # accessory entries. Pure-numeric col-21 cells in non-header rows are
-    # stat values, not accessory entries — skip them.
+    # accessory entries. Stat boosts live in the rows immediately below
+    # each accessory header as `=STAT` formula icons (col 20) paired with
+    # numeric values (col 21).
     if _COL_EQUIP < len(header_row):
         primary_name = _cell_text(header_row[_COL_EQUIP])
         primary_effect: str | None = None
@@ -444,6 +510,7 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
                 "name": primary_name,
                 "description": primary_effect,
                 "is_exclusive": False,
+                "stats": _scan_accessory_stats(block_rows, 1),
             })
         for ridx, r in enumerate(block_rows):
             if _COL_EXCL_TAG >= len(r):
@@ -452,8 +519,8 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
             if not label:
                 continue
             label_lower = label.lower()
-            is_excl = label_lower.startswith("exclusive accessory")
-            is_unique = label_lower == "unique effects"
+            is_excl = label_lower.startswith(_TAG_EXCLUSIVE_PREFIX)
+            is_unique = label_lower == _TAG_UNIQUE_EFFECTS
             if not (is_excl or is_unique):
                 continue
             # Effect text: prefer c23 of the next row, fall back to c21
@@ -472,6 +539,7 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
                 "name": label,
                 "description": eff or None,
                 "is_exclusive": is_excl,
+                "stats": _scan_accessory_stats(block_rows, ridx + 1),
             })
 
     # Profile column: take the longest non-empty text seen as self_buffs_text;

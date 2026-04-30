@@ -373,7 +373,17 @@ def _build_ultimate_section(form: sqlite3.Row, skills: list[sqlite3.Row]) -> dis
     return embed
 
 
-def _build_a4_section(form: sqlite3.Row, equipment: list[sqlite3.Row]) -> discord.Embed:
+def _format_stat(stat: sqlite3.Row) -> str:
+    val = stat["stat_value"]
+    sign = "+" if val >= 0 else "−"  # U+2212 minus, not '-' before '+'
+    return f"{stat['stat_name']} {sign}{abs(val)}"
+
+
+def _build_a4_section(
+    form: sqlite3.Row,
+    equipment: list[sqlite3.Row],
+    stats_by_equipment: dict[int, list[sqlite3.Row]],
+) -> discord.Embed:
     embed = _new_header_embed(form)
     if not equipment:
         embed.add_field(
@@ -389,6 +399,9 @@ def _build_a4_section(form: sqlite3.Row, equipment: list[sqlite3.Row]) -> discor
         if e["description"]:
             line += f" — {e['description']}"
         lines.append(line)
+        stats = stats_by_equipment.get(e["id"]) or []
+        if stats:
+            lines.append(f"  _Stats: {' · '.join(_format_stat(s) for s in stats)}_")
     embed.add_field(
         name="A4 Accessory",
         value=_truncate("\n".join(lines), FIELD_VALUE_LIMIT),
@@ -460,7 +473,11 @@ def build_section_embed(
     elif section == "ultimate":
         embed = _build_ultimate_section(form, repo.get_skills(conn, form_id))
     elif section == "a4":
-        embed = _build_a4_section(form, repo.get_equipment(conn, form_id))
+        embed = _build_a4_section(
+            form,
+            repo.get_equipment(conn, form_id),
+            repo.get_equipment_stats_by_form(conn, form_id),
+        )
     elif section == "info":
         embed = _build_info_section(
             form,

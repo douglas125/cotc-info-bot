@@ -177,6 +177,7 @@ def clear_character_tables(conn: sqlite3.Connection) -> None:
     for tbl in (
         "characters_fts",
         "character_profile",
+        "equipment_stats",
         "equipment",
         "skills",
         "character_affinities",
@@ -270,12 +271,21 @@ def insert_skills(conn: sqlite3.Connection, form_id: int, skills: list[dict]) ->
 def insert_equipment(conn: sqlite3.Connection, form_id: int, items: list[dict]) -> None:
     if not items:
         return
-    conn.executemany(
-        "INSERT INTO equipment(form_id, slot, name, description, is_exclusive) "
-        "VALUES (?, ?, ?, ?, ?)",
-        [(form_id, e.get("slot"), e.get("name"), e.get("description"),
-          1 if e.get("is_exclusive") else 0) for e in items],
-    )
+    for e in items:
+        cur = conn.execute(
+            "INSERT INTO equipment(form_id, slot, name, description, is_exclusive) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (form_id, e.get("slot"), e.get("name"), e.get("description"),
+             1 if e.get("is_exclusive") else 0),
+        )
+        stats = e.get("stats") or []
+        if stats:
+            conn.executemany(
+                "INSERT INTO equipment_stats(equipment_id, stat_name, stat_value, stat_order) "
+                "VALUES (?, ?, ?, ?)",
+                [(cur.lastrowid, name, value, order)
+                 for order, (name, value) in enumerate(stats)],
+            )
 
 
 def upsert_profile(conn: sqlite3.Connection, form_id: int,
@@ -425,6 +435,24 @@ def get_equipment(conn: sqlite3.Connection, form_id: int) -> list[sqlite3.Row]:
     ))
 
 
+def get_equipment_stats_by_form(
+    conn: sqlite3.Connection, form_id: int,
+) -> dict[int, list[sqlite3.Row]]:
+    """Return ``{equipment_id: [stat_row, ...]}`` for one form, ordered by stat_order."""
+    rows = conn.execute(
+        "SELECT es.equipment_id, es.stat_name, es.stat_value, es.stat_order "
+        "FROM equipment_stats es "
+        "JOIN equipment e ON e.id = es.equipment_id "
+        "WHERE e.form_id = ? "
+        "ORDER BY es.equipment_id, es.stat_order",
+        (form_id,),
+    ).fetchall()
+    out: dict[int, list[sqlite3.Row]] = {}
+    for r in rows:
+        out.setdefault(r["equipment_id"], []).append(r)
+    return out
+
+
 def get_profile(conn: sqlite3.Connection, form_id: int) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT * FROM character_profile WHERE form_id = ?", (form_id,)
@@ -434,7 +462,7 @@ def get_profile(conn: sqlite3.Connection, form_id: int) -> sqlite3.Row | None:
 def counts(conn: sqlite3.Connection) -> dict[str, int]:
     out = {}
     for tbl in ("characters", "character_forms", "skills", "equipment",
-                "character_affinities",
+                "equipment_stats", "character_affinities",
                 "enemies", "enemy_forms", "enemy_member_stats", "enemy_weaknesses"):
         out[tbl] = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
     return out

@@ -15,7 +15,7 @@ def test_bootstrap_creates_all_tables(tmp_db_path: Path) -> None:
     )}
     expected = {
         "characters", "character_forms", "character_affinities",
-        "skills", "equipment", "character_profile",
+        "skills", "equipment", "equipment_stats", "character_profile",
         "sync_runs", "raw_snapshots",
         "feedback_submissions",
         "command_usage_daily",
@@ -148,6 +148,68 @@ def test_counts(tmp_db_path: Path) -> None:
     assert c["skills"] == 2
     assert c["equipment"] == 1
     assert c["character_affinities"] == 2
+    conn.close()
+
+
+def test_insert_equipment_with_stats_and_get_back(tmp_db_path: Path) -> None:
+    """Equipment dicts may carry a 'stats' list of (name, value) tuples;
+    they round-trip through insert_equipment + get_equipment_stats_by_form."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="Bargello",
+                                base_role="thief", base_weapon="dagger")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="Bargello",
+                               rarity="5*")
+    repo.insert_equipment(conn, form_id, [
+        {"slot": None, "name": "Cuffs of the Family",
+         "description": "Self 100000 Damage Cap Up",
+         "is_exclusive": False,
+         "stats": [("SP", 40), ("ATK", 100)]},
+        {"slot": None, "name": "Bare Accessory",
+         "description": None, "is_exclusive": False, "stats": []},
+    ])
+    eq = repo.get_equipment(conn, form_id)
+    by_eq = repo.get_equipment_stats_by_form(conn, form_id)
+    assert {e["name"] for e in eq} == {"Cuffs of the Family", "Bare Accessory"}
+    cuffs = next(e for e in eq if e["name"] == "Cuffs of the Family")
+    cuffs_stats = by_eq[cuffs["id"]]
+    assert [(s["stat_name"], s["stat_value"]) for s in cuffs_stats] == \
+        [("SP", 40), ("ATK", 100)]
+    bare = next(e for e in eq if e["name"] == "Bare Accessory")
+    assert bare["id"] not in by_eq
+    conn.close()
+
+
+def test_equipment_stats_negative_value_round_trip(tmp_db_path: Path) -> None:
+    """Negative stat values (e.g. ATK -200 on Sorcery) must persist as-is."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="Throne",
+                                base_role="scholar", base_weapon="tome")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="Throne",
+                               rarity="5*")
+    repo.insert_equipment(conn, form_id, [
+        {"slot": None, "name": "The Secrets of Sorcery",
+         "description": "...", "is_exclusive": False,
+         "stats": [("ATK", -200)]},
+    ])
+    eq = repo.get_equipment(conn, form_id)
+    by_eq = repo.get_equipment_stats_by_form(conn, form_id)
+    assert by_eq[eq[0]["id"]][0]["stat_value"] == -200
+    conn.close()
+
+
+def test_equipment_stats_cascade_on_form_delete(tmp_db_path: Path) -> None:
+    """Wiping character_forms must cascade through equipment to equipment_stats."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="X",
+                                base_role="r", base_weapon="w")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="X", rarity="3*")
+    repo.insert_equipment(conn, form_id, [
+        {"slot": None, "name": "A", "description": None, "is_exclusive": False,
+         "stats": [("ATK", 1), ("SP", 2)]},
+    ])
+    assert conn.execute("SELECT COUNT(*) FROM equipment_stats").fetchone()[0] == 2
+    repo.clear_character_tables(conn)
+    assert conn.execute("SELECT COUNT(*) FROM equipment_stats").fetchone()[0] == 0
     conn.close()
 
 
