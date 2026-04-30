@@ -301,7 +301,12 @@ def _attach_footer(embed: discord.Embed, last_sync: sqlite3.Row | None) -> None:
     if not last_sync:
         return
     ts = last_sync["finished_at"] or last_sync["started_at"]
-    embed.set_footer(text=f"synced {ts} · status: {last_sync['status']}")
+    embed.set_footer(
+        text=(
+            f"synced {ts} · status: {last_sync['status']}\n"
+            "Errors? Suggestions? Use /feedback or ping me @Mc"
+        )
+    )
 
 
 def _group_by_kind(skills: list[sqlite3.Row]) -> dict[str, list[sqlite3.Row]]:
