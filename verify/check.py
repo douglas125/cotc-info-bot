@@ -459,6 +459,69 @@ def check_spot_characters(payload: dict, conn) -> list[tuple[bool, str]]:
     return out
 
 
+# Known A4 stat tuples for hand-verified characters. Keyed by canonical name.
+# Stats are listed in the order they appear in the live sheet (preserves
+# stat_order). The 4-stat entries (Serenoa, EX Temenos, Lemaire) exercise
+# the upper bound of the parser; EX Temenos's "Secrets of Sorcery" also
+# covers the negative-value case (ATK -200).
+# Note: the live sheet uses U+2019 (curly apostrophe) in accessory names
+# like "Professor’s Insignia" — match it exactly.
+_EXPECTED_A4_STATS: dict[str, tuple[str, list[tuple[str, int]]]] = {
+    "Bargello":   ("Cuffs of the Family",          [("SP", 40), ("ATK", 100)]),
+    "Cyrus":      ("Professor’s Insignia",    [("SP", 40), ("MAG", 60), ("MDEF", 40)]),
+    "Therion":    ("Famous Thief’s Lockpick", [("HP", 400), ("ATK", 40), ("SPD", 60)]),
+    "Lionel":     ("Crest of Breistadt",           [("HP", 400), ("ATK", 60), ("DEF", 40)]),
+    "Serenoa":    ("Crest of the Wolffort Family", [("HP", 300), ("ATK", 40), ("DEF", 30), ("CRIT", 40)]),
+    "EX Temenos": ("The Secrets of Sorcery",       [("HP", 900), ("SP", 100), ("ATK", -200), ("MAG", 200)]),
+    "Lemaire":    ("Brush of Passion",             [("ATK", 35), ("DEF", 35), ("MAG", 35), ("MDEF", 35)]),
+}
+
+
+def check_a4_accessory_stats(conn) -> list[tuple[bool, str]]:
+    """For each hand-verified character, assert their A4 accessory stats
+    parsed correctly (correct accessory name, correct ordered stat list).
+
+    Also reports a coverage summary: of all primary (non-exclusive) A4
+    accessories, what fraction has at least one stat row. The live sheet
+    assigns stats to almost every primary accessory, so a sudden drop is
+    a parser-regression smell.
+    """
+    out: list[tuple[bool, str]] = []
+    for name, (acc_name, expected_stats) in _EXPECTED_A4_STATS.items():
+        rows = conn.execute(
+            "SELECT es.stat_name, es.stat_value FROM equipment_stats es "
+            "JOIN equipment e ON e.id = es.equipment_id "
+            "JOIN character_forms cf ON cf.id = e.form_id "
+            "JOIN characters c ON c.id = cf.character_id "
+            "WHERE c.canonical_name = ? AND e.name = ? "
+            "ORDER BY es.stat_order",
+            (name, acc_name),
+        ).fetchall()
+        actual = [(r["stat_name"], r["stat_value"]) for r in rows]
+        ok = actual == expected_stats
+        out.append((ok, f"A4 stats for '{name}' / '{acc_name}': "
+                        f"expected {expected_stats}, got {actual}"))
+
+    # Coverage: of the actual primary A4 accessories (excluding the
+    # "Unique Effects" pseudo-rows the parser inserts to attach status
+    # icons), how many have at least one stat? The snapshot histogram
+    # shows ~99% in the live sheet; anything below 95% is suspicious.
+    total = conn.execute(
+        "SELECT COUNT(*) FROM equipment "
+        "WHERE is_exclusive = 0 AND lower(name) != 'unique effects'"
+    ).fetchone()[0]
+    with_stats = conn.execute(
+        "SELECT COUNT(DISTINCT e.id) FROM equipment e "
+        "JOIN equipment_stats es ON es.equipment_id = e.id "
+        "WHERE e.is_exclusive = 0 AND lower(e.name) != 'unique effects'"
+    ).fetchone()[0]
+    pct = (100.0 * with_stats / total) if total else 0.0
+    out.append((pct >= 95.0,
+                f"primary-A4 stat coverage: {with_stats}/{total} ({pct:.0f}%) "
+                f"have at least one stat row"))
+    return out
+
+
 # --- runner -----------------------------------------------------------------
 
 def run_all() -> int:
@@ -477,6 +540,7 @@ def run_all() -> int:
         ("FTS searchable",           check_fts_searchable(conn)),
         ("Splash-art coverage",      check_splash_art_coverage(conn)),
         ("Spot-check characters",    check_spot_characters(payload, conn)),
+        ("A4 accessory stats",       check_a4_accessory_stats(conn)),
     ]
 
     total = 0

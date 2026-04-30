@@ -258,6 +258,64 @@ def test_build_section_a4_basic_shape(tmp_db_path: Path) -> None:
     assert "exclusive" in a4_field.value
 
 
+def test_build_section_a4_renders_stats_subline(tmp_db_path: Path) -> None:
+    """When an accessory has stats, a `_Stats: ATK +100 · SP +40_` sub-line
+    must appear below the bullet."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="Bargello",
+                                base_role="thief", base_weapon="dagger")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="Bargello", rarity="5*")
+    repo.insert_equipment(conn, form_id, [
+        {"slot": None, "name": "Cuffs of the Family",
+         "description": "Self 100000 Damage Cap Up",
+         "is_exclusive": False,
+         "stats": [("ATK", 100), ("SP", 40)]},
+    ])
+    embed = embeds.build_section_embed(conn, form_id, "a4")
+    conn.close()
+    a4_field = next(f for f in embed.fields if f.name == "A4 Accessory")
+    assert "Cuffs of the Family" in a4_field.value
+    assert "ATK +100" in a4_field.value
+    assert "SP +40" in a4_field.value
+    assert "Stats" in a4_field.value
+
+
+def test_build_section_a4_renders_negative_stat_with_minus(tmp_db_path: Path) -> None:
+    """Negative stat values must render with a minus sign, not '+-'."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="Throne",
+                                base_role="scholar", base_weapon="tome")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="Throne", rarity="5*")
+    repo.insert_equipment(conn, form_id, [
+        {"slot": None, "name": "The Secrets of Sorcery",
+         "description": "Grant self +100,000 Damage Cap.",
+         "is_exclusive": False,
+         "stats": [("HP", 900), ("SP", 100), ("ATK", -200), ("MAG", 200)]},
+    ])
+    embed = embeds.build_section_embed(conn, form_id, "a4")
+    conn.close()
+    a4_field = next(f for f in embed.fields if f.name == "A4 Accessory")
+    assert "ATK −200" in a4_field.value  # U+2212 minus
+    assert "+-" not in a4_field.value
+    assert "MAG +200" in a4_field.value
+
+
+def test_build_section_a4_no_stats_means_no_subline(tmp_db_path: Path) -> None:
+    """An accessory with zero stats must NOT add a `_Stats:_` line."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="Bare",
+                                base_role="r", base_weapon="w")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="Bare", rarity="3*")
+    repo.insert_equipment(conn, form_id, [
+        {"slot": None, "name": "Nothing", "description": "no boost",
+         "is_exclusive": False, "stats": []},
+    ])
+    embed = embeds.build_section_embed(conn, form_id, "a4")
+    conn.close()
+    a4_field = next(f for f in embed.fields if f.name == "A4 Accessory")
+    assert "Stats" not in a4_field.value
+
+
 def test_build_section_a4_handles_no_equipment(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     ch = repo.upsert_character(conn, canonical_name="NoGear", base_role="r", base_weapon="w")

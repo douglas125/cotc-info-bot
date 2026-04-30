@@ -69,6 +69,19 @@ CREATE TABLE IF NOT EXISTS equipment (
 );
 CREATE INDEX IF NOT EXISTS ix_equipment_form ON equipment(form_id);
 
+-- Stat boosts granted by an A4 accessory. Each accessory has 0-4 stats,
+-- encoded in the sheet as `=ATK`/`=SP`/... formula icons paired with
+-- numeric values (negatives allowed; e.g. "Secrets of Sorcery" gives ATK -200).
+CREATE TABLE IF NOT EXISTS equipment_stats (
+    id              INTEGER PRIMARY KEY,
+    equipment_id    INTEGER NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
+    stat_name       TEXT NOT NULL,    -- 'ATK'|'MAG'|'SP'|'HP'|'SPD'|'DEF'|'MDEF'|'CRIT'
+    stat_value      INTEGER NOT NULL,
+    stat_order      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_equipment_stats_equipment
+    ON equipment_stats(equipment_id);
+
 CREATE TABLE IF NOT EXISTS character_profile (
     form_id         INTEGER PRIMARY KEY REFERENCES character_forms(id) ON DELETE CASCADE,
     splash_art_url  TEXT,

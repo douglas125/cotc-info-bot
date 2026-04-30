@@ -206,7 +206,8 @@ def test_alias_table_has_no_circular_or_chained_entries() -> None:
 
 # --- role-tab block detection (synthetic payload) --------------------------
 
-def _cell(text: str = "", color: dict | None = None, hyperlink: str | None = None) -> dict:
+def _cell(text: str = "", color: dict | None = None, hyperlink: str | None = None,
+          formula: str | None = None, number: int | None = None) -> dict:
     out: dict = {}
     if text:
         out["formattedValue"] = text
@@ -214,6 +215,11 @@ def _cell(text: str = "", color: dict | None = None, hyperlink: str | None = Non
         out["effectiveFormat"] = {"textFormat": {"foregroundColor": color}}
     if hyperlink:
         out["hyperlink"] = hyperlink
+    if formula:
+        out["userEnteredValue"] = {"formulaValue": formula}
+    if number is not None:
+        out["effectiveValue"] = {"numberValue": number}
+        out.setdefault("formattedValue", str(number))
     return out
 
 
@@ -270,6 +276,131 @@ def test_parse_role_tab_detects_blocks_by_anchor_pattern() -> None:
     assert any(e["name"] == "Cyrus's Tome" for e in blocks[0].equipment)
     # Therion has 1 skill, no equipment
     assert len(blocks[1].skills) == 1
+
+
+def _accessory_block(
+    name: str, accessory: str, accessory_effect: str,
+    stats: list[tuple[str, int]],
+    *, exclusive: list[tuple[str, list[tuple[str, int]], str]] | None = None,
+) -> list[list[dict]]:
+    """Mini block whose first row is the SP/Active header (with the accessory
+    name in col 21 and `=A4Icon` in col 20), followed by ``len(stats)`` stat
+    rows (col 20=`=STAT`, col 21=value), then optional Exclusive/Unique blocks.
+
+    Mirrors the live layout: the first stat row also carries the effect text
+    in col 23 (the parser reads ``block_rows[1][_COL_EQUIP_EFF]``)."""
+    rows: list[list[dict]] = []
+    header = [_cell(name), _cell(), _cell(), _cell(), _cell(), _cell(),
+              _cell("SP"), _cell("Active")] + [_cell()] * 12 + [
+        _cell(formula="=A4Icon"),
+        _cell(accessory),
+        _cell(), _cell(), _cell(),
+    ]
+    rows.append(header)
+    for i, (sname, sval) in enumerate(stats):
+        r = [_cell()] * 26
+        r[20] = _cell(formula=f"={sname}")
+        r[21] = _cell(number=sval)
+        if i == 0 and accessory_effect:
+            r[23] = _cell(accessory_effect)
+        rows.append(r)
+    rows.append([_cell()] * 26)  # separator
+    for tag, exstats, eff in (exclusive or []):
+        tag_row = [_cell()] * 26
+        tag_row[20] = _cell(tag)
+        rows.append(tag_row)
+        for i, (sname, sval) in enumerate(exstats):
+            r = [_cell()] * 26
+            r[20] = _cell(formula=f"={sname}")
+            r[21] = _cell(number=sval)
+            if i == 0 and eff:
+                r[23] = _cell(eff)
+            rows.append(r)
+        rows.append([_cell()] * 26)
+    return rows
+
+
+def test_parse_accessory_stats_two_stat_layout() -> None:
+    """Bargello shape: 2 stats below the accessory header row."""
+    sheet = _make_role_sheet(_accessory_block(
+        "Bargello", "Cuffs of the Family", "Self 100000 Damage Cap Up",
+        [("SP", 40), ("ATK", 100)],
+    ))
+    blocks = parse_role_tab(sheet, gid=999)
+    assert len(blocks) == 1
+    eq = blocks[0].equipment
+    assert len(eq) == 1
+    assert eq[0]["name"] == "Cuffs of the Family"
+    assert eq[0]["description"] == "Self 100000 Damage Cap Up"
+    assert eq[0]["stats"] == [("SP", 40), ("ATK", 100)]
+
+
+def test_parse_accessory_stats_four_stat_with_negative() -> None:
+    """Sorcery shape: 4 stats including ATK -200."""
+    sheet = _make_role_sheet(_accessory_block(
+        "Throne", "The Secrets of Sorcery", "Grant self +100,000 Damage Cap.",
+        [("HP", 900), ("SP", 100), ("ATK", -200), ("MAG", 200)],
+    ))
+    blocks = parse_role_tab(sheet, gid=999)
+    eq = blocks[0].equipment
+    assert eq[0]["stats"] == [("HP", 900), ("SP", 100), ("ATK", -200), ("MAG", 200)]
+
+
+def test_parse_accessory_stats_terminate_on_non_stat_formula() -> None:
+    """`=Burning` and other status icons must NOT be recorded as stats."""
+    rows = _accessory_block(
+        "X", "Test Accessory", "effect", [("ATK", 10)],
+    )
+    # inject a status-icon row right after the (single) stat row
+    extra = [_cell()] * 26
+    extra[20] = _cell(formula="=Burning")
+    extra[21] = _cell("Burning")  # not a number
+    rows.insert(2, extra)
+    sheet = _make_role_sheet(rows)
+    eq = parse_role_tab(sheet, gid=999)[0].equipment
+    assert eq[0]["stats"] == [("ATK", 10)]  # `=Burning` not picked up
+
+
+def test_parse_accessory_stats_terminate_on_missing_value() -> None:
+    """A `=STAT` formula without a numeric col-21 value terminates the scan."""
+    rows = _accessory_block(
+        "X", "Test", "effect", [("ATK", 10)],
+    )
+    bad = [_cell()] * 26
+    bad[20] = _cell(formula="=SP")
+    # col 21 left empty / non-numeric
+    bad[21] = _cell("not-a-number")
+    rows.insert(2, bad)
+    sheet = _make_role_sheet(rows)
+    eq = parse_role_tab(sheet, gid=999)[0].equipment
+    assert eq[0]["stats"] == [("ATK", 10)]
+
+
+def test_parse_accessory_stats_exclusive_accessory_also_carries_stats() -> None:
+    """Exclusive accessories follow the same `=STAT` + numeric pattern."""
+    sheet = _make_role_sheet(_accessory_block(
+        "X", "Primary", "primary effect", [("ATK", 100)],
+        exclusive=[
+            ("Exclusive Accessory 1", [("ATK", 20), ("DEF", 20)], "Self 10% Spear Damage Up"),
+        ],
+    ))
+    eq = parse_role_tab(sheet, gid=999)[0].equipment
+    assert len(eq) == 2
+    assert eq[0]["name"] == "Primary"
+    assert eq[0]["stats"] == [("ATK", 100)]
+    assert eq[1]["name"] == "Exclusive Accessory 1"
+    assert eq[1]["is_exclusive"] is True
+    assert eq[1]["stats"] == [("ATK", 20), ("DEF", 20)]
+
+
+def test_parse_accessory_stats_no_stats_yields_empty_list() -> None:
+    """Accessory with zero stat rows still parses cleanly with stats=[]."""
+    sheet = _make_role_sheet(_accessory_block(
+        "X", "Bare Accessory", "effect", [],
+    ))
+    eq = parse_role_tab(sheet, gid=999)[0].equipment
+    assert eq[0]["name"] == "Bare Accessory"
+    assert eq[0]["stats"] == []
 
 
 def test_parse_role_tab_ignores_rows_without_sp_active_marker() -> None:
