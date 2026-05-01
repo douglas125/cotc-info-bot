@@ -8,6 +8,8 @@ from typing import Any, Callable
 from config import (
     ENEMIES_SPREADSHEET_ID,
     ENEMY_DATA_TAB_GIDS,
+    PETS_LIST_GID,
+    PETS_SPREADSHEET_ID,
     ROLE_TABS,
     TABS_BY_GID,
     WEAPON_TO_ROLE,
@@ -26,6 +28,7 @@ from sync.parsers import (
     parse_role_tab,
     parse_sea_kits,
 )
+from sync.pet_parsers import parse_pets
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -74,6 +77,11 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
         enemy_payload = fetch_spreadsheet(api_key, ENEMIES_SPREADSHEET_ID)
         progress("Persisting raw enemy snapshot...")
         repo.store_raw_snapshot(conn, run_id, enemy_payload, kind="enemies")
+
+        progress("Fetching pet spreadsheet (Seed Story Content)...")
+        pets_payload = fetch_spreadsheet(api_key, PETS_SPREADSHEET_ID)
+        progress("Persisting raw pet snapshot...")
+        repo.store_raw_snapshot(conn, run_id, pets_payload, kind="pets")
 
         progress("Parsing Characters Index...")
         index_sheet = sheet_by_gid(payload, 1917707422)
@@ -290,6 +298,20 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             progress("Rebuilding enemy FTS index...")
             repo.rebuild_enemy_fts(conn)
 
+            progress("Parsing pet spreadsheet...")
+            parsed_pets, pet_warnings = parse_pets(pets_payload, PETS_LIST_GID)
+            for w in pet_warnings:
+                progress(f"  WARN: {w}")
+            progress(f"  Parsed {len(parsed_pets)} pets.")
+
+            progress("Writing pet data...")
+            repo.clear_pet_tables(conn)
+            for pet in parsed_pets:
+                repo.upsert_pet(conn, pet)
+
+            progress("Rebuilding pet FTS index...")
+            repo.rebuild_pet_fts(conn)
+
         c = repo.counts(conn)
         repo.finish_sync_run(
             conn, run_id, status="ok",
@@ -297,12 +319,16 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             skills_count=c["skills"],
             enemies_count=c["enemies"],
             enemy_forms_count=c["enemy_forms"],
+            pets_count=c["pets"],
         )
         progress(f"Sync OK. Forms={c['character_forms']} Skills={c['skills']} "
                  f"Equipment={c['equipment']} Affinities={c['character_affinities']} "
-                 f"Enemies={c['enemies']} EnemyForms={c['enemy_forms']}.")
+                 f"Enemies={c['enemies']} EnemyForms={c['enemy_forms']} "
+                 f"Pets={c['pets']}.")
         return {"run_id": run_id, "status": "ok",
-                "unmatched_enemies": list(enemy_parse.unmatched), **c}
+                "unmatched_enemies": list(enemy_parse.unmatched),
+                "pet_warnings": list(pet_warnings),
+                **c}
 
     except Exception as exc:
         repo.finish_sync_run(conn, run_id, status="error", error=str(exc))

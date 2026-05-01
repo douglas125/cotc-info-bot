@@ -66,15 +66,18 @@ character_sheet/
 ├── bot/                         # Discord bot (`python -m bot`)
 │   ├── __main__.py              # entrypoint; cold-start sync if DB empty
 │   ├── client.py                # discord.Client + CommandTree wiring
-│   ├── commands.py              # /character, /enemy, /search, /refresh, /feedback
+│   ├── commands.py              # /character, /enemy, /pet, /search, /refresh, /feedback
 │   ├── embeds.py                # /character embed builders (no runtime)
 │   ├── enemy_embeds.py          # /enemy embed builders (no runtime)
+│   ├── pet_embeds.py            # /pet embed builder (single screen, no view)
 │   ├── views.py                 # /character dropdown view (sections)
 │   ├── enemy_views.py           # /enemy dropdown view (rank tiers)
 │   └── db.py                    # per-call SQLite connection helper
 ├── sync/
 │   ├── fetch.py                 # one Sheets API v4 call, all tabs
 │   ├── parsers.py               # Index parser + role-tab parser + SEA/GL
+│   ├── enemy_parsers.py         # enemy data + display tab parsers
+│   ├── pet_parsers.py           # Pet List parser (Seed Story Content sheet)
 │   ├── runner.py                # orchestrates fetch + parse + transactional persist
 │   └── cli.py                   # `python -m sync.cli --api-key ...`
 ├── db/
@@ -124,10 +127,18 @@ in `bot/`; entry point is `python -m bot`.
   swaps among the enemy's available ranks (Rank1..EX3 for ranked
   enemies; NPCs are single-rank with no dropdown). Source: the second
   enemy sheet (Adversary Log CotC), see `INFO_SOURCES.md`.
+- `/pet name:<autocomplete>` — single-screen embed: ability text, Max
+  Boost, Turn Preparation (base / Lv10), Turn Cooldown (base / Lv5),
+  the 8 fixed stats (HP/SP/Patk/Pdef/Matk/Mdef/Crit/Speed), and the
+  "how to obtain" string. Source: the third *Seed Story Content* sheet,
+  see `INFO_SOURCES.md`. When a typed prefix matches more than one pet
+  with the same English name (e.g. "White Rabbit" exists as both a
+  Login reward and a Quest reward), the autocomplete labels show a
+  short source-text hint so the user can disambiguate.
 - `/search role weapon rarity weakness text` — top-10 list, all params
   optional, all autocompletes pull from the live DB.
 - `/refresh` — admin-gated; re-runs `sync.runner.run_sync` off the event
-  loop, syncing both the character and enemy spreadsheets in one
+  loop, syncing the character, enemy, AND pet spreadsheets in one
   transaction. Refuses if a refresh is already in flight.
 - `/feedback text:<≤2000 chars>` — anyone; logs a correction/inconsistency
   report into `feedback_submissions`. Per-user rate limit (3/60s) is
@@ -202,34 +213,42 @@ red=5★, green=free 3→5★, yellow=4★, blue=3★.
 5. SEA/GL parser flags characters with SEA-only kit variants (creates a second
    form row with `server='sea'`).
 6. Persist inside `BEGIN IMMEDIATE`: `clear_character_tables` /
-   `clear_enemy_tables` then re-insert. `rebuild_fts` /
-   `rebuild_enemy_fts` repopulate the FTS indexes. `sync_runs` row is
-   finalized with both character and enemy counts.
+   `clear_enemy_tables` / `clear_pet_tables` then re-insert.
+   `rebuild_fts` / `rebuild_enemy_fts` / `rebuild_pet_fts` repopulate the
+   FTS indexes. `sync_runs` row is finalized with character, enemy, and
+   pet counts.
 
 ### What `/refresh` wipes vs preserves
 
-The wipe loops in `repo.clear_character_tables` and `repo.clear_enemy_tables`
-are intentional and the contents matter — adding or removing a table here
-changes whether community state survives a re-sync. Treat it as a policy
-decision, not a maintenance chore.
+The wipe loops in `repo.clear_character_tables`,
+`repo.clear_enemy_tables`, and `repo.clear_pet_tables` are intentional
+and the contents matter — adding or removing a table here changes
+whether community state survives a re-sync. Treat it as a policy
+decision, not a maintenance chore. Each pipeline's wipe is narrow:
+adding a sheet-derived table goes in its OWN clear function, never
+in another pipeline's.
 
 **Wiped on every refresh** (sheet-derived, regenerated from the snapshot):
 
-- Character side: `characters_fts`, `character_profile`, `equipment`,
-  `skills`, `character_affinities`, `character_forms`, `characters`
-- Enemy side: `enemies_fts`, `enemy_member_stats`, `enemy_forms`, `enemies`
+- Character side: `characters_fts`, `character_profile`, `equipment_stats`,
+  `equipment`, `skills`, `character_affinities`, `character_forms`, `characters`
+- Enemy side: `enemies_fts`, `enemy_weaknesses`, `enemy_member_stats`,
+  `enemy_forms`, `enemies`
+- Pet side: `pets_fts`, `pets`
 
-**Preserved across refreshes** (must NOT be added to either wipe loop):
+**Preserved across refreshes** (must NOT be added to ANY wipe loop):
 
 - `sync_runs` / `raw_snapshots` — sync history & raw payloads, used by the
   verifier and by parser re-runs. `raw_snapshots` carries one row per
-  `(sync_run_id, kind)` so both pipelines are auditable from one run.
+  `(sync_run_id, kind)` (`'characters'`, `'enemies'`, `'pets'`) so all
+  three pipelines are auditable from one run.
 - `feedback_submissions` — community-submitted corrections (`/feedback`).
   Wiping it would silently delete user reports on every re-sync. Cleared
   explicitly via the admin-only `/feedback_clear` slash command.
-- `command_usage_daily` — per-day counter of `/character` and `/enemy`
-  invocations. Wiping it would erase usage history that no other source
-  can reconstruct. No admin-clear command yet — drop manually if needed.
+- `command_usage_daily` — per-day counter of `/character`, `/enemy`, and
+  `/pet` invocations. Wiping it would erase usage history that no other
+  source can reconstruct. No admin-clear command yet — drop manually if
+  needed.
 
 ### Reading usage stats
 

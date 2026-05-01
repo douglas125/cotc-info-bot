@@ -117,7 +117,54 @@ Same v4 endpoint, same field mask. One enemy-specific gap:
   discussion API (`spreadsheets.comments.list`), not returned by
   `spreadsheets.get`. We intentionally don't fetch them in v1.
 
-## Tertiary source — community damage calculator (V1.1 spreadsheet)
+## Tertiary source — Pet sheet (Seed Story Content)
+
+- **URL**: <https://docs.google.com/spreadsheets/d/1pApYNOrKWliMn_25Fs23Lhc8wlSDwutxCYJzyufSwUY/>
+- **Spreadsheet ID**: `1pApYNOrKWliMn_25Fs23Lhc8wlSDwutxCYJzyufSwUY`
+- **Title**: *Seed Story Content*
+- **Access**: public, read-only via the same Google Sheets v4 API key.
+- **Why we mirror it**: every pet has 8 fixed stats, an ability block
+  (effect text + optional Max Boost + Turn Preparation + Turn Cooldown),
+  and a "how to obtain" string. `/pet` surfaces all of that in one
+  Discord embed (no rank dropdown — pet info is small enough to fit on
+  a single screen). When pets reach Lv10 their first-use turn drops by
+  1, and at Lv5 their cooldown drops by 1; the source sheet prints
+  both base and reduced values inline, and the parser stores both.
+
+### Tab inventory
+
+- 1 × `Pet List` (gid in `config.py::PETS_LIST_GID = 243040141`) —
+  4-rows-per-pet block layout: row r₀ holds name + HP/SP + ability +
+  source; rows r₀+1..r₀+3 carry the remaining six stats in
+  (Patk/Pdef), (Matk/Mdef), (Crit/Speed) pairs. Other tabs in the
+  workbook (`Overview`, `Pet System`, etc.) are not parser inputs.
+
+### Layout notes
+
+- Pet names are formatted `<JP> (<English>)`. The English part of the
+  LAST `(...)` group is the canonical name; the raw cell is preserved
+  as `display_name_jp` so the original is searchable. Nested example:
+  `ルールー (紫) (Purple Lulu )` → `Purple Lulu`. One real-world entry
+  uses a tab character between JP and English (`黒茶\t(Black Brown
+  Dog)`); whitespace is normalized before regex matching.
+- The ability cell packs effect text plus optional `Max Boost: …`,
+  `Turn Preparation: N (Lv10: N-1)`, and `Turn Cooldown: M (Lv5: M-1)`
+  lines, separated by newlines. Source-side typos (`Lv.10`, `Lv:`,
+  missing inner digits) are tolerated by the regexes in
+  `sync/pet_parsers.py`. Christmas Dog's "two `Turn Preparation` lines,
+  no `Turn Cooldown`" typo auto-heals (the second occurrence becomes
+  cooldown) AND the runner emits a warning so upstream gets a nudge
+  to fix the source.
+- Stats are read by *label* (find the cell whose text equals "Patk",
+  take its right neighbor) so a column-position drift in the source
+  sheet does not silently corrupt values.
+- Duplicate English names exist (`White Rabbit` appears as both a
+  Login-event reward and a Quest reward). The DB uses
+  `UNIQUE(canonical_name, source_row)` and `/pet`'s autocomplete shows
+  a source-text hint to disambiguate when a typed prefix matches more
+  than one row.
+
+## Quaternary source — community damage calculator (V1.1 spreadsheet)
 
 - **File**: `buff_debuff/COTC Effective Damage Calculator V1.1.xlsx`
 - **Title**: *MeowDB's COTC Effective Damage Calculator V1.1*

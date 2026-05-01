@@ -149,6 +149,20 @@ ENEMY_DATA_TAB_GIDS: dict[str, int] = {
 # Display tabs whose blocks should be treated as NPCs (single-rank, no dropdown).
 ENEMY_NPC_TAB_GIDS: frozenset[int] = frozenset({2117870435})
 
+
+# Seed Story Content — sibling pet spreadsheet.
+PETS_SPREADSHEET_ID = "1pApYNOrKWliMn_25Fs23Lhc8wlSDwutxCYJzyufSwUY"
+PETS_SPREADSHEET_URL = f"https://docs.google.com/spreadsheets/d/{PETS_SPREADSHEET_ID}"
+
+# GID of the 'Pet List' tab in the pet spreadsheet (discovered via
+# verify/probe_pets.py). The tab has a 4-rows-per-pet block layout:
+# row r₀ holds name + HP/SP + ability + source; rows r₀+1..r₀+3 hold the
+# remaining 6 stats in (Patk/Pdef), (Matk/Mdef), (Crit/Speed) pairs.
+PETS_LIST_GID: int = 243040141
+
+# Display-name → canonical-name map for future drift handling. Empty today.
+PET_NAME_ALIASES: dict[str, str] = {}
+
 # Tabs that are not parser inputs: instructional, layout scaffold, image assets.
 ENEMY_SKIP_TABS: frozenset[str] = frozenset({
     "Guide", "Template", "Images",

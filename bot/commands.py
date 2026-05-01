@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -16,7 +17,7 @@ from discord import app_commands
 
 import config
 from bot import db as bot_db
-from bot import embeds, enemy_embeds
+from bot import embeds, enemy_embeds, pet_embeds
 from bot.enemy_views import EnemyView
 from bot.views import CharacterView
 from db import repo
@@ -287,6 +288,81 @@ def _resolve_enemy_id(conn: sqlite3.Connection, name_or_id: str) -> int | None:
 
 
 # ----------------------------------------------------------------------------
+# Pet-name autocomplete and resolution (used by /pet)
+# ----------------------------------------------------------------------------
+
+def _pet_choice_label(row: sqlite3.Row, *, hint: bool) -> str:
+    """Choice label: canonical name, optionally suffixed with a source hint
+    when multiple pets share the English name (e.g. White Rabbit). The hint
+    is the first non-empty line of source_text, capped at 30 chars."""
+    label = row["canonical_name"]
+    if hint and row["source_text"]:
+        first_line = next(
+            (line.strip() for line in row["source_text"].splitlines()
+             if line.strip()),
+            "",
+        )
+        if first_line:
+            snippet = first_line[:30]
+            label = f"{label} — {snippet}"
+    if len(label) > 100:  # Discord caps Choice.name at 100 chars
+        label = label[:99] + "…"
+    return label
+
+
+def _autocomplete_pets(
+    conn: sqlite3.Connection, current: str,
+) -> list[app_commands.Choice[str]]:
+    """Return up to AUTOCOMPLETE_LIMIT pet choices.
+
+    `repo.pet_choices_by_name` returns prefix-matches first, then
+    substrings. When the result set has duplicate canonical_names, append
+    a short source-text hint so the user can disambiguate (e.g.
+    'White Rabbit — Quest' vs 'White Rabbit — New Year 2023 Login (JP)').
+    """
+    rows = repo.pet_choices_by_name(conn, current, AUTOCOMPLETE_LIMIT)
+    name_counts: Counter[str] = Counter(r["canonical_name"] for r in rows)
+    return [
+        app_commands.Choice(
+            name=_pet_choice_label(r, hint=name_counts[r["canonical_name"]] > 1),
+            value=str(r["pet_id"]),
+        )
+        for r in rows
+    ]
+
+
+def _resolve_pet_id(conn: sqlite3.Connection, name_or_id: str) -> int | None:
+    """Resolve a /pet `name` parameter to a pet id.
+
+    Stringified id from autocomplete wins. Free-text falls back to exact,
+    then prefix. When multiple pets share the English name and the user
+    types just that name, returns the lowest-id match — the autocomplete
+    label is the recommended path for disambiguation.
+    """
+    s = (name_or_id or "").strip()
+    if not s:
+        return None
+    if s.isdigit():
+        if conn.execute("SELECT 1 FROM pets WHERE id = ?", (int(s),)).fetchone():
+            return int(s)
+    row = conn.execute(
+        "SELECT id FROM pets WHERE LOWER(canonical_name) = LOWER(?) "
+        "ORDER BY id LIMIT 1",
+        (s,),
+    ).fetchone()
+    if row:
+        return row[0]
+    row = conn.execute(
+        "SELECT id FROM pets WHERE LOWER(canonical_name) LIKE LOWER(?) "
+        "ORDER BY id LIMIT 1",
+        (f"{s}%",),
+    ).fetchone()
+    if row:
+        return row[0]
+    return None
+
+
+# ----------------------------------------------------------------------------
 # /feedback helpers
 # ----------------------------------------------------------------------------
 
@@ -381,6 +457,31 @@ def register(tree: app_commands.CommandTree) -> None:
     async def _enemy_ac(interaction: discord.Interaction, current: str):
         return _autocomplete_enemies(bot_db.conn(), current)
 
+    @tree.command(name="pet", description="Show stats and ability for a CotC pet.")
+    @app_commands.describe(name="Start typing a pet name to see suggestions.")
+    async def pet_cmd(interaction: discord.Interaction, name: str) -> None:
+        conn = bot_db.conn()
+        _record_command_usage(conn, "pet")
+        pet_id = _resolve_pet_id(conn, name)
+        if pet_id is None:
+            await interaction.response.send_message(
+                f"No pet matches `{name}`. Try a shorter prefix.",
+                ephemeral=True,
+            )
+            return
+        embed = pet_embeds.build_pet_embed(conn, pet_id)
+        if embed is None:
+            await interaction.response.send_message(
+                "That pet was removed by a recent refresh — try again.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(embed=embed)
+
+    @pet_cmd.autocomplete("name")
+    async def _pet_ac(interaction: discord.Interaction, current: str):
+        return _autocomplete_pets(bot_db.conn(), current)
+
     @tree.command(name="search", description="Filter CotC units by role, weapon, rarity, weakness, or free text.")
     @app_commands.describe(
         role="Role (e.g. Warrior, Cleric)",
@@ -473,15 +574,20 @@ def register(tree: app_commands.CommandTree) -> None:
                 return
 
         unmatched = summary.get("unmatched_enemies") or []
-        unmatched_note = ""
+        pet_warnings = summary.get("pet_warnings") or []
+        notes: list[str] = []
         if unmatched:
-            unmatched_note = f" · enemies_unmatched={len(unmatched)}"
+            notes.append(f"enemies_unmatched={len(unmatched)}")
+        if pet_warnings:
+            notes.append(f"pet_warnings={len(pet_warnings)}")
+        notes_suffix = (" · " + " · ".join(notes)) if notes else ""
         await interaction.followup.send(
             f"Sync OK. forms={summary.get('character_forms', '?')} · "
             f"skills={summary.get('skills', '?')} · "
             f"equipment={summary.get('equipment', '?')} · "
             f"enemies={summary.get('enemies', '?')} · "
-            f"enemy_forms={summary.get('enemy_forms', '?')}{unmatched_note}",
+            f"enemy_forms={summary.get('enemy_forms', '?')} · "
+            f"pets={summary.get('pets', '?')}{notes_suffix}",
             ephemeral=True,
         )
 
