@@ -185,6 +185,38 @@ These apply across all groups.
 9. **Defensive math** → defensive buffs (PDEF Up, MDEF Up, weapon/element Res Up on ally) follow the same bucket structure on the **defender** side. The defender's group product **divides** the attacker's damage. (See `edge_cases.md`.)
 10. **Boost Lv** → varies per skill. The %, the duration, both, or neither may scale with Boost Lv. Read each skill description.
 
+## Cross-reference: V1.1 spreadsheet
+
+The community ships a **`COTC Effective Damage Calculator V1.1`**
+spreadsheet (original by Meow; Ult/Pet expansions by Wigglytuff). A
+copy lives at `buff_debuff/COTC Effective Damage Calculator V1.1.xlsx`
+and its formulas are ported to Python in `damage/spreadsheet_calc.py`.
+The parity test in `tests/test_damage.py` reads the .xlsx directly and
+asserts cell-by-cell equality.
+
+V1.1 is a **correct subset** of the model in this README — the bucket
+structure (G1 fully additive; G2/G3 fully additive; G4/G5 sub-pools
+multiplying) matches exactly. What V1.1 omits:
+
+- **G6 Divine Beast** (flat ×1.10).
+- **Per-type sub-buckets** in G2/G3/G4/G5 — V1.1 lumps them into a
+  single field per group; you enter "the right buff for this attack"
+  yourself.
+- **Sub-bucket auto-caps** — V1.1 trusts you to enter at most 30%
+  (50% for select JP units) per field.
+- **Final multipliers** — Crit, Hell/Heaven/Living World, Soul
+  Potency, Skill Potency. The cell text confirms: *"This calc cannot
+  figure out CRIT damage nor damage differences from weapon grade."*
+- **Defensive bucket math** — V1.1 has a simplified `(M + ATK − DEF)`
+  term, not the full defender-side group product.
+- **Umbrella buff expansion** — V1.1 has no concept of "Physical DMG
+  Up applies to all 8 weapon sub-buckets independently."
+
+Use V1.1 when you want a quick A-vs-B build comparison; use
+`damage/full_calc.py` when you need the full model (caps, umbrella
+expansion, G6, final multipliers, defender). The two layers reduce
+to each other on V1.1's lumped inputs (proved in the test suite).
+
 ## Source image
 
 ![Buff/debuff bucket diagram](buff_debuff_groups.jpeg)

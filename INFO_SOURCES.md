@@ -117,6 +117,32 @@ Same v4 endpoint, same field mask. One enemy-specific gap:
   discussion API (`spreadsheets.comments.list`), not returned by
   `spreadsheets.get`. We intentionally don't fetch them in v1.
 
+## Tertiary source — community damage calculator (V1.1 spreadsheet)
+
+- **File**: `buff_debuff/COTC Effective Damage Calculator V1.1.xlsx`
+- **Title**: *MeowDB's COTC Effective Damage Calculator V1.1*
+- **Authors**: original by Meow; Ult/Pet expansions by Wigglytuff.
+- **Source**: posted on the meowdb / Wigglytuff Discord
+  (`discord.gg/Ah3xSgtkgd`).
+- **Tabs**:
+  - `Master` (hidden) — globals: damage type (Physical/Elemental),
+    enemy PDEF/EDEF.
+  - `Public1` (visible) — main two-column comparison calculator. This
+    is the canonical entry point; its formulas in `C15`/`C38`/`C39`
+    are the source of truth that `damage/spreadsheet_calc.py` mirrors.
+  - `Copy of Public1`, `Copy of Public1 1` — duplicates of Public1.
+- **Why we keep a local copy**: it's the canonical formula source for
+  `damage/spreadsheet_calc.py`. The parity tests in
+  `tests/test_damage.py` load it via stdlib `zipfile` and assert
+  cell-by-cell equality. If upstream regenerates the file, drop in the
+  new copy and re-run the parity suite — failures flag formula drift.
+- **Limitations** (from the cell text): does not model crit damage,
+  weapon-grade differences, Divine Beast (G6), per-type sub-buckets,
+  sub-bucket auto-caps, defensive bucket math, or any of the four
+  final multipliers (Crit, Hell/Heaven/Living World, Soul Potency,
+  Skill Potency). Those live in `damage/full_calc.py` and the prose
+  spec in `buff_debuff/`.
+
 ## Git remote
 
 - Repo: <https://github.com/douglas125/cotc-info-bot>
