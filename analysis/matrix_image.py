@@ -43,7 +43,7 @@ from damage.types import DEFAULT_SUB_BUCKET_CAP, ELEMENTS, WEAPONS
 
 ICON_SIZE = 20
 CELL_WIDTH = 64
-CELL_HEIGHT = 26
+CELL_HEIGHT = 32          # tall enough for two stacked lines on over-cap cells
 LABEL_WIDTH = 220
 HEADER_HEIGHT = 38
 TITLE_HEIGHT = 28
@@ -63,6 +63,7 @@ TITLE_TEXT = (240, 240, 240, 255)
 TEXT_COLOR = (40, 40, 40, 255)
 LABEL_COLOR = (60, 60, 70, 255)
 OVERCAP_COLOR = (220, 60, 60, 255)
+CAPPED_COLOR = (40, 130, 60, 255)     # green — effective contribution after cap
 CRIT_COLOR = (220, 100, 30, 255)
 FINAL_BG = (228, 240, 220, 255)
 HEADER_BG = (235, 238, 245, 255)
@@ -291,17 +292,23 @@ def _render_matrix(
 
     # Body data rows.
     body_font = _font(11)
+    small_font = _font(9)
     label_font = _font(11, bold=False)
     for ri, row in enumerate(rows):
         bg = ROW_BG_LIGHT if ri % 2 == 0 else ROW_BG_ALT
         draw.rectangle((x, cy, x + block_w, cy + CELL_HEIGHT), fill=bg)
-        draw.text((x + 6, cy + 7), row.label, font=label_font, fill=LABEL_COLOR)
+        draw.text(
+            (x + 6, cy + (CELL_HEIGHT - 14) // 2),
+            row.label, font=label_font, fill=LABEL_COLOR,
+        )
         for ci, val in enumerate(row.values):
             cx = x + LABEL_WIDTH + ci * CELL_WIDTH
             draw.line((cx, cy, cx, cy + CELL_HEIGHT), fill=GRID_COLOR)
             if val > 0:
                 _draw_value_cell(
-                    draw, cx=cx, cy=cy, val=val, font=body_font,
+                    draw, cx=cx, cy=cy, val=val,
+                    cap=_cap_for(bucketed, row.label, columns[ci]),
+                    font=body_font, small_font=small_font,
                 )
         # Right-edge gridline closing the row.
         draw.line(
@@ -358,22 +365,62 @@ def _draw_value_cell(
     cx: int,
     cy: int,
     val: float,
+    cap: float,
     font: ImageFont.ImageFont,
+    small_font: ImageFont.ImageFont,
 ) -> None:
-    """Draw the magnitude and (if over cap) a red strikethrough."""
+    """Draw the magnitude.
+
+    If ``val <= cap`` (under the sub-bucket cap), render a single
+    centered line in normal text colour.
+
+    If ``val > cap``, render two stacked lines:
+      - Top: the raw additive sum, struck through in red.
+      - Bottom: the capped value (e.g. "→ 30%") in green so the
+        reader sees the effective contribution that goes into the
+        damage formula.
+    """
     pct = round(val * 100)
     text = f"{pct}%"
-    tw = draw.textlength(text, font=font)
-    tx = cx + (CELL_WIDTH - tw) // 2
-    ty = cy + 7
-    draw.text((tx, ty), text, font=font, fill=TEXT_COLOR)
-    if val > DEFAULT_SUB_BUCKET_CAP:
-        line_y = ty + 7
-        draw.line(
-            (tx - 2, line_y, tx + tw + 2, line_y),
-            fill=OVERCAP_COLOR,
-            width=2,
-        )
+
+    if val <= cap:
+        tw = draw.textlength(text, font=font)
+        tx = cx + (CELL_WIDTH - tw) // 2
+        ty = cy + (CELL_HEIGHT - 14) // 2
+        draw.text((tx, ty), text, font=font, fill=TEXT_COLOR)
+        return
+
+    # Over-cap path: stacked two-line cell.
+    cap_pct = round(cap * 100)
+    cap_text = f"→ {cap_pct}%"  # "→ 30%"
+    raw_w = draw.textlength(text, font=small_font)
+    cap_w = draw.textlength(cap_text, font=small_font)
+    raw_tx = cx + (CELL_WIDTH - raw_w) // 2
+    cap_tx = cx + (CELL_WIDTH - cap_w) // 2
+    raw_ty = cy + 3
+    cap_ty = cy + CELL_HEIGHT - 14
+    draw.text((raw_tx, raw_ty), text, font=small_font, fill=OVERCAP_COLOR)
+    # Strikethrough the raw value at mid-text height.
+    line_y = raw_ty + 6
+    draw.line(
+        (raw_tx - 2, line_y, raw_tx + raw_w + 2, line_y),
+        fill=OVERCAP_COLOR,
+        width=2,
+    )
+    draw.text((cap_tx, cap_ty), cap_text, font=small_font, fill=CAPPED_COLOR)
+
+
+def _cap_for(bucketed: BucketedTeam, row_label: str, column: str) -> float:
+    """The sub-bucket cap that applies to one cell.
+
+    Today every sub-bucket caps at ``DEFAULT_SUB_BUCKET_CAP`` (30%).
+    When per-sub-bucket cap-raise effects land in BucketedTeam (e.g.
+    Black Knight EX raising Self's Atk Up + Sword Damage Up cap to
+    50%), this helper is the seam where a per-(row_label, column,
+    target_scope) override gets surfaced — the renderer doesn't have
+    to change shape; only the cap value flowing into ``_draw_value_cell``.
+    """
+    return DEFAULT_SUB_BUCKET_CAP
 
 
 def _draw_star(

@@ -123,6 +123,49 @@ def test_render_overcap_cell_has_red_pixels(tmp_db_path: Path) -> None:
     assert matches > 10, "expected over-cap strikethrough pixels"
 
 
+def test_render_overcap_cell_shows_capped_value_in_green(tmp_db_path: Path) -> None:
+    """Over-cap cells render the effective ``→ 30%`` in CAPPED_COLOR
+    so the reader sees both the wasted raw sum AND the contribution
+    that actually feeds the multiplier."""
+    conn = repo.connect(tmp_db_path)
+    try:
+        fid = _seed_form(
+            conn, name="Hero", weapon="Sword",
+            skills=[
+                {
+                    "slot_order": 1, "name": "Slash", "kind": "active",
+                    "power_min": 80, "power_max": 80, "hits": 5,
+                    "description": "5x AoE Sword (5x 80 Power)",
+                },
+                {
+                    "slot_order": 2, "name": "Stance A", "kind": "passive",
+                    "description": "Self 25% Sword Damage Up",
+                },
+                {
+                    "slot_order": 3, "name": "Stance B", "kind": "passive",
+                    "description": "Self 25% Sword Damage Up",
+                },
+            ],
+        )
+        bucketed = aggregator.aggregate_team(
+            conn, frontrow_form_ids=[fid],
+            profile=AssumptionProfile(boost_level=3),
+        )
+    finally:
+        conn.close()
+
+    rendered = matrix_image.render(bucketed)
+    image = Image.open(BytesIO(rendered.data)).convert("RGBA")
+    target = matrix_image.CAPPED_COLOR
+    matches = 0
+    for r, g, b, a in image.getdata():
+        if abs(r - target[0]) < 30 and abs(g - target[1]) < 30 and abs(b - target[2]) < 30:
+            matches += 1
+            if matches > 5:
+                break
+    assert matches > 5, "expected green capped-value pixels in over-cap cell"
+
+
 def test_render_crit_column_differs_from_baseline(tmp_db_path: Path) -> None:
     """A team with Self Guaranteed Crit on the DPS produces a different
     final-multiplier row than the same team without it."""
