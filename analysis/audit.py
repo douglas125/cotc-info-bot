@@ -234,7 +234,13 @@ def _print_report(
 
 
 def _type_matrix_lines(bucketed) -> list[tuple[str, str]]:
-    """``[("Weapons", "Sword x6.17 ..."), ("Elements", "Fire x5.29 ...")]``."""
+    """Full per-type matrix (all 8 weapons, all 6 elements) sorted desc.
+
+    Cells in ``bucketed.crit_types`` are tagged with ``★`` and use the
+    crit-applied multiplier (1.25 + Σ Crit Damage Up). Returns
+    ``[("Weapons", "..."), ("Elements", "...")]`` plus an optional
+    ``("(crit)", "...")`` footer when any cell is starred.
+    """
     weapon_pairs = sorted(
         (
             (w, damage_estimate.final_multiplier_for_type(bucketed, w))
@@ -255,16 +261,24 @@ def _type_matrix_lines(bucketed) -> list[tuple[str, str]]:
     def _line(pairs):
         if not pairs:
             return "-"
-        head = " | ".join(f"{n.title()} x{m:.2f}" for n, m in pairs[:3])
-        rest = pairs[3:]
-        if rest and all(abs(rest[0][1] - other) < 0.01 for _n, other in rest):
-            head += f"  (others x{rest[0][1]:.2f})"
-        return head
+        cells = []
+        for n, m in pairs:
+            marker = "★" if damage_estimate.type_has_guaranteed_crit(bucketed, n) else ""
+            cells.append(f"{n.title()} {marker}x{m:.2f}")
+        return " | ".join(cells)
 
-    return [
+    out = [
         ("Weapons", _line(weapon_pairs)),
         ("Elements", _line(element_pairs)),
     ]
+    if bucketed.crit_types:
+        types_str = "/".join(t.title() for t in sorted(bucketed.crit_types))
+        out.append((
+            "(crit)",
+            f"★ guaranteed crit applied on {types_str} "
+            f"(1.25 + {bucketed.team_crit_dmg_up * 100:.0f}% Crit Dmg Up)",
+        ))
+    return out
 
 
 def _build_name_resolutions(

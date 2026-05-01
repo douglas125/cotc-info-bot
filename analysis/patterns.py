@@ -100,6 +100,21 @@ _RE_DAMAGE_CAP_UP = re.compile(
     re.IGNORECASE,
 )
 _RE_POTENCY_UP = re.compile(rf"{_PCT}\s+Potency\s+Up\b", re.IGNORECASE)
+# Match "X% Crit Damage Up" / "X% Crit Dmg Up" — additive into the Crit
+# final-multiplier pool (1.25 + Σ). Distinct from "X% Crit Up" which is
+# Crit *chance* Up and lives in G1 as a stat. Order matters in
+# ``_handle_description``: Crit Damage Up is parsed before generic stat
+# effects so the same wording isn't double-counted.
+_RE_CRIT_DMG_UP = re.compile(
+    rf"{_PCT}\s+Crit\s+(?:Damage|Dmg)\s+Up\b", re.IGNORECASE,
+)
+# "Self Guaranteed Crit", "Guaranteed Critical Strike", etc. Qualitative —
+# no magnitude. ``_scope`` parsing picks up the "Self" / "All Allies"
+# prefix when present; default to ``self`` since that's the only known
+# wording today (Pardis EX).
+_RE_GUARANTEED_CRIT = re.compile(
+    r"\bGuaranteed\s+Crit(?:ical(?:\s+Strike)?)?\b", re.IGNORECASE,
+)
 _RE_REGEN_SCOPE = re.compile(
     r"\b(frontrow|self|all allies|all other allies)\s+regen\b",
 )
@@ -111,6 +126,8 @@ _RE_DURATION = re.compile(
 def _handle_description(match: re.Match[str], row: dict) -> Sequence[ClassifiedEffect]:
     text = match.group(0)
     effects: list[ClassifiedEffect] = []
+    effects.extend(_parse_crit_dmg_up(text))   # before stat/typed_dmg_up to
+    effects.extend(_parse_guaranteed_crit(text))  # avoid double-counting
     effects.extend(_parse_stat_effects(text))
     effects.extend(_parse_typed_damage_up(text))
     effects.extend(_parse_typed_res_down(text))
@@ -253,6 +270,44 @@ def _parse_potency_up(text: str) -> list[ClassifiedEffect]:
             direction="up",
             magnitude=_pct(m.group("pct")),
             target_scope=_scope(text, category="skill_potency_up"),
+            raw_description=text,
+        ))
+    return out
+
+
+def _parse_crit_dmg_up(text: str) -> list[ClassifiedEffect]:
+    """Crit Damage Up — additive into the Crit final-multiplier pool.
+
+    Note that the magnitude is added to ``1.25 + Σ Crit Damage Up``
+    (per ``buff_debuff/README.md``), and applies only when crit lands.
+    Stored as a decimal fraction.
+    """
+    out: list[ClassifiedEffect] = []
+    for m in _RE_CRIT_DMG_UP.finditer(text):
+        out.append(_effect(
+            category="crit_dmg_up",
+            direction="up",
+            magnitude=_pct(m.group("pct")),
+            target_scope=_scope(text, category="crit_dmg_up"),
+            raw_description=text,
+        ))
+    return out
+
+
+def _parse_guaranteed_crit(text: str) -> list[ClassifiedEffect]:
+    """Guaranteed Crit — qualitative; flips the crit final-multiplier on.
+
+    Magnitude is meaningless for this category; presence is the signal.
+    Default scope is ``self`` per the only-known wording (Pardis EX:
+    "Self Guaranteed Crit"); ``_scope`` picks up explicit "All Allies" /
+    "Frontrow" when those prefixes appear.
+    """
+    out: list[ClassifiedEffect] = []
+    for _m in _RE_GUARANTEED_CRIT.finditer(text):
+        out.append(_effect(
+            category="crit_guaranteed",
+            magnitude=0.0,
+            target_scope=_scope(text, category="crit_guaranteed") or "self",
             raw_description=text,
         ))
     return out

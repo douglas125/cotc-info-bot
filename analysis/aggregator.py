@@ -96,6 +96,11 @@ def aggregate_team(
         e.magnitude for e in deduped
         if e.category == "soul_potency_up" and e.target_scope in _TEAM_WIDE_SCOPES
     )
+    crit_dmg_up_team_wide = sum(
+        e.magnitude for e in deduped
+        if e.category == "crit_dmg_up" and e.target_scope in _TEAM_WIDE_SCOPES
+    )
+    crit_types = _crit_types_for_team(skills, deduped)
 
     return BucketedTeam(
         frontrow_form_ids=front,
@@ -110,6 +115,8 @@ def aggregate_team(
         classified=tuple(deduped),
         unparsed=tuple(unparsed),
         profile=profile,
+        team_crit_dmg_up=crit_dmg_up_team_wide,
+        crit_types=crit_types,
     )
 
 
@@ -232,3 +239,67 @@ def _expand_typed(
         else:
             out.append(f"{group}.{source}.{t}_{suffix}")
     return out
+
+
+# ---------------------------------------------------------------------------
+# Crit-type detection — which weapon/element types benefit from
+# guaranteed-crit on this team.
+# ---------------------------------------------------------------------------
+
+# Hit-count / type extraction shares the same regex shape as
+# damage_estimate but we re-derive minimally here to avoid a circular import.
+import re as _re  # local alias keeps the module's top imports clean
+
+_RE_ATTACK_TYPE_LOCAL = _re.compile(
+    r"\b(?:\d+\s*x|counterattack)\b[^,\n(]*?"
+    r"\b(sword|dagger|bow|axe|staff|tome|fan|spear|"
+    r"fire|ice|lightning|wind|light|dark)\b",
+    _re.IGNORECASE,
+)
+
+
+def _crit_types_for_team(
+    skills: list, classified: list[ClassifiedEffect],
+) -> frozenset[str]:
+    """Return the set of weapon/element types where any team member has
+    guaranteed crit on at least one of their damage skills.
+
+    A guaranteed-crit effect with ``target_scope='self'`` only flips
+    crit on for the originating character; we therefore look up the
+    weapons/elements that character's damage skills cover and add them.
+    Team-wide guaranteed crit (rare, but the model supports it) covers
+    every type on the team's damage roster.
+    """
+    self_crit_form_ids: set[int] = set()
+    team_wide_crit = False
+    for e in classified:
+        if e.category != "crit_guaranteed":
+            continue
+        if e.target_scope == "self":
+            self_crit_form_ids.add(e.source_form_id)
+        elif e.target_scope in {None, "all_allies", "other_allies", "frontrow"}:
+            team_wide_crit = True
+
+    if not self_crit_form_ids and not team_wide_crit:
+        return frozenset()
+
+    types_by_form: dict[int, set[str]] = {}
+    for skill in skills:
+        fid = int(skill["form_id"])
+        kind = (skill["kind"] or "").lower()
+        if kind not in {"active", "ex", "ultimate", "divine"}:
+            continue
+        desc = skill["description"] or ""
+        m = _RE_ATTACK_TYPE_LOCAL.search(desc)
+        if not m:
+            continue
+        types_by_form.setdefault(fid, set()).add(m.group(1).lower())
+
+    out: set[str] = set()
+    if team_wide_crit:
+        for s in types_by_form.values():
+            out.update(s)
+    else:
+        for fid in self_crit_form_ids:
+            out.update(types_by_form.get(fid, set()))
+    return frozenset(out)

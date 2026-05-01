@@ -498,6 +498,99 @@ def test_fixture_team_t2_per_dps_self_only_cap_up_breakdown(
     assert "Single-ally potency bridges" in cap_field.value
 
 
+def test_guaranteed_crit_lifts_buff_multiplier_by_125x(seeded_conn):
+    """A self Guaranteed Crit on the DPS multiplies the buff product by 1.25.
+
+    Mirrors the audit-CLI numerical check: a DPS with no other multipliers
+    should end up at ×1.25 once the crit pattern fires.
+    """
+    cid = repo.upsert_character(seeded_conn, "Pardis EX", base_role="warrior", base_weapon="sword")
+    fid = repo.insert_form(
+        seeded_conn, character_id=cid, display_name="Pardis EX",
+        rarity="5*", variant_kind="ex", server="global",
+    )
+    repo.insert_affinities(seeded_conn, fid, [("weapon", "Sword", None)])
+    repo.insert_skills(seeded_conn, fid, [
+        {
+            "slot_order": 1, "name": "Slash", "kind": "active",
+            "power_min": 80, "power_max": 80, "hits": 5,
+            "description": "5x AoE Sword (5x 80 Power)",
+        },
+        {
+            "slot_order": 2, "name": "Sword Mastery", "kind": "passive",
+            "description": "Self Guaranteed Crit while in frontrow",
+        },
+    ])
+    report = team_commands.build_team_report(
+        seeded_conn, frontrow_form_ids=[fid],
+    )
+    assert "sword" in report.bucketed.crit_types
+    sword_mult = next(
+        d.buff_multiplier for d in report.damage.per_dps
+        if d.display_name == "Pardis EX"
+    )
+    # ≥ 1.25 because the only multiplier in play is the crit pool;
+    # other groups are 1.0. Allow a tolerance for any tiny G1 drift.
+    assert 1.24 <= sword_mult <= 1.26, sword_mult
+
+
+def test_crit_damage_up_adds_to_crit_pool(seeded_conn):
+    """50% Crit Damage Up + Guaranteed Crit → crit multiplier = 1.25 + 0.50 = 1.75.
+
+    Verifies the Crit Damage Up classifier feeds into the final
+    multiplier pool the way ``buff_debuff/README.md`` describes.
+    """
+    cid = repo.upsert_character(seeded_conn, "Tester", base_role="warrior", base_weapon="sword")
+    fid = repo.insert_form(
+        seeded_conn, character_id=cid, display_name="Tester",
+        rarity="5*", variant_kind="base", server="global",
+    )
+    repo.insert_affinities(seeded_conn, fid, [("weapon", "Sword", None)])
+    repo.insert_skills(seeded_conn, fid, [
+        {
+            "slot_order": 1, "name": "Slash", "kind": "active",
+            "power_min": 80, "power_max": 80, "hits": 5,
+            "description": "5x AoE Sword (5x 80 Power)",
+        },
+        {
+            "slot_order": 2, "name": "Crit Stack", "kind": "passive",
+            "description": "Self Guaranteed Crit + 50% Crit Damage Up",
+        },
+    ])
+    report = team_commands.build_team_report(
+        seeded_conn, frontrow_form_ids=[fid],
+    )
+    sword_mult = next(
+        d.buff_multiplier for d in report.damage.per_dps
+        if d.display_name == "Tester"
+    )
+    # 1.25 base crit + 0.50 Crit Damage Up = 1.75 final-pool crit multiplier.
+    assert 1.74 <= sword_mult <= 1.76, sword_mult
+
+
+def test_type_matrix_shows_full_eight_weapons(seeded_conn):
+    """The Damage potential by type field lists every weapon and element."""
+    cid = repo.upsert_character(seeded_conn, "Tester", base_role="warrior", base_weapon="sword")
+    fid = repo.insert_form(
+        seeded_conn, character_id=cid, display_name="Tester",
+        rarity="5*", variant_kind="base", server="global",
+    )
+    repo.insert_affinities(seeded_conn, fid, [("weapon", "Sword", None)])
+    report = team_commands.build_team_report(
+        seeded_conn, frontrow_form_ids=[fid],
+    )
+    embed = team_embeds.build(seeded_conn, report)
+    matrix_field = next(
+        f for f in embed.fields if f.name == "Damage potential by type"
+    )
+    text = matrix_field.value
+    # All 8 weapons and 6 elements appear by name.
+    for weapon in ("Sword", "Dagger", "Bow", "Axe", "Staff", "Tome", "Fan", "Spear"):
+        assert weapon in text, f"missing weapon {weapon} in matrix"
+    for element in ("Fire", "Ice", "Lightning", "Wind", "Light", "Dark"):
+        assert element in text, f"missing element {element} in matrix"
+
+
 def test_fixture_team_quantified_support_role_lines(
     seeded_conn, t1_sword_bruiser,
 ):

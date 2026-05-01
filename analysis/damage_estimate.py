@@ -242,7 +242,14 @@ def _buff_multiplier_for(
     bucketed: BucketedTeam, *, weapon: str | None,
     element: str | None, dps_form_id: int,
 ) -> float:
-    """Compose G1..G6 + final multipliers for a DPS with given weapon/element."""
+    """Compose G1..G6 + final multipliers for a DPS with given weapon/element.
+
+    Crit gating: if the DPS has a guaranteed-crit effect that fires on
+    this attack type — or any team member has team-wide guaranteed crit
+    — the crit final multiplier is applied at ``1.25 + Σ Crit Damage Up``
+    (per ``buff_debuff/README.md``). Per-DPS Crit Damage Up sums team-wide
+    plus self-scoped from the DPS.
+    """
     sums = bucketed.raw_sub_bucket_sums
 
     g1 = full_calc.additive_group(_g1_keys_for_attack_type(sums, weapon, element))
@@ -265,30 +272,108 @@ def _buff_multiplier_for(
     skill_team, skill_self = potency_up_breakdown_for_dps(bucketed, dps_form_id)
     skill = full_calc.skill_potency_multiplier(skill_team + skill_self)
     soul = full_calc.soul_potency_multiplier(bucketed.team_soul_potency_up)
-    # Crit gating defaults to off — phase 2 may detect "Guaranteed Crit"
-    # passives on the DPS and flip this on per-summary.
-    crit = full_calc.crit_multiplier(crit_active=False)
+    crit_active = crit_active_for_dps(
+        bucketed, dps_form_id, weapon=weapon, element=element,
+    )
+    crit_dmg_up = crit_dmg_up_for_dps(bucketed, dps_form_id) if crit_active else 0.0
+    crit = full_calc.crit_multiplier(crit_active=crit_active, crit_damage_up_sum=crit_dmg_up)
     alignment = full_calc.alignment_multiplier()
 
     return g1 * g2 * g3 * g4 * g5 * g6 * crit * alignment * soul * skill
 
 
+def crit_active_for_dps(
+    bucketed: BucketedTeam,
+    dps_form_id: int,
+    *,
+    weapon: str | None,
+    element: str | None,
+) -> bool:
+    """True iff this DPS gets guaranteed crit on (weapon|element) attacks.
+
+    Self-scoped guaranteed-crit only fires for the originating character;
+    team-wide scope (rare) fires for every DPS.
+    """
+    types = {t for t in (weapon, element) if t}
+    for e in bucketed.classified:
+        if e.category != "crit_guaranteed":
+            continue
+        if e.target_scope == "self":
+            if e.source_form_id != dps_form_id:
+                continue
+        elif e.target_scope not in {None, "all_allies", "other_allies", "frontrow"}:
+            continue
+        # Most guaranteed-crit wording today is type-agnostic ("Self
+        # Guaranteed Crit"). If the effect carries explicit type targets,
+        # restrict to those; otherwise it covers any of the DPS's attacks.
+        if not e.targets:
+            return True
+        if any(t in e.targets for t in types):
+            return True
+    return False
+
+
+def crit_dmg_up_for_dps(
+    bucketed: BucketedTeam, dps_form_id: int,
+) -> float:
+    """Σ Crit Damage Up applicable to this DPS (team-wide + self)."""
+    s = float(bucketed.team_crit_dmg_up)
+    for e in bucketed.classified:
+        if e.category != "crit_dmg_up":
+            continue
+        if e.target_scope == "self" and e.source_form_id == dps_form_id:
+            s += e.magnitude
+    return s
+
+
 def final_multiplier_for_type(bucketed: BucketedTeam, attack_type: str) -> float:
     """Team-wide final multiplier for a hypothetical weapon/element type.
 
-    This powers the coverage matrix. It intentionally excludes self-only
-    potency and cap effects because there is no specific DPS attached to
-    a type cell.
+    Powers the coverage matrix. Excludes self-only potency and cap-up
+    (those need a specific DPS), but **does** include the crit final
+    multiplier when ``attack_type`` is in ``bucketed.crit_types`` —
+    i.e. some team member has guaranteed crit and at least one damage
+    skill of this type. Crit Damage Up uses the team-wide sum.
     """
     attack_type = (attack_type or "").lower()
     weapon = attack_type if attack_type in WEAPONS else None
     element = attack_type if attack_type in ELEMENTS else None
-    return _buff_multiplier_for(
-        bucketed,
-        weapon=weapon,
-        element=element,
-        dps_form_id=-1,
+
+    sums = bucketed.raw_sub_bucket_sums
+    g1 = full_calc.additive_group(_g1_keys_for_attack_type(sums, weapon, element))
+    g2 = full_calc.additive_group(
+        _keys_for_attack_type(sums, "g2", weapon, element, "dmg_up")
     )
+    g3 = full_calc.additive_group(
+        _keys_for_attack_type(sums, "g3", weapon, element, "res_down")
+    )
+    g4 = full_calc.multiplicative_group(
+        stats_sums=_keys_with_prefix(sums, "g4.ultimate.")
+        if any(k.startswith("g4.ultimate.") for k in sums) else None,
+    )
+    g5 = full_calc.multiplicative_group(
+        stats_sums=_keys_with_prefix(sums, "g5.")
+        if any(k.startswith("g5.") for k in sums) else None,
+    )
+    g6 = full_calc.divine_beast_multiplier(bucketed.divine_beast)
+
+    soul = full_calc.soul_potency_multiplier(bucketed.team_soul_potency_up)
+    skill = full_calc.skill_potency_multiplier(bucketed.team_skill_potency_up)
+
+    crit_active = type_has_guaranteed_crit(bucketed, attack_type)
+    crit_dmg_up = bucketed.team_crit_dmg_up if crit_active else 0.0
+    crit = full_calc.crit_multiplier(crit_active=crit_active, crit_damage_up_sum=crit_dmg_up)
+    alignment = full_calc.alignment_multiplier()
+
+    return g1 * g2 * g3 * g4 * g5 * g6 * crit * alignment * soul * skill
+
+
+def type_has_guaranteed_crit(bucketed: BucketedTeam, attack_type: str) -> bool:
+    """Does any team member's guaranteed-crit cover this weapon/element?
+
+    Reads ``bucketed.crit_types`` (precomputed by the aggregator).
+    """
+    return (attack_type or "").lower() in bucketed.crit_types
 
 
 def _keys_with_prefix(

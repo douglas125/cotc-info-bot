@@ -52,7 +52,7 @@ SOURCE_KINDS: tuple[str, ...] = (
 CATEGORIES: tuple[str, ...] = (
     "stat_up", "stat_down",
     "dmg_up", "res_down",
-    "crit_up", "crit_dmg_up",
+    "crit_up", "crit_dmg_up", "crit_guaranteed",
     "soul_potency_up", "skill_potency_up",
     "damage_cap_up",
     "multi_cast",
@@ -188,6 +188,11 @@ class BucketedTeam:
     classified: tuple[ClassifiedEffect, ...]
     unparsed: tuple[ClassifiedEffect, ...]
     profile: AssumptionProfile
+    # Crit additions (default-zero/empty for backwards compat).
+    team_crit_dmg_up: float = 0.0               # team-wide additive Σ Crit Dmg Up
+    crit_types: frozenset[str] = frozenset()    # weapon/element types where any
+                                                 # team member has guaranteed crit
+                                                 # (covers their damage-relevant skills)
 
     @property
     def all_form_ids(self) -> tuple[int, ...]:

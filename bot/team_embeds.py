@@ -148,12 +148,13 @@ def _survivability_block(verdict: SurvivabilityVerdict) -> str:
 
 
 def _type_matrix_block(bucketed: BucketedTeam) -> str:
-    """Top weapon and element multipliers for this team.
+    """Full per-type damage multiplier matrix (all 8 weapons, all 6 elements).
 
-    Pulled from :func:`damage_estimate.final_multiplier_for_type` — the
-    same per-type final multiplier the audit CLI prints under --debug.
-    Sorting top-3 makes it obvious which weapon/element this team's
-    buff stack is shaped to optimise.
+    Each cell is the team's final multiplier for an attack of that type
+    via :func:`damage_estimate.final_multiplier_for_type`. Cells where
+    a team member has guaranteed crit are flagged with ``★`` and use
+    the crit-applied value (``1.25 + Σ Crit Damage Up`` in the final
+    pool). A footnote line names the source of the crit when present.
     """
     weapon_pairs = sorted(
         (
@@ -171,24 +172,46 @@ def _type_matrix_block(bucketed: BucketedTeam) -> str:
         key=lambda kv: kv[1],
         reverse=True,
     )
-    weapon_line = _format_type_line(weapon_pairs)
-    element_line = _format_type_line(element_pairs)
-    return (
-        f"**Weapons:** {weapon_line}\n"
-        f"**Elements:** {element_line}"
-    )
+    weapon_line = _format_type_line(bucketed, weapon_pairs)
+    element_line = _format_type_line(bucketed, element_pairs)
+    lines = [
+        f"**Weapons:** {weapon_line}",
+        f"**Elements:** {element_line}",
+    ]
+    crit_footer = _crit_footnote(bucketed)
+    if crit_footer:
+        lines.append(crit_footer)
+    return "\n".join(lines)
 
 
-def _format_type_line(pairs: list[tuple[str, float]]) -> str:
-    """Top 3 highlighted, remaining baseline shown only when distinct."""
+def _format_type_line(
+    bucketed: BucketedTeam, pairs: list[tuple[str, float]],
+) -> str:
+    """Render one row of the matrix — every populated cell, sorted desc."""
     if not pairs:
         return "—"
-    top3 = pairs[:3]
-    rest = pairs[3:]
-    head = " · ".join(f"{name.title()} ×{mult:.2f}" for name, mult in top3)
-    if rest and all(abs(rest[0][1] - other) < 0.01 for _name, other in rest):
-        head += f" (others ×{rest[0][1]:.2f})"
-    return head
+    cells: list[str] = []
+    for name, mult in pairs:
+        marker = "★" if damage_estimate.type_has_guaranteed_crit(bucketed, name) else ""
+        cells.append(f"{name.title()} {marker}×{mult:.2f}")
+    return " · ".join(cells)
+
+
+def _crit_footnote(bucketed: BucketedTeam) -> str | None:
+    """Footnote naming the source(s) of guaranteed crit, when any."""
+    if not bucketed.crit_types:
+        return None
+    sources: list[str] = []
+    seen: set[int] = set()
+    for e in bucketed.classified:
+        if e.category != "crit_guaranteed":
+            continue
+        if e.source_form_id in seen:
+            continue
+        seen.add(e.source_form_id)
+        sources.append(str(e.source_form_id))
+    types_str = "/".join(t.title() for t in sorted(bucketed.crit_types))
+    return f"_★ guaranteed crit applied on {types_str} (1.25 + Σ Crit Damage Up)._"
 
 
 def _cap_block(
