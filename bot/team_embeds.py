@@ -155,7 +155,7 @@ def _per_dps_block(bucketed, damage: DamageReport) -> str:
         mcast_str = f", x{multi_cast:.0f}" if multi_cast > 1.0 else ""
         best = dps.best_skills[0] if dps.best_skills else None
         if best:
-            eff_hits = damage_estimate.effective_hits(best.hits, multi_cast)
+            eff_hits = damage_estimate.effective_hits_for_skill(best, multi_cast)
             potency = damage_estimate.realised_potency(best.power_max, potency_for_dps)
             caps = damage_estimate.caps_each_hit(
                 power=best.power_max,
@@ -166,7 +166,7 @@ def _per_dps_block(bucketed, damage: DamageReport) -> str:
             best_line = (
                 f"best {best.name or best.skill_kind} "
                 f"{best.power_max or '?'}p/{best.hits or '?'}h"
-                f"{f' eff{eff_hits}' if multi_cast > 1.0 else ''} "
+                f"{f' eff{eff_hits}' if eff_hits != (best.hits or 0) else ''} "
                 f"real={potency:.0f} cap={cap_flag}"
             )
         else:

@@ -29,9 +29,11 @@ team's cap-up tier — see ``buff_debuff/damage_cap_and_potency.md``.
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 
 from damage import full_calc
+from damage.types import ELEMENTS, WEAPONS
 
 from . import coverage
 from .types import (
@@ -104,14 +106,14 @@ def _summary_for_dps(
 ) -> PerDpsDamageSummary:
     form = repo.get_form(conn, form_id)
     display_name = form["display_name"] if form else f"form#{form_id}"
-    weapon = _affinity_label(conn, form_id, kind="weapon")
-    element = _affinity_label(conn, form_id, kind="element")
 
     multi_cast = self_multi_cast_factor(bucketed, form_id)
+    best_skills = _best_skills_for(conn, form_id, multi_cast=multi_cast)
+    weapon = best_skills[0].weapon if best_skills and best_skills[0].weapon else _affinity_label(conn, form_id, kind="weapon")
+    element = best_skills[0].element if best_skills and best_skills[0].element else _affinity_label(conn, form_id, kind="element")
     multiplier = _buff_multiplier_for(
         bucketed, weapon=weapon, element=element, dps_form_id=form_id,
     )
-    best_skills = _best_skills_for(conn, form_id, multi_cast=multi_cast)
 
     return PerDpsDamageSummary(
         form_id=form_id,
@@ -259,8 +261,8 @@ def final_multiplier_for_type(bucketed: BucketedTeam, attack_type: str) -> float
     a type cell.
     """
     attack_type = (attack_type or "").lower()
-    weapon = attack_type if attack_type in full_calc.WEAPONS else None
-    element = attack_type if attack_type in full_calc.ELEMENTS else None
+    weapon = attack_type if attack_type in WEAPONS else None
+    element = attack_type if attack_type in ELEMENTS else None
     return _buff_multiplier_for(
         bucketed,
         weapon=weapon,
@@ -345,33 +347,82 @@ def _best_skills_for(
     reach competitive total damage even at cap.
     """
     rows = conn.execute(
-        "SELECT id, name, kind, power_min, power_max, hits "
+        "SELECT id, name, kind, power_min, power_max, hits, description "
         "FROM skills "
         "WHERE form_id = ? AND power_max IS NOT NULL "
-        "ORDER BY (COALESCE(power_max, 0) * COALESCE(hits, 1)) DESC, "
-        "         (COALESCE(power_min, 0)) DESC, "
-        "         id ASC",
+        "ORDER BY id ASC",
         (form_id,),
     ).fetchall()
-    out: list[SkillDamageRow] = []
+    candidates: list[tuple[float, SkillDamageRow]] = []
     for r in rows:
         if (r["kind"] or "") not in _DAMAGE_KINDS:
             continue
         listed_hits = r["hits"] or 1
-        effective_hits = float(listed_hits) * multi_cast
+        repeat_factor = _skill_repeat_factor(r["description"] or "")
+        effective_hits = float(listed_hits) * multi_cast * repeat_factor
         if effective_hits < MIN_DAMAGE_RELEVANT_EFFECTIVE_HITS:
             continue
-        out.append(SkillDamageRow(
+        weapon, element = _skill_attack_type(r["description"] or "")
+        skill = SkillDamageRow(
             skill_id=r["id"],
             skill_kind=r["kind"] or "active",
             name=r["name"],
             power_min=r["power_min"],
             power_max=r["power_max"],
             hits=r["hits"],
-        ))
-        if len(out) >= top:
-            break
-    return out
+            weapon=weapon,
+            element=element,
+            repeat_factor=repeat_factor,
+        )
+        score = float(r["power_max"] or 0) * effective_hits
+        candidates.append((score, skill))
+    candidates.sort(
+        key=lambda item: (
+            item[0],
+            item[1].power_max or 0,
+            item[1].hits or 0,
+            -item[1].skill_id,
+        ),
+        reverse=True,
+    )
+    return [skill for _score, skill in candidates[:top]]
+
+
+def _skill_repeat_factor(description: str) -> float:
+    """Return built-in repeats from a damage skill's own text.
+
+    This is separate from self multi-cast buffs. For example Pardis's
+    "repeat this attack once (up to 3x)" is one listed hit with up to
+    three repeats, so the skill itself contributes four effective hits
+    before his ultimate double-cast is applied.
+    """
+    text = " ".join((description or "").split()).lower()
+    m = re.search(r"repeat this attack once \(up to (\d+)x\)", text)
+    if m:
+        return float(int(m.group(1)) + 1)
+    if "repeat this attack once" in text or "cast this a second time in a row" in text:
+        return 2.0
+    return 1.0
+
+
+def _skill_attack_type(description: str) -> tuple[str | None, str | None]:
+    """Infer the primary attack type from a skill description."""
+    text = description or ""
+    m = re.search(
+        r"\b(?:\d+\s*x|counterattack)\b[^,\n(]*?\b("
+        + "|".join(WEAPONS + ELEMENTS)
+        + r")\b",
+        text,
+        re.IGNORECASE,
+    )
+    if not m:
+        return None, None
+    token = m.group(1).lower()
+    if token in WEAPONS:
+        return token, None
+    if token in ELEMENTS:
+        return None, token
+    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -400,3 +451,8 @@ def caps_each_hit(
 def effective_hits(listed_hits: int | None, multi_cast: float) -> int:
     """``listed_hits * multi_cast`` rounded down to int (display only)."""
     return int(float(listed_hits or 0) * multi_cast)
+
+
+def effective_hits_for_skill(skill: SkillDamageRow, multi_cast: float) -> int:
+    """Listed hits times skill-native repeats and self multi-cast."""
+    return int(float(skill.hits or 0) * max(1.0, skill.repeat_factor) * multi_cast)

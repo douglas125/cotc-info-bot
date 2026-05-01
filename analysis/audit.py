@@ -16,6 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from damage.types import ELEMENTS, WEAPONS
 from db import repo
 
 from . import aggregator, coverage, damage_estimate, resolve, survivability
@@ -115,6 +116,9 @@ def _print_report(*, bucketed, verdict, matrix, damage, debug: bool) -> None:
                 print(f"  {label}:")
                 for k, v in coverage.top_n(sub, n=10):
                     print(f"    {k}  +{v * 100:.1f}%")
+        print("  Final multipliers by type:")
+        print("    Weapons:  " + _type_multiplier_line(bucketed, WEAPONS))
+        print("    Elements: " + _type_multiplier_line(bucketed, ELEMENTS))
     print()
     print("Per-DPS damage:")
     for dps in damage.per_dps:
@@ -142,10 +146,10 @@ def _print_report(*, bucketed, verdict, matrix, damage, debug: bool) -> None:
                 skill_potency_up=team_pot + self_pot,
                 team_damage_cap_up=team_wide + self_only,
             )
-            eff = damage_estimate.effective_hits(s.hits, multi_cast)
+            eff = damage_estimate.effective_hits_for_skill(s, multi_cast)
             print(f"        - [{s.skill_kind}] {label}  "
                   f"power={s.power_min}-{s.power_max} hits={s.hits or '?'}"
-                  f"{f' (eff {eff})' if multi_cast > 1.0 else ''}  "
+                  f"{f' (eff {eff})' if eff != (s.hits or 0) else ''}  "
                   f"realised={potency:.0f} caps_each_hit={cap_each}")
     print()
     print(f"Classified effects: {len(bucketed.classified)}  "
@@ -155,6 +159,13 @@ def _print_report(*, bucketed, verdict, matrix, damage, debug: bool) -> None:
         for u in bucketed.unparsed:
             print(f"  - form={u.source_form_id} skill={u.source_skill_id} "
                   f"({u.source_kind}): {u.raw_description[:160]}")
+
+
+def _type_multiplier_line(bucketed, types: tuple[str, ...]) -> str:
+    return ", ".join(
+        f"{t.title()} x{damage_estimate.final_multiplier_for_type(bucketed, t):.2f}"
+        for t in types
+    )
 
 
 if __name__ == "__main__":

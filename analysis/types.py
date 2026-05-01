@@ -251,6 +251,9 @@ class SkillDamageRow:
     power_min: int | None
     power_max: int | None
     hits: int | None
+    weapon: str | None = None
+    element: str | None = None
+    repeat_factor: float = 1.0
 
 
 @dataclass(frozen=True)

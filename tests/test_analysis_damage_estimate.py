@@ -315,6 +315,44 @@ def test_best_skills_excludes_non_damage_kinds(conn):
     assert [r.name for r in out] == ["Active5x"]
 
 
+def test_best_skills_rank_repeat_text_by_effective_hits(conn):
+    c, fid = conn
+    repo.insert_skills(c, fid, [
+        {"slot_order": 1, "name": "Three-hit", "kind": "active",
+         "power_min": 65, "power_max": 65, "hits": 3,
+         "description": "3x single-target Sword (3x 65 Power)"},
+        {"slot_order": 2, "name": "Repeater", "kind": "active",
+         "power_min": 70, "power_max": 70, "hits": 1,
+         "description": "1x AoE Sword (1x 70 Power) If Boost MAX, repeat this attack once (up to 3x)"},
+    ])
+    out = damage_estimate._best_skills_for(c, fid, multi_cast=2.0, top=2)
+    assert [r.name for r in out] == ["Repeater", "Three-hit"]
+    assert out[0].weapon == "sword"
+    assert out[0].repeat_factor == 4.0
+    assert damage_estimate.effective_hits_for_skill(out[0], 2.0) == 8
+
+
+def test_summary_uses_best_skill_attack_type_for_multiplier(conn):
+    c, fid = conn
+    c.execute(
+        "UPDATE characters SET base_weapon = 'tome' "
+        "WHERE id = (SELECT character_id FROM character_forms WHERE id = ?)",
+        (fid,),
+    )
+    repo.insert_skills(c, fid, [
+        {"slot_order": 1, "name": "Sword DPS", "kind": "active",
+         "power_min": 70, "power_max": 70, "hits": 4,
+         "description": "4x single-target Sword (4x 70 Power)"},
+    ])
+    bt = _bucketed(
+        front=(fid,),
+        sub_bucket_sums={"g2.active.sword_dmg_up": 0.30},
+    )
+    report = damage_estimate.build(bt, c)
+    assert report.per_dps[0].weapon == "sword"
+    assert report.per_dps[0].buff_multiplier == pytest.approx(1.30)
+
+
 # ---------------------------------------------------------------------------
 # Cap-reached heuristic.
 # ---------------------------------------------------------------------------
