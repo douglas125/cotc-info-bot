@@ -163,22 +163,8 @@ def test_embed_truncates_long_unparsed_list_to_field_limit(seeded_conn):
         assert len(f.value) <= 1024
 
 
-def test_register_is_a_no_op_in_phase_1():
-    """The dormant command must not register anything on the tree."""
-
-    class _StubTree:
-        def __init__(self):
-            self.commands: list = []
-
-        def command(self, *_a, **_k):
-            def wrap(fn):
-                self.commands.append(fn)
-                return fn
-            return wrap
-
-    stub = _StubTree()
-    team_commands.register(stub)
-    assert stub.commands == []
+# Registration is now exercised by tests/test_bot_registration.py against
+# a real ``discord.app_commands.CommandTree`` — see that file.
 
 
 # ---------------------------------------------------------------------------
