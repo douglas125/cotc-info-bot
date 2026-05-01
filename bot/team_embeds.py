@@ -1,11 +1,27 @@
-"""Render a :class:`analysis.types.TeamReport` into a Discord embed."""
+"""Build the two `/analyze_team` views — matrix and analysis.
+
+The slash command surfaces a dropdown selector with two options:
+
+  - **Damage matrix** (default) — minimal text header + the rendered
+    PNG matrix from :mod:`analysis.matrix_image` shown inline via
+    ``embed.set_image(url="attachment://...")``.
+  - **Analysis breakdown** — the full text-heavy embed (Best use, gaps,
+    survivability, cap, support roles).
+
+Both build functions return :class:`RenderedTeamMessage` so the view
+in :mod:`bot.team_views` can swap between them without re-rendering
+the matrix on every toggle.
+"""
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
+from io import BytesIO
 
 import discord
 
-from analysis import damage_estimate, insights
+from analysis import damage_estimate, insights, matrix_image
+from analysis.matrix_image import RenderedMatrixImage
 from analysis.types import (
     BucketedTeam,
     DamageReport,
@@ -18,12 +34,52 @@ from damage.types import ELEMENTS, WEAPONS
 from db import repo
 
 
-def build(conn: sqlite3.Connection, report: TeamReport) -> discord.Embed:
+@dataclass
+class RenderedTeamMessage:
+    """A built embed plus the optional file attachment for the matrix view."""
+
+    embed: discord.Embed
+    file: discord.File | None = None
+
+
+def build_matrix_message(
+    conn: sqlite3.Connection,
+    report: TeamReport,
+    *,
+    rendered_image: RenderedMatrixImage,
+) -> RenderedTeamMessage:
+    """Default view — minimal text header + the matrix image attached inline.
+
+    The caller is responsible for wrapping ``rendered_image.data`` in a
+    fresh :class:`discord.File` (the stream is consumed on send/edit;
+    on toggle-back we re-create from cached bytes).
+    """
+    embed = discord.Embed(
+        title="Team Analysis",
+        color=discord.Color.blurple(),
+    )
+    type_multipliers = damage_estimate.final_multipliers_for_team(report.bucketed)
+    embed.description = _truncate(
+        _header_description(conn, report) + "\n" + _matrix_headline(type_multipliers),
+        EMBED_DESCRIPTION_LIMIT,
+    )
+    embed.set_image(url=f"attachment://{rendered_image.filename}")
+    _attach_footer(embed, repo.latest_sync_run(conn))
+    file = discord.File(BytesIO(rendered_image.data), filename=rendered_image.filename)
+    return RenderedTeamMessage(embed=embed, file=file)
+
+
+def build_analysis_message(
+    conn: sqlite3.Connection,
+    report: TeamReport,
+) -> RenderedTeamMessage:
+    """Second view — the full text breakdown from PR #44."""
     embed = discord.Embed(
         title="Team Analysis",
         color=discord.Color.blurple(),
     )
     embed.description = _truncate(_header_description(conn, report), EMBED_DESCRIPTION_LIMIT)
+    type_multipliers = damage_estimate.final_multipliers_for_team(report.bucketed)
 
     ranked = insights.ranked_dps(report.bucketed, report.damage, limit=3)
     embed.add_field(
@@ -33,7 +89,7 @@ def build(conn: sqlite3.Connection, report: TeamReport) -> discord.Embed:
     )
     embed.add_field(
         name="Damage potential by type",
-        value=_truncate(_type_matrix_block(report.bucketed), FIELD_VALUE_LIMIT),
+        value=_truncate(_type_matrix_block(report.bucketed, type_multipliers), FIELD_VALUE_LIMIT),
         inline=False,
     )
     embed.add_field(
@@ -68,7 +124,25 @@ def build(conn: sqlite3.Connection, report: TeamReport) -> discord.Embed:
         )
 
     _attach_footer(embed, repo.latest_sync_run(conn))
-    return embed
+    return RenderedTeamMessage(embed=embed, file=None)
+
+
+def _matrix_headline(type_multipliers: dict[str, float]) -> str:
+    """One-line summary of the top types — sits below the header block.
+
+    Picks the top 3 weapon and top 1 element multiplier so a reader
+    sees this team's identity without scrolling to the image.
+    """
+    weapon_pairs = sorted(
+        ((w, type_multipliers[w]) for w in WEAPONS),
+        key=lambda kv: kv[1], reverse=True,
+    )[:3]
+    element_pairs = sorted(
+        ((e, type_multipliers[e]) for e in ELEMENTS),
+        key=lambda kv: kv[1], reverse=True,
+    )[:1]
+    bits = [f"{n.title()} ×{m:.2f}" for n, m in weapon_pairs + element_pairs]
+    return f"_Top damage types:_ {' · '.join(bits)} — full breakdown in image below."
 
 
 def _header_description(conn: sqlite3.Connection, report: TeamReport) -> str:
@@ -147,30 +221,24 @@ def _survivability_block(verdict: SurvivabilityVerdict) -> str:
     return f"{head}\n{cites}"
 
 
-def _type_matrix_block(bucketed: BucketedTeam) -> str:
+def _type_matrix_block(
+    bucketed: BucketedTeam, type_multipliers: dict[str, float],
+) -> str:
     """Full per-type damage multiplier matrix (all 8 weapons, all 6 elements).
 
-    Each cell is the team's final multiplier for an attack of that type
-    via :func:`damage_estimate.final_multiplier_for_type`. Cells where
-    a team member has guaranteed crit are flagged with ``★`` and use
-    the crit-applied value (``1.25 + Σ Crit Damage Up`` in the final
-    pool). A footnote line names the source of the crit when present.
+    Each cell is the team's final multiplier for an attack of that type.
+    Cells where a team member has guaranteed crit are flagged with ``★``
+    and use the crit-applied value (``1.25 + Σ Crit Damage Up`` in the
+    final pool). A footnote line names the source of the crit when
+    present.
     """
     weapon_pairs = sorted(
-        (
-            (w, damage_estimate.final_multiplier_for_type(bucketed, w))
-            for w in WEAPONS
-        ),
-        key=lambda kv: kv[1],
-        reverse=True,
+        ((w, type_multipliers[w]) for w in WEAPONS),
+        key=lambda kv: kv[1], reverse=True,
     )
     element_pairs = sorted(
-        (
-            (e, damage_estimate.final_multiplier_for_type(bucketed, e))
-            for e in ELEMENTS
-        ),
-        key=lambda kv: kv[1],
-        reverse=True,
+        ((e, type_multipliers[e]) for e in ELEMENTS),
+        key=lambda kv: kv[1], reverse=True,
     )
     weapon_line = _format_type_line(bucketed, weapon_pairs)
     element_line = _format_type_line(bucketed, element_pairs)

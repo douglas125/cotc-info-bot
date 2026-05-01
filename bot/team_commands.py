@@ -104,6 +104,13 @@ async def _analyze_team_impl(
     is called at the very end, so unit tests can pass a stub interaction
     and assert on the embed payload.
     """
+    from io import BytesIO
+
+    import discord
+
+    from analysis import matrix_image
+    from bot.team_views import AnalyzeTeamView
+
     report = build_team_report(
         conn,
         frontrow_form_ids=frontrow_form_ids,
@@ -114,8 +121,20 @@ async def _analyze_team_impl(
         boost_level=boost_level,
         highlighted_dps=highlighted_dps,
     )
-    embed = team_embeds.build(conn, report)
-    await interaction.response.send_message(embed=embed)
+    rendered = matrix_image.render(report.bucketed)
+    message = team_embeds.build_matrix_message(
+        conn, report, rendered_image=rendered,
+    )
+    view = AnalyzeTeamView(
+        report=report,
+        matrix_bytes=rendered.data,
+        matrix_filename=rendered.filename,
+    )
+    await interaction.response.send_message(
+        embed=message.embed,
+        file=discord.File(BytesIO(rendered.data), filename=rendered.filename),
+        view=view,
+    )
 
 
 def register(tree: app_commands.CommandTree) -> None:  # noqa: ARG001

@@ -120,7 +120,7 @@ def test_embed_renders_without_error(seeded_conn):
     report = team_commands.build_team_report(
         seeded_conn, frontrow_form_ids=[f1, f2], cap_orbs=1,
     )
-    embed = team_embeds.build(seeded_conn, report)
+    embed = team_embeds.build_analysis_message(seeded_conn, report).embed
     assert embed.title == "Team Analysis"
     # Required fields present.
     field_names = [f.name for f in embed.fields]
@@ -157,7 +157,7 @@ def test_embed_truncates_long_unparsed_list_to_field_limit(seeded_conn):
     ]
     repo.insert_skills(seeded_conn, fid, skills)
     report = team_commands.build_team_report(seeded_conn, frontrow_form_ids=[fid])
-    embed = team_embeds.build(seeded_conn, report)
+    embed = team_embeds.build_analysis_message(seeded_conn, report).embed
     for f in embed.fields:
         # Discord caps field values at 1024.
         assert len(f.value) <= 1024
@@ -366,7 +366,7 @@ def test_fixture_team_t1_aliased_inputs_surface_in_description(
         cap_orbs=5,  # User's screenshot showed 5; should still flag the 3-rule.
         name_resolutions=t1_sword_bruiser["name_resolutions"],
     )
-    embed = team_embeds.build(seeded_conn, report)
+    embed = team_embeds.build_analysis_message(seeded_conn, report).embed
     desc = embed.description or ""
     # Alias trail with typed -> resolved arrows.
     assert "Pardis III → Pardis" in desc
@@ -386,7 +386,7 @@ def test_fixture_team_t1_over_three_cap_orbs_flagged_in_gaps(
         backrow_form_ids=t1_sword_bruiser["back"],
         cap_orbs=5,
     )
-    embed = team_embeds.build(seeded_conn, report)
+    embed = team_embeds.build_analysis_message(seeded_conn, report).embed
     gap_field = next(f for f in embed.fields if f.name == "Main gaps")
     assert "only 3 stack" in gap_field.value
 
@@ -407,7 +407,7 @@ def test_fixture_team_t1_capping_dps_shows_total_damage_estimate(
         cap_orbs=3,
         name_resolutions=t1_sword_bruiser["name_resolutions"],
     )
-    embed = team_embeds.build(seeded_conn, report)
+    embed = team_embeds.build_analysis_message(seeded_conn, report).embed
     best_use = next(f for f in embed.fields if f.name == "Best use")
     assert "Black Knight" in best_use.value
     # Damage estimate format: "≈ N.NM dmg — H/H hits cap at N.NM"
@@ -429,7 +429,7 @@ def test_fixture_team_t3_fire_mage_potency_limited_diagnosis(
         backrow_form_ids=t3_fire_mage_underpowered["back"],
         cap_orbs=3,
     )
-    embed = team_embeds.build(seeded_conn, report)
+    embed = team_embeds.build_analysis_message(seeded_conn, report).embed
     gap_field = next(f for f in embed.fields if f.name == "Main gaps")
     assert "EX Cyrus" in gap_field.value
     assert "below the 240 cap-rule" in gap_field.value
@@ -449,7 +449,7 @@ def test_fixture_team_t4_type_matrix_shows_team_identity(
         backrow_form_ids=t4_bow_multi_element["back"],
         cap_orbs=3,
     )
-    embed = team_embeds.build(seeded_conn, report)
+    embed = team_embeds.build_analysis_message(seeded_conn, report).embed
     matrix_field = next(
         f for f in embed.fields if f.name == "Damage potential by type"
     )
@@ -468,7 +468,7 @@ def test_fixture_team_t5_parser_confidence_appears(
         backrow_form_ids=t1_sword_bruiser["back"],
         cap_orbs=3,
     )
-    embed = team_embeds.build(seeded_conn, report)
+    embed = team_embeds.build_analysis_message(seeded_conn, report).embed
     desc = embed.description or ""
     assert "Parser confidence:" in desc
     assert "%" in desc
@@ -486,7 +486,7 @@ def test_fixture_team_t2_per_dps_self_only_cap_up_breakdown(
         backrow_form_ids=t1_sword_bruiser["back"],
         cap_orbs=3,
     )
-    embed = team_embeds.build(seeded_conn, report)
+    embed = team_embeds.build_analysis_message(seeded_conn, report).embed
     cap_field = next(
         f for f in embed.fields if f.name == "Team cap and potency"
     )
@@ -579,7 +579,7 @@ def test_type_matrix_shows_full_eight_weapons(seeded_conn):
     report = team_commands.build_team_report(
         seeded_conn, frontrow_form_ids=[fid],
     )
-    embed = team_embeds.build(seeded_conn, report)
+    embed = team_embeds.build_analysis_message(seeded_conn, report).embed
     matrix_field = next(
         f for f in embed.fields if f.name == "Damage potential by type"
     )
@@ -601,7 +601,7 @@ def test_fixture_team_quantified_support_role_lines(
         backrow_form_ids=t1_sword_bruiser["back"],
         cap_orbs=3,
     )
-    embed = team_embeds.build(seeded_conn, report)
+    embed = team_embeds.build_analysis_message(seeded_conn, report).embed
     support_field = next(
         (f for f in embed.fields if f.name == "Support roles"), None,
     )
