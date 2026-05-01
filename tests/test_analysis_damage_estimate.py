@@ -332,6 +332,24 @@ def test_best_skills_rank_repeat_text_by_effective_hits(conn):
     assert damage_estimate.effective_hits_for_skill(out[0], 2.0) == 8
 
 
+def test_best_skills_infers_missing_power_and_conditional_max_hits(conn):
+    c, fid = conn
+    repo.insert_skills(c, fid, [
+        {"slot_order": 1, "name": "Conditional five-hit", "kind": "active",
+         "power_min": None, "power_max": None, "hits": None,
+         "description": (
+             "3x Random-Target Sword, also hits Dark Weakness (3x 65-120 Power)\n"
+             "If there are 4+ allies with Cursed State: 5x Random-Target"
+         )},
+    ])
+    out = damage_estimate._best_skills_for(c, fid, multi_cast=3.0, top=1)
+    assert out[0].power_min == 65
+    assert out[0].power_max == 120
+    assert out[0].hits == 5
+    assert out[0].weapon == "sword"
+    assert damage_estimate.effective_hits_for_skill(out[0], 3.0) == 15
+
+
 def test_summary_uses_best_skill_attack_type_for_multiplier(conn):
     c, fid = conn
     c.execute(

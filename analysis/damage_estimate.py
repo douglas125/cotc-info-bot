@@ -349,7 +349,7 @@ def _best_skills_for(
     rows = conn.execute(
         "SELECT id, name, kind, power_min, power_max, hits, description "
         "FROM skills "
-        "WHERE form_id = ? AND power_max IS NOT NULL "
+        "WHERE form_id = ? "
         "ORDER BY id ASC",
         (form_id,),
     ).fetchall()
@@ -357,24 +357,30 @@ def _best_skills_for(
     for r in rows:
         if (r["kind"] or "") not in _DAMAGE_KINDS:
             continue
-        listed_hits = r["hits"] or 1
+        description = r["description"] or ""
+        power_min, power_max = _skill_power_range(
+            description,
+            power_min=r["power_min"],
+            power_max=r["power_max"],
+        )
+        listed_hits = _skill_hit_count(description, hits=r["hits"])
         repeat_factor = _skill_repeat_factor(r["description"] or "")
         effective_hits = float(listed_hits) * multi_cast * repeat_factor
         if effective_hits < MIN_DAMAGE_RELEVANT_EFFECTIVE_HITS:
             continue
-        weapon, element = _skill_attack_type(r["description"] or "")
+        weapon, element = _skill_attack_type(description)
         skill = SkillDamageRow(
             skill_id=r["id"],
             skill_kind=r["kind"] or "active",
             name=r["name"],
-            power_min=r["power_min"],
-            power_max=r["power_max"],
-            hits=r["hits"],
+            power_min=power_min,
+            power_max=power_max,
+            hits=listed_hits,
             weapon=weapon,
             element=element,
             repeat_factor=repeat_factor,
         )
-        score = float(r["power_max"] or 0) * effective_hits
+        score = float(power_max or 0) * effective_hits
         candidates.append((score, skill))
     candidates.sort(
         key=lambda item: (
@@ -403,6 +409,39 @@ def _skill_repeat_factor(description: str) -> float:
     if "repeat this attack once" in text or "cast this a second time in a row" in text:
         return 2.0
     return 1.0
+
+
+def _skill_hit_count(description: str, *, hits: int | None) -> int:
+    """Best available hit count under optimistic conditional assumptions."""
+    candidates = [int(hits or 0)]
+    for m in re.finditer(
+        r"\b(\d+)\s*x\s+(?:single-target|random-target|aoe|st|rt)\b",
+        description or "",
+        re.IGNORECASE,
+    ):
+        candidates.append(int(m.group(1)))
+    return max(candidates) if candidates else 0
+
+
+def _skill_power_range(
+    description: str,
+    *,
+    power_min: int | None,
+    power_max: int | None,
+) -> tuple[int | None, int | None]:
+    """Use parsed DB power columns, falling back to the description."""
+    if power_max is not None:
+        return power_min, power_max
+    m = re.search(
+        r"\((\d+)x\s*(\d+)(?:\s*[~\-]\s*(\d+))?\s*Power",
+        description or "",
+        re.IGNORECASE,
+    )
+    if not m:
+        return power_min, power_max
+    parsed_min = int(m.group(2))
+    parsed_max = int(m.group(3) or m.group(2))
+    return parsed_min, parsed_max
 
 
 def _skill_attack_type(description: str) -> tuple[str | None, str | None]:

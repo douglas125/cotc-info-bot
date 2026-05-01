@@ -70,13 +70,6 @@ def build(conn: sqlite3.Connection, report: TeamReport) -> discord.Embed:
             if not value:
                 continue
             embed.add_field(name=name, value=_truncate(value, FIELD_VALUE_LIMIT), inline=False)
-    if report.bucketed.unparsed:
-        embed.add_field(
-            name=f"Unparsed skills ({len(report.bucketed.unparsed)})",
-            value=_truncate(_unparsed_block(report.bucketed.unparsed), FIELD_VALUE_LIMIT),
-            inline=False,
-        )
-
     _attach_footer(embed, repo.latest_sync_run(conn))
     return embed
 
