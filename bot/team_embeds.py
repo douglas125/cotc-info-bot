@@ -58,8 +58,9 @@ def build_matrix_message(
         title="Team Analysis",
         color=discord.Color.blurple(),
     )
+    type_multipliers = damage_estimate.final_multipliers_for_team(report.bucketed)
     embed.description = _truncate(
-        _header_description(conn, report) + "\n" + _matrix_headline(report.bucketed),
+        _header_description(conn, report) + "\n" + _matrix_headline(type_multipliers),
         EMBED_DESCRIPTION_LIMIT,
     )
     embed.set_image(url=f"attachment://{rendered_image.filename}")
@@ -78,6 +79,7 @@ def build_analysis_message(
         color=discord.Color.blurple(),
     )
     embed.description = _truncate(_header_description(conn, report), EMBED_DESCRIPTION_LIMIT)
+    type_multipliers = damage_estimate.final_multipliers_for_team(report.bucketed)
 
     ranked = insights.ranked_dps(report.bucketed, report.damage, limit=3)
     embed.add_field(
@@ -87,7 +89,7 @@ def build_analysis_message(
     )
     embed.add_field(
         name="Damage potential by type",
-        value=_truncate(_type_matrix_block(report.bucketed), FIELD_VALUE_LIMIT),
+        value=_truncate(_type_matrix_block(report.bucketed, type_multipliers), FIELD_VALUE_LIMIT),
         inline=False,
     )
     embed.add_field(
@@ -125,26 +127,18 @@ def build_analysis_message(
     return RenderedTeamMessage(embed=embed, file=None)
 
 
-# Backwards-compatible alias — older callers pass through to the analysis
-# breakdown so existing tests don't all need updating in this PR.
-def build(conn: sqlite3.Connection, report: TeamReport) -> discord.Embed:
-    """Deprecated; use :func:`build_analysis_message` or
-    :func:`build_matrix_message`. Returns just the analysis embed."""
-    return build_analysis_message(conn, report).embed
-
-
-def _matrix_headline(bucketed: BucketedTeam) -> str:
+def _matrix_headline(type_multipliers: dict[str, float]) -> str:
     """One-line summary of the top types — sits below the header block.
 
     Picks the top 3 weapon and top 1 element multiplier so a reader
     sees this team's identity without scrolling to the image.
     """
     weapon_pairs = sorted(
-        ((w, damage_estimate.final_multiplier_for_type(bucketed, w)) for w in WEAPONS),
+        ((w, type_multipliers[w]) for w in WEAPONS),
         key=lambda kv: kv[1], reverse=True,
     )[:3]
     element_pairs = sorted(
-        ((e, damage_estimate.final_multiplier_for_type(bucketed, e)) for e in ELEMENTS),
+        ((e, type_multipliers[e]) for e in ELEMENTS),
         key=lambda kv: kv[1], reverse=True,
     )[:1]
     bits = [f"{n.title()} ×{m:.2f}" for n, m in weapon_pairs + element_pairs]
@@ -227,30 +221,24 @@ def _survivability_block(verdict: SurvivabilityVerdict) -> str:
     return f"{head}\n{cites}"
 
 
-def _type_matrix_block(bucketed: BucketedTeam) -> str:
+def _type_matrix_block(
+    bucketed: BucketedTeam, type_multipliers: dict[str, float],
+) -> str:
     """Full per-type damage multiplier matrix (all 8 weapons, all 6 elements).
 
-    Each cell is the team's final multiplier for an attack of that type
-    via :func:`damage_estimate.final_multiplier_for_type`. Cells where
-    a team member has guaranteed crit are flagged with ``★`` and use
-    the crit-applied value (``1.25 + Σ Crit Damage Up`` in the final
-    pool). A footnote line names the source of the crit when present.
+    Each cell is the team's final multiplier for an attack of that type.
+    Cells where a team member has guaranteed crit are flagged with ``★``
+    and use the crit-applied value (``1.25 + Σ Crit Damage Up`` in the
+    final pool). A footnote line names the source of the crit when
+    present.
     """
     weapon_pairs = sorted(
-        (
-            (w, damage_estimate.final_multiplier_for_type(bucketed, w))
-            for w in WEAPONS
-        ),
-        key=lambda kv: kv[1],
-        reverse=True,
+        ((w, type_multipliers[w]) for w in WEAPONS),
+        key=lambda kv: kv[1], reverse=True,
     )
     element_pairs = sorted(
-        (
-            (e, damage_estimate.final_multiplier_for_type(bucketed, e))
-            for e in ELEMENTS
-        ),
-        key=lambda kv: kv[1],
-        reverse=True,
+        ((e, type_multipliers[e]) for e in ELEMENTS),
+        key=lambda kv: kv[1], reverse=True,
     )
     weapon_line = _format_type_line(bucketed, weapon_pairs)
     element_line = _format_type_line(bucketed, element_pairs)

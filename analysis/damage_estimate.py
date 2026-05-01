@@ -376,6 +376,19 @@ def type_has_guaranteed_crit(bucketed: BucketedTeam, attack_type: str) -> bool:
     return (attack_type or "").lower() in bucketed.crit_types
 
 
+def final_multipliers_for_team(bucketed: BucketedTeam) -> dict[str, float]:
+    """Per-type final multipliers for every weapon and element on this team.
+
+    Single-pass precomputation so the embed and the matrix renderer
+    don't each rebuild G1/G2/G3/G4 fourteen times when both are
+    rendered for the same team.
+    """
+    return {
+        t: final_multiplier_for_type(bucketed, t)
+        for t in WEAPONS + ELEMENTS
+    }
+
+
 def _keys_with_prefix(
     sums: dict[str, float] | object, prefix: str,
 ) -> dict[str, float]:

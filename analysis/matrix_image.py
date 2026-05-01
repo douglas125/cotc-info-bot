@@ -86,14 +86,29 @@ class _MatrixRow:
     values: tuple[float, ...]  # one entry per column
 
 
-def render(bucketed: BucketedTeam) -> RenderedMatrixImage:
+def render(
+    bucketed: BucketedTeam,
+    *,
+    type_multipliers: dict[str, float] | None = None,
+) -> RenderedMatrixImage:
     """Render the team's bucket matrix to a PNG.
 
-    Returns a :class:`RenderedMatrixImage` with PNG bytes ready to wrap
-    in ``discord.File(BytesIO(rendered.data), filename=rendered.filename)``.
+    ``type_multipliers`` is an optional precomputed
+    ``{weapon|element: final multiplier}`` map (see
+    :func:`damage_estimate.final_multipliers_for_team`). Pass it when
+    the caller already computed the per-type multipliers for the embed
+    so the renderer doesn't redo the work.
     """
-    physical_rows = _physical_rows(bucketed)
-    elemental_rows = _elemental_rows(bucketed)
+    if type_multipliers is None:
+        type_multipliers = damage_estimate.final_multipliers_for_team(bucketed)
+    physical_rows = _build_rows(
+        bucketed, columns=WEAPONS,
+        stat_up="atk_up", stat_down="def_down",
+    )
+    elemental_rows = _build_rows(
+        bucketed, columns=ELEMENTS,
+        stat_up="mag_up", stat_down="mdef_down",
+    )
 
     phys_block_w = LABEL_WIDTH + len(WEAPONS) * CELL_WIDTH
     elem_block_w = LABEL_WIDTH + len(ELEMENTS) * CELL_WIDTH
@@ -123,6 +138,7 @@ def render(bucketed: BucketedTeam) -> RenderedMatrixImage:
         columns=WEAPONS,
         rows=physical_rows,
         bucketed=bucketed,
+        type_multipliers=type_multipliers,
     )
 
     # Bottom: Elemental matrix, centered horizontally under the physical.
@@ -135,6 +151,7 @@ def render(bucketed: BucketedTeam) -> RenderedMatrixImage:
         columns=ELEMENTS,
         rows=elemental_rows,
         bucketed=bucketed,
+        type_multipliers=type_multipliers,
     )
 
     if bucketed.divine_beast:
@@ -159,12 +176,17 @@ def render(bucketed: BucketedTeam) -> RenderedMatrixImage:
 # Row data builders.
 # ---------------------------------------------------------------------------
 
-def _physical_rows(bucketed: BucketedTeam) -> list[_MatrixRow]:
-    """The G1+G2+G3+G4 physical rows for the top matrix.
+def _build_rows(
+    bucketed: BucketedTeam,
+    *,
+    columns: tuple[str, ...],
+    stat_up: str,        # "atk_up" for physical, "mag_up" for elemental
+    stat_down: str,      # "def_down" / "mdef_down"
+) -> list[_MatrixRow]:
+    """Build the per-(group, source) rows for one matrix sub-table.
 
-    Rows where every value is 0 are dropped so empty G4 sub-pools
-    don't clutter the image when no team member has Ultimate buffs of
-    that shape.
+    All-zero rows are dropped so empty G4 sub-pools don't clutter the
+    image when no team member has Ultimate buffs of that shape.
     """
     sums = bucketed.raw_sub_bucket_sums
     rows: list[_MatrixRow] = []
@@ -172,64 +194,30 @@ def _physical_rows(bucketed: BucketedTeam) -> list[_MatrixRow]:
     def replicated(label: str, key: str) -> None:
         v = float(sums.get(key, 0.0))
         if v > 0:
-            rows.append(_MatrixRow(label=label, values=tuple(v for _ in WEAPONS)))
+            rows.append(_MatrixRow(label=label, values=tuple(v for _ in columns)))
 
-    def per_weapon(label: str, group: str, source: str, suffix: str) -> None:
+    def per_type(label: str, group: str, source: str, suffix: str) -> None:
         values = tuple(
-            float(sums.get(f"{group}.{source}.{w}_{suffix}", 0.0))
-            for w in WEAPONS
+            float(sums.get(f"{group}.{source}.{t}_{suffix}", 0.0))
+            for t in columns
         )
         if any(v > 0 for v in values):
             rows.append(_MatrixRow(label=label, values=values))
 
-    replicated("G1 Active Atk Up",      "g1.active.atk_up")
-    replicated("G1 Active Def Down",    "g1.active.def_down")
-    replicated("G1 Passive Atk Up",     "g1.passive.atk_up")
-    replicated("G1 Passive Def Down",   "g1.passive.def_down")
-    per_weapon("G2 Active DMG Up",      "g2", "active",   "dmg_up")
-    per_weapon("G2 Passive DMG Up",     "g2", "passive",  "dmg_up")
-    per_weapon("G3 Active Res Down",    "g3", "active",   "res_down")
-    per_weapon("G3 Passive Res Down",   "g3", "passive",  "res_down")
-    replicated("G4 Ult Atk Up",         "g4.ultimate.atk_up")
-    replicated("G4 Ult Def Down",       "g4.ultimate.def_down")
-    per_weapon("G4 Ult DMG Up",         "g4", "ultimate", "dmg_up")
-    per_weapon("G4 Ult Res Down",       "g4", "ultimate", "res_down")
-    return rows
-
-
-def _elemental_rows(bucketed: BucketedTeam) -> list[_MatrixRow]:
-    """The G1+G2+G3+G4 elemental rows for the bottom matrix.
-
-    Rows where every value is 0 are dropped (same rule as physical).
-    """
-    sums = bucketed.raw_sub_bucket_sums
-    rows: list[_MatrixRow] = []
-
-    def replicated(label: str, key: str) -> None:
-        v = float(sums.get(key, 0.0))
-        if v > 0:
-            rows.append(_MatrixRow(label=label, values=tuple(v for _ in ELEMENTS)))
-
-    def per_element(label: str, group: str, source: str, suffix: str) -> None:
-        values = tuple(
-            float(sums.get(f"{group}.{source}.{e}_{suffix}", 0.0))
-            for e in ELEMENTS
-        )
-        if any(v > 0 for v in values):
-            rows.append(_MatrixRow(label=label, values=values))
-
-    replicated("G1 Active Mag Up",      "g1.active.mag_up")
-    replicated("G1 Active MDef Down",   "g1.active.mdef_down")
-    replicated("G1 Passive Mag Up",     "g1.passive.mag_up")
-    replicated("G1 Passive MDef Down",  "g1.passive.mdef_down")
-    per_element("G2 Active DMG Up",     "g2", "active",   "dmg_up")
-    per_element("G2 Passive DMG Up",    "g2", "passive",  "dmg_up")
-    per_element("G3 Active Res Down",   "g3", "active",   "res_down")
-    per_element("G3 Passive Res Down",  "g3", "passive",  "res_down")
-    replicated("G4 Ult Mag Up",         "g4.ultimate.mag_up")
-    replicated("G4 Ult MDef Down",      "g4.ultimate.mdef_down")
-    per_element("G4 Ult DMG Up",        "g4", "ultimate", "dmg_up")
-    per_element("G4 Ult Res Down",      "g4", "ultimate", "res_down")
+    up_label = stat_up.replace("_", " ").title()        # "Atk Up" / "Mag Up"
+    down_label = stat_down.replace("_", " ").title()    # "Def Down" / "Mdef Down"
+    replicated(f"G1 Active {up_label}",     f"g1.active.{stat_up}")
+    replicated(f"G1 Active {down_label}",   f"g1.active.{stat_down}")
+    replicated(f"G1 Passive {up_label}",    f"g1.passive.{stat_up}")
+    replicated(f"G1 Passive {down_label}",  f"g1.passive.{stat_down}")
+    per_type("G2 Active DMG Up",            "g2", "active",   "dmg_up")
+    per_type("G2 Passive DMG Up",           "g2", "passive",  "dmg_up")
+    per_type("G3 Active Res Down",          "g3", "active",   "res_down")
+    per_type("G3 Passive Res Down",         "g3", "passive",  "res_down")
+    replicated(f"G4 Ult {up_label}",        f"g4.ultimate.{stat_up}")
+    replicated(f"G4 Ult {down_label}",      f"g4.ultimate.{stat_down}")
+    per_type("G4 Ult DMG Up",               "g4", "ultimate", "dmg_up")
+    per_type("G4 Ult Res Down",             "g4", "ultimate", "res_down")
     return rows
 
 
@@ -238,6 +226,7 @@ def _elemental_rows(bucketed: BucketedTeam) -> list[_MatrixRow]:
 # ---------------------------------------------------------------------------
 
 def _matrix_block_height(n_data_rows: int) -> int:
+    """Vertical pixels for one matrix block (title + header + rows + final mult)."""
     return (
         TITLE_HEIGHT
         + HEADER_HEIGHT
@@ -256,6 +245,7 @@ def _render_matrix(
     columns: tuple[str, ...],
     rows: list[_MatrixRow],
     bucketed: BucketedTeam,
+    type_multipliers: dict[str, float],
 ) -> None:
     n_cols = len(columns)
     block_w = LABEL_WIDTH + n_cols * CELL_WIDTH
@@ -290,7 +280,8 @@ def _render_matrix(
         )
     cy += HEADER_HEIGHT
 
-    # Body data rows.
+    # Body data rows. Cap is column-independent today (see _cap_for);
+    # one lookup per row is enough.
     body_font = _font(11)
     small_font = _font(9)
     label_font = _font(11, bold=False)
@@ -301,13 +292,13 @@ def _render_matrix(
             (x + 6, cy + (CELL_HEIGHT - 14) // 2),
             row.label, font=label_font, fill=LABEL_COLOR,
         )
+        cap = _cap_for(bucketed, row.label)
         for ci, val in enumerate(row.values):
             cx = x + LABEL_WIDTH + ci * CELL_WIDTH
             draw.line((cx, cy, cx, cy + CELL_HEIGHT), fill=GRID_COLOR)
             if val > 0:
                 _draw_value_cell(
-                    draw, cx=cx, cy=cy, val=val,
-                    cap=_cap_for(bucketed, row.label, columns[ci]),
+                    draw, cx=cx, cy=cy, val=val, cap=cap,
                     font=body_font, small_font=small_font,
                 )
         # Right-edge gridline closing the row.
@@ -333,7 +324,7 @@ def _render_matrix(
     for ci, col_name in enumerate(columns):
         cx = x + LABEL_WIDTH + ci * CELL_WIDTH
         draw.line((cx, cy, cx, cy + final_height), fill=GRID_COLOR)
-        mult = damage_estimate.final_multiplier_for_type(bucketed, col_name)
+        mult = type_multipliers[col_name]
         is_crit = damage_estimate.type_has_guaranteed_crit(bucketed, col_name)
         text = f"×{mult:.2f}"
         tw = draw.textlength(text, font=final_font)
@@ -410,15 +401,15 @@ def _draw_value_cell(
     draw.text((cap_tx, cap_ty), cap_text, font=small_font, fill=CAPPED_COLOR)
 
 
-def _cap_for(bucketed: BucketedTeam, row_label: str, column: str) -> float:
-    """The sub-bucket cap that applies to one cell.
+def _cap_for(bucketed: BucketedTeam, row_label: str) -> float:
+    """The sub-bucket cap that applies to one row.
 
     Today every sub-bucket caps at ``DEFAULT_SUB_BUCKET_CAP`` (30%).
     When per-sub-bucket cap-raise effects land in BucketedTeam (e.g.
     Black Knight EX raising Self's Atk Up + Sword Damage Up cap to
-    50%), this helper is the seam where a per-(row_label, column,
-    target_scope) override gets surfaced — the renderer doesn't have
-    to change shape; only the cap value flowing into ``_draw_value_cell``.
+    50%), this helper is the seam where the override gets surfaced —
+    extend the signature with a column once cap-raises become
+    column-specific.
     """
     return DEFAULT_SUB_BUCKET_CAP
 
