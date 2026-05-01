@@ -5,8 +5,6 @@ import sqlite3
 from collections import defaultdict
 from typing import Any, Callable
 
-from dataclasses import asdict
-
 from config import (
     ENEMIES_SPREADSHEET_ID,
     ENEMY_DATA_TAB_GIDS,
@@ -309,7 +307,7 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             progress("Writing pet data...")
             repo.clear_pet_tables(conn)
             for pet in parsed_pets:
-                repo.upsert_pet(conn, asdict(pet))
+                repo.upsert_pet(conn, pet)
 
             progress("Rebuilding pet FTS index...")
             repo.rebuild_pet_fts(conn)

@@ -30,6 +30,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from sync.fetch import sheet_by_gid
 from sync.parsers import _cell_color_hex, _cell_text
 
 
@@ -226,8 +227,7 @@ def _parse_ability_block(
     effect_raw = text[:boundary].rstrip()
     trailer = text[boundary:]
 
-    # Effect text: trim leading/trailing blank lines but preserve internal
-    # blank lines so multi-paragraph effects render naturally.
+    # Preserve internal blank lines so multi-paragraph effects render naturally.
     lines = effect_raw.splitlines()
     while lines and not lines[0].strip():
         lines.pop(0)
@@ -299,7 +299,7 @@ def parse_pets(
         # Probe not yet run; non-fatal, just return empty.
         return pets, warnings
 
-    sheet = _sheet_by_gid(payload, gid)
+    sheet = sheet_by_gid(payload, gid)
     if sheet is None:
         warnings.append(f"Pet sheet gid={gid} not found in payload")
         return pets, warnings
@@ -368,10 +368,3 @@ def parse_pets(
         r_i += BLOCK_HEIGHT
 
     return pets, warnings
-
-
-def _sheet_by_gid(payload: dict[str, Any], gid: int) -> dict[str, Any] | None:
-    for sheet in payload.get("sheets", []) or []:
-        if sheet.get("properties", {}).get("sheetId") == gid:
-            return sheet
-    return None

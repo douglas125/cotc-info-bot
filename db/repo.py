@@ -812,21 +812,29 @@ _PET_INSERT_COLUMNS = (
 )
 
 
-def upsert_pet(conn: sqlite3.Connection, pet: dict[str, Any]) -> int:
+def _pet_value(pet: Any, column: str) -> Any:
+    """Read a pet column from either a dataclass or a plain dict."""
+    if isinstance(pet, dict):
+        return pet.get(column)
+    return getattr(pet, column, None)
+
+
+def upsert_pet(conn: sqlite3.Connection, pet: Any) -> int:
     """Insert or update one pet keyed by (canonical_name, source_row).
 
-    `pet` is a plain dict (the parser's `ParsedPet` is asdict'd by the
-    runner) carrying every column listed in `_PET_INSERT_COLUMNS`. The
-    UNIQUE constraint lets two pets share an English name as long as
-    their source rows differ — the documented "White Rabbit" collision.
+    `pet` is either a `sync.pet_parsers.ParsedPet` dataclass (the runner
+    path) or a plain dict (test fixtures). Both shapes carry every
+    column listed in `_PET_INSERT_COLUMNS`. The UNIQUE constraint lets
+    two pets share an English name as long as their source rows differ
+    — the documented "White Rabbit" collision.
     """
     placeholders = ", ".join("?" for _ in _PET_INSERT_COLUMNS)
     columns = ", ".join(_PET_INSERT_COLUMNS)
-    values = tuple(pet.get(c) for c in _PET_INSERT_COLUMNS)
+    values = tuple(_pet_value(pet, c) for c in _PET_INSERT_COLUMNS)
     row = conn.execute(
         "SELECT id FROM pets WHERE canonical_name = ? AND "
         "COALESCE(source_row, -1) = COALESCE(?, -1)",
-        (pet.get("canonical_name"), pet.get("source_row")),
+        (_pet_value(pet, "canonical_name"), _pet_value(pet, "source_row")),
     ).fetchone()
     if row:
         update_cols = ", ".join(f"{c} = ?" for c in _PET_INSERT_COLUMNS)
