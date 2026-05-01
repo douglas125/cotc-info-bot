@@ -140,22 +140,42 @@ def _autocomplete_forms(conn: sqlite3.Connection, current: str) -> list[app_comm
 
     alias_rows: list[tuple[str, sqlite3.Row]] = []
     if current:
-        alias_canonicals: dict[str, str] = {}
+        # Split the typed input into (marker, bare). A bare typed prefix
+        # ('alau') matches alias_key as a substring → look up the bare
+        # canonical (existing behavior). A variant-shaped typed prefix
+        # ('alaune ex', 'ex alaune', 'elrica ex2') still matches the bare
+        # alias_key, but we look up the canonical wrapped in the typed
+        # marker, in both word orders, so the DB's stored spelling can
+        # disagree about prefix vs suffix order.
+        prefix_t, bare_t, suffix_t = config._split_variant(current)
+        marker_t = (prefix_t or suffix_t).upper()
+        bare_t_low = bare_t.lower()
+        alias_targets: dict[str, str] = {}  # canonical display_name → alias_key for label
         for alias_key, canonical in config.NAME_ALIASES.items():
-            if current in alias_key.lower():
-                alias_canonicals.setdefault(canonical, alias_key)
-        if alias_canonicals:
-            placeholders = ",".join("?" * len(alias_canonicals))
+            ak_low = alias_key.lower()
+            # Reject the alias unless the bare typed text is a substring of
+            # the bare alias key. Substring (not prefix) preserves the legacy
+            # behavior where typing 'rauser' surfaces 'Krauser'.
+            if not bare_t_low or bare_t_low not in ak_low:
+                continue
+            if not marker_t:
+                alias_targets.setdefault(canonical, alias_key)
+            else:
+                alias_targets.setdefault(f"{marker_t} {canonical}", alias_key)
+                alias_targets.setdefault(f"{canonical} {marker_t}", alias_key)
+        if alias_targets:
+            placeholders = ",".join("?" * len(alias_targets))
             extra = list(conn.execute(
                 f"SELECT f.id, f.display_name, f.rarity, c.base_role "
                 f"FROM character_forms f "
                 f"JOIN characters c ON c.id = f.character_id "
-                f"WHERE f.display_name IN ({placeholders}) "
+                f"WHERE LOWER(f.display_name) IN ({placeholders}) "
                 f"ORDER BY f.rarity DESC, f.display_name",
-                list(alias_canonicals.keys()),
+                [k.lower() for k in alias_targets.keys()],
             ))
+            lower_to_alias = {k.lower(): v for k, v in alias_targets.items()}
             for r in extra:
-                ak = alias_canonicals.get(r["display_name"])
+                ak = lower_to_alias.get(r["display_name"].lower())
                 if ak:
                     alias_rows.append((ak, r))
 
@@ -206,9 +226,13 @@ def _resolve_form_id(conn: sqlite3.Connection, name_or_id: str) -> int | None:
 
     canonical = config.alias_to_canonical(raw)
     if canonical and canonical.lower() != raw.lower():
-        fid = _exact_match_form_id(conn, canonical)
-        if fid is not None:
-            return fid
+        # Walk every alias-equivalent key (covers EX/EX2 word-order swap on
+        # the canonical side) and let _exact_match_form_id handle the swap
+        # on the typed side too.
+        for variant in config.canonical_name_keys(canonical):
+            fid = _exact_match_form_id(conn, variant)
+            if fid is not None:
+                return fid
     return None
 
 

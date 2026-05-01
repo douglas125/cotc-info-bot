@@ -351,6 +351,67 @@ def test_run_sync_creates_form_for_sea_only_block(
         conn.close()
 
 
+def _build_payload_with_aliased_ex(
+    index_name: str, role_tab_name: str,
+) -> dict:
+    """Index uses the canonical (e.g. 'EX Araune'), role tab uses an aliased
+    spelling possibly with the EX marker in the opposite word order
+    (e.g. 'Alaune EX'). The sync runner must merge both into one form."""
+    sheets = [
+        _index_sheet_with((index_name, "warrior")),
+        _sheet(WARRIORS_5_GID, "Warriors 5",
+               _block_rows(role_tab_name, "ALIASED_EX_KIT: 1x single-target Sword")),
+    ]
+    used = {s["properties"]["sheetId"] for s in sheets}
+    for tab in TABS:
+        if tab.gid not in used:
+            sheets.append(_sheet(tab.gid, tab.name, [[_idx_cell()]]))
+    return {"sheets": sheets}
+
+
+@pytest.mark.parametrize("index_name,role_tab_name", [
+    ("EX Araune",  "Alaune EX"),     # prefix Index ↔ suffix role-tab + alias
+    ("Araune EX",  "EX Alaune"),     # suffix Index ↔ prefix role-tab + alias
+    ("EX Araune",  "EX Alaune"),     # same word order, alias only
+    ("Erika EX2",  "EX2 Elrica"),    # EX2 + word-order swap + alias
+])
+def test_run_sync_aliases_ex_role_tab_to_index_entry(
+    tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch,
+    index_name: str, role_tab_name: str,
+) -> None:
+    """Regression: NAME_ALIASES must apply to EX/EX2 forms, regardless of
+    whether the marker comes before or after the bare name."""
+    payload = _build_payload_with_aliased_ex(index_name, role_tab_name)
+    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key, *_: payload)
+    monkeypatch.setattr("db.repo.DB_PATH", tmp_db_path)
+
+    summary = runner_mod.run_sync("dummy-key")
+    assert summary["status"] == "ok"
+
+    conn = sqlite3.connect(tmp_db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        # Exactly one form, named after the Index canonical (NOT the role-tab spelling).
+        forms = conn.execute(
+            "SELECT id, display_name FROM character_forms "
+            "WHERE LOWER(display_name) IN (?, ?)",
+            (index_name.lower(), role_tab_name.lower()),
+        ).fetchall()
+        assert len(forms) == 1, \
+            f"expected 1 merged form for {index_name!r} ↔ {role_tab_name!r}, " \
+            f"got {[dict(r) for r in forms]}"
+        assert forms[0]["display_name"] == index_name
+
+        # The role-tab kit must be attached to that form (not silently dropped).
+        descs = [r["description"] for r in conn.execute(
+            "SELECT description FROM skills WHERE form_id = ?", (forms[0]["id"],),
+        )]
+        assert any("ALIASED_EX_KIT" in (d or "") for d in descs), \
+            f"role-tab kit lost during merge: {descs!r}"
+    finally:
+        conn.close()
+
+
 def _build_payload_with_role_tab_only_ex() -> dict:
     """EX Temenos is present as a complete role-tab block but not in Index."""
     sheets = [

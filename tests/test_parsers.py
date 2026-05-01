@@ -3,7 +3,14 @@ from __future__ import annotations
 
 import pytest
 
-from config import color_family, rarity_from_color, canonicalize_name, NAME_ALIASES
+from config import (
+    NAME_ALIASES,
+    alias_to_canonical,
+    canonical_name_keys,
+    canonicalize_name,
+    color_family,
+    rarity_from_color,
+)
 from sync.parsers import (
     Anchor,
     FormBlock,
@@ -202,6 +209,52 @@ def test_alias_table_has_no_circular_or_chained_entries() -> None:
     values = set(NAME_ALIASES.values())
     assert not (keys & values), \
         f"alias chains detected (key→value→key): {keys & values}"
+
+
+def test_canonicalize_name_variant_aware() -> None:
+    """EX / EX2 names — in either word order — pick up the bare-name alias."""
+    assert canonicalize_name("Alaune EX") == "Araune EX"
+    assert canonicalize_name("EX Alaune") == "EX Araune"
+    assert canonicalize_name("Elrica EX2") == "Erika EX2"
+    assert canonicalize_name("EX2 Elrica") == "EX2 Erika"
+    # Case-insensitive on the bare portion.
+    assert canonicalize_name("alaune EX") == "Araune EX"
+    # Unknown bare name passes through unchanged regardless of variant.
+    assert canonicalize_name("Cyrus EX") == "Cyrus EX"
+    assert canonicalize_name("EX Cyrus") == "EX Cyrus"
+
+
+def test_canonical_name_keys_yields_both_word_orders() -> None:
+    """canonical_name_keys gives the indexer every shape the Index might use."""
+    keys = canonical_name_keys("Alaune EX")
+    assert "Alaune EX" in keys
+    assert "Araune EX" in keys
+    assert "EX Araune" in keys
+    keys2 = canonical_name_keys("EX2 Elrica")
+    assert "EX2 Elrica" in keys2
+    assert "EX2 Erika" in keys2
+    assert "Erika EX2" in keys2
+    # No duplicates (case-insensitive dedupe).
+    assert len(keys) == len({k.casefold() for k in keys})
+    # Bare names without a marker still yield the bare alias only.
+    assert set(canonical_name_keys("Alaune")) == {"Alaune", "Araune"}
+    # Unknown bare without a marker → just the input.
+    assert canonical_name_keys("Cyrus") == ["Cyrus"]
+    # Unknown bare WITH a variant marker still gets the opposite-order key
+    # registered, so the runner can match a role-tab 'Cyrus EX' against an
+    # Index 'EX Cyrus' even without an alias entry.
+    keys3 = canonical_name_keys("Cyrus EX")
+    assert "Cyrus EX" in keys3 and "EX Cyrus" in keys3
+
+
+def test_alias_to_canonical_handles_variant_forms() -> None:
+    assert alias_to_canonical("Alaune EX") == "Araune EX"
+    assert alias_to_canonical("EX Alaune") == "EX Araune"
+    assert alias_to_canonical("Elrica EX2") == "Erika EX2"
+    # Returns None when there's nothing to canonicalize.
+    assert alias_to_canonical("Cyrus") is None
+    assert alias_to_canonical("Cyrus EX") is None
+    assert alias_to_canonical("Araune EX") is None
 
 
 # --- role-tab block detection (synthetic payload) --------------------------
