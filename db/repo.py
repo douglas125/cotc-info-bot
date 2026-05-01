@@ -37,6 +37,7 @@ def bootstrap(conn: sqlite3.Connection) -> None:
     conn.executescript(sql)
     _migrate_skills_columns(conn)
     _migrate_sync_runs_enemy_counts(conn)
+    _migrate_sync_runs_pets_count(conn)
 
 
 def _ensure_columns(
@@ -76,6 +77,12 @@ def _migrate_sync_runs_enemy_counts(conn: sqlite3.Connection) -> None:
     _ensure_columns(conn, "sync_runs", (
         ("enemies_count",     "INTEGER"),
         ("enemy_forms_count", "INTEGER"),
+    ))
+
+
+def _migrate_sync_runs_pets_count(conn: sqlite3.Connection) -> None:
+    _ensure_columns(conn, "sync_runs", (
+        ("pets_count", "INTEGER"),
     ))
 
 
@@ -134,15 +141,17 @@ def finish_sync_run(
     skills_count: int | None = None,
     enemies_count: int | None = None,
     enemy_forms_count: int | None = None,
+    pets_count: int | None = None,
 ) -> None:
     conn.execute(
         "UPDATE sync_runs "
         "SET finished_at = ?, status = ?, error = ?, "
         "    forms_count = ?, skills_count = ?, "
-        "    enemies_count = ?, enemy_forms_count = ? "
+        "    enemies_count = ?, enemy_forms_count = ?, "
+        "    pets_count = ? "
         "WHERE id = ?",
         (_now_iso(), status, error, forms_count, skills_count,
-         enemies_count, enemy_forms_count, run_id),
+         enemies_count, enemy_forms_count, pets_count, run_id),
     )
 
 
@@ -196,6 +205,17 @@ def clear_enemy_tables(conn: sqlite3.Connection) -> None:
         "enemy_forms",
         "enemies",
     ):
+        conn.execute(f"DELETE FROM {tbl}")
+
+
+def clear_pet_tables(conn: sqlite3.Connection) -> None:
+    """Wipe all pet data in dependency order. Keep sync history.
+
+    Intentionally narrow — does NOT touch character/enemy tables, sync
+    history, feedback, or usage counters. Each /refresh re-parses the
+    pet snapshot and rewrites these two tables.
+    """
+    for tbl in ("pets_fts", "pets"):
         conn.execute(f"DELETE FROM {tbl}")
 
 
@@ -463,7 +483,8 @@ def counts(conn: sqlite3.Connection) -> dict[str, int]:
     out = {}
     for tbl in ("characters", "character_forms", "skills", "equipment",
                 "equipment_stats", "character_affinities",
-                "enemies", "enemy_forms", "enemy_member_stats", "enemy_weaknesses"):
+                "enemies", "enemy_forms", "enemy_member_stats", "enemy_weaknesses",
+                "pets"):
         out[tbl] = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
     return out
 
@@ -779,3 +800,110 @@ def usage_in_window(
         "ORDER BY usage_date DESC, command_name",
         (start, end),
     ))
+
+
+# --- pet writers/readers ----------------------------------------------------
+
+_PET_INSERT_COLUMNS = (
+    "canonical_name", "display_name_jp", "source_text", "ability_text",
+    "max_boost", "prep_base", "prep_lv10", "cooldown_base", "cooldown_lv5",
+    "hp", "sp", "patk", "pdef", "matk", "mdef", "crit", "speed",
+    "sheet_gid", "source_row", "name_color_hex", "hyperlink_url",
+)
+
+
+def upsert_pet(conn: sqlite3.Connection, pet: dict[str, Any]) -> int:
+    """Insert or update one pet keyed by (canonical_name, source_row).
+
+    `pet` is a plain dict (the parser's `ParsedPet` is asdict'd by the
+    runner) carrying every column listed in `_PET_INSERT_COLUMNS`. The
+    UNIQUE constraint lets two pets share an English name as long as
+    their source rows differ — the documented "White Rabbit" collision.
+    """
+    placeholders = ", ".join("?" for _ in _PET_INSERT_COLUMNS)
+    columns = ", ".join(_PET_INSERT_COLUMNS)
+    values = tuple(pet.get(c) for c in _PET_INSERT_COLUMNS)
+    row = conn.execute(
+        "SELECT id FROM pets WHERE canonical_name = ? AND "
+        "COALESCE(source_row, -1) = COALESCE(?, -1)",
+        (pet.get("canonical_name"), pet.get("source_row")),
+    ).fetchone()
+    if row:
+        update_cols = ", ".join(f"{c} = ?" for c in _PET_INSERT_COLUMNS)
+        conn.execute(
+            f"UPDATE pets SET {update_cols} WHERE id = ?",
+            values + (row[0],),
+        )
+        return row[0]
+    cur = conn.execute(
+        f"INSERT INTO pets({columns}) VALUES ({placeholders})",
+        values,
+    )
+    return cur.lastrowid
+
+
+def rebuild_pet_fts(conn: sqlite3.Connection) -> None:
+    """Repopulate the pet FTS index from the relational table."""
+    conn.execute("DELETE FROM pets_fts")
+    conn.execute(
+        "INSERT INTO pets_fts(pet_id, canonical_name, display_name_jp, "
+        "ability_text, source_text) "
+        "SELECT id, canonical_name, COALESCE(display_name_jp, ''), "
+        "COALESCE(ability_text, ''), COALESCE(source_text, '') FROM pets"
+    )
+
+
+def get_pet(conn: sqlite3.Connection, pet_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM pets WHERE id = ?", (pet_id,)).fetchone()
+
+
+def pet_choices_by_name(
+    conn: sqlite3.Connection, current: str, limit: int,
+) -> list[sqlite3.Row]:
+    """Autocomplete source. Returns pets whose canonical_name matches `current`,
+    prefix matches first, then substring matches. Multiple rows may share a
+    name (different `source_row`); both are returned and the bot disambiguates
+    via the source-text hint at label-time."""
+    needle = (current or "").strip().lower()
+    if not needle:
+        return list(conn.execute(
+            "SELECT id AS pet_id, canonical_name, source_text, source_row "
+            "FROM pets ORDER BY canonical_name, source_row LIMIT ?",
+            (limit,),
+        ))
+    sql = """
+        SELECT id AS pet_id, canonical_name, source_text, source_row
+        FROM pets
+        WHERE LOWER(canonical_name) LIKE ?
+        ORDER BY
+            CASE WHEN LOWER(canonical_name) LIKE ? THEN 0 ELSE 1 END,
+            canonical_name, source_row
+        LIMIT ?
+    """
+    return list(conn.execute(sql, (f"%{needle}%", f"{needle}%", limit)))
+
+
+def search_pets(
+    conn: sqlite3.Connection,
+    *,
+    text: str | None = None,
+    limit: int = 200,
+) -> list[sqlite3.Row]:
+    where: list[str] = []
+    params: list[Any] = []
+    join_fts = ""
+    if text and text.strip():
+        join_fts = "JOIN pets_fts fts ON fts.pet_id = p.id"
+        where.append("pets_fts MATCH ?")
+        params.append(_fts_query(text))
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    sql = f"""
+        SELECT p.id AS pet_id, p.canonical_name, p.source_text, p.source_row
+        FROM pets p
+        {join_fts}
+        {where_sql}
+        ORDER BY p.canonical_name, p.source_row
+        LIMIT ?
+    """
+    params.append(limit)
+    return list(conn.execute(sql, params))

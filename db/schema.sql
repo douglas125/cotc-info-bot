@@ -218,3 +218,53 @@ CREATE VIRTUAL TABLE IF NOT EXISTS enemies_fts USING fts5(
     member_names,
     tokenize = 'unicode61 remove_diacritics 2'
 );
+
+
+-- ===========================================================================
+-- Pets (Seed Story Content sheet — third spreadsheet, parallel pipeline)
+-- ===========================================================================
+--
+-- Modeling decisions:
+--  * One `pets` row per (canonical_name, source_row). The Pet List sheet has
+--    duplicate English names (e.g. 'White Rabbit' from Login + Quest); the
+--    source row is the natural disambiguator — same name on two different
+--    rows means two different pets in-game.
+--  * No `pet_forms` table — pets have no rank/variant axis.
+--  * Stats are 8 fixed columns on `pets` (HP, SP, Patk, Pdef, Matk, Mdef,
+--    Crit, Speed). Long-form would just be re-pivoted at every read site.
+--  * The ability cell packs effect text + optional `Max Boost: …` +
+--    `Turn Preparation: N (Lv10: N-1)` + `Turn Cooldown: M (Lv5: M-1)`.
+--    The parser splits these out into typed columns so the embed can format
+--    each line cleanly without re-parsing.
+CREATE TABLE IF NOT EXISTS pets (
+    id              INTEGER PRIMARY KEY,
+    canonical_name  TEXT NOT NULL,        -- English, e.g. 'Red Brown Cat'
+    display_name_jp TEXT,                 -- raw cell, e.g. '赤茶 (Red Brown Cat)'
+    source_text     TEXT,                 -- "how to obtain" cell
+    ability_text    TEXT,                 -- effect lines (1-3) before Max Boost
+    max_boost       TEXT,                 -- 'Lv2'/'Lv3'/'Lv4' or NULL
+    prep_base       INTEGER,              -- Turn Preparation base
+    prep_lv10       INTEGER,              -- Turn Preparation at Lv10 (NULL if absent)
+    cooldown_base   INTEGER,              -- Turn Cooldown base
+    cooldown_lv5    INTEGER,              -- Turn Cooldown at Lv5 (NULL if absent)
+    hp INTEGER, sp INTEGER,
+    patk INTEGER, pdef INTEGER,
+    matk INTEGER, mdef INTEGER,
+    crit INTEGER, speed INTEGER,
+    sheet_gid       INTEGER,
+    source_row      INTEGER,              -- 0-based row of the name cell
+    name_color_hex  TEXT,
+    hyperlink_url   TEXT,                 -- '#gid=...&range=A<row>' anchor
+    UNIQUE(canonical_name, source_row)
+);
+CREATE INDEX IF NOT EXISTS ix_pets_name ON pets(canonical_name);
+
+-- Free-text search across pet name (EN + JP) and ability/source text.
+CREATE VIRTUAL TABLE IF NOT EXISTS pets_fts USING fts5(
+    pet_id UNINDEXED,
+    canonical_name,
+    display_name_jp,
+    ability_text,
+    source_text,
+    tokenize = 'unicode61 remove_diacritics 2'
+);
