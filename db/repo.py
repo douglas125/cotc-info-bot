@@ -449,6 +449,53 @@ def get_affinities(conn: sqlite3.Connection, form_id: int) -> list[sqlite3.Row]:
     ))
 
 
+def skills_for_forms(
+    conn: sqlite3.Connection, form_ids: list[int],
+) -> list[sqlite3.Row]:
+    """Batch-fetch skills for several forms in one query.
+
+    Used by the team analyser, which pulls skills for up to 4 active
+    members at once. Order is (form_id, slot_order) so callers can group
+    by form_id without a second sort.
+    """
+    if not form_ids:
+        return []
+    placeholders = ",".join("?" * len(form_ids))
+    return list(conn.execute(
+        f"SELECT * FROM skills WHERE form_id IN ({placeholders}) "
+        f"ORDER BY form_id, slot_order",
+        form_ids,
+    ))
+
+
+def equipment_for_forms(
+    conn: sqlite3.Connection, form_ids: list[int],
+) -> list[sqlite3.Row]:
+    """Batch-fetch A4 equipment for several forms in one query."""
+    if not form_ids:
+        return []
+    placeholders = ",".join("?" * len(form_ids))
+    return list(conn.execute(
+        f"SELECT * FROM equipment WHERE form_id IN ({placeholders}) "
+        f"ORDER BY form_id, id",
+        form_ids,
+    ))
+
+
+def affinities_for_forms(
+    conn: sqlite3.Connection, form_ids: list[int],
+) -> list[sqlite3.Row]:
+    """Batch-fetch affinities (weapon/element/weakness/trait) for several forms."""
+    if not form_ids:
+        return []
+    placeholders = ",".join("?" * len(form_ids))
+    return list(conn.execute(
+        f"SELECT * FROM character_affinities WHERE form_id IN ({placeholders}) "
+        f"ORDER BY form_id, kind, icon_label",
+        form_ids,
+    ))
+
+
 def get_equipment(conn: sqlite3.Connection, form_id: int) -> list[sqlite3.Row]:
     return list(conn.execute(
         "SELECT * FROM equipment WHERE form_id = ? ORDER BY id", (form_id,)

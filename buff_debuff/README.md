@@ -16,6 +16,8 @@ annotations.
 > - `README.md` — this file: glossary, six groups, formula
 > - `examples.md` — worked calculations (Lynette, Richard, Kilns, Mydia, …)
 > - `edge_cases.md` — Boost Lv, special caps, multi-hit, defensive math, …
+> - `damage_cap_and_potency.md` — per-hit damage cap, cap-up sources (free orbs, A4, skills), tier thresholds, the 240-potency rule
+> - `team_composition.md` — frontrow/backrow rules, row-gated passives, break window, multi-cast, single-target potency-up bridges
 > - `buff_debuff_groups.jpeg` — source image
 
 ## Glossary
