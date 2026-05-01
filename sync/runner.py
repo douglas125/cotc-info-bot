@@ -13,6 +13,8 @@ from config import (
     ROLE_TABS,
     TABS_BY_GID,
     WEAPON_TO_ROLE,
+    _split_variant,
+    canonical_name_keys,
     canonicalize_name,
 )
 from db import repo
@@ -94,9 +96,10 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
         # Map (canonical_name → list of (tab_gid, FormBlock)) so we can merge
         # role-tab data into Index entries by name. Also keep blocks_by_tab
         # so we can fuzzy-fall-back within the right tab when names disagree.
-        # Index each block under BOTH its raw role-tab spelling and its
-        # canonicalized spelling (per config.NAME_ALIASES) so Index lookups
-        # find blocks that the community sheet spelled differently.
+        # Index each block under every key returned by canonical_name_keys —
+        # raw spelling, aliased spelling, and both EX/EX2 word orders — so
+        # Index lookups find blocks regardless of how the community sheet
+        # spelled or ordered the variant marker.
         blocks_by_name: dict[str, list[tuple[int, Any]]] = defaultdict(list)
         blocks_by_tab: dict[int, list[Any]] = defaultdict(list)
         for tab in ROLE_TABS:
@@ -106,24 +109,21 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                 continue
             blocks = parse_role_tab(sheet, gid=tab.gid)
             for b in blocks:
-                blocks_by_name[b.display_name].append((tab.gid, b))
-                canon = canonicalize_name(b.display_name)
-                if canon != b.display_name:
-                    blocks_by_name[canon].append((tab.gid, b))
+                for key in canonical_name_keys(b.display_name):
+                    blocks_by_name[key].append((tab.gid, b))
                 blocks_by_tab[tab.gid].append(b)
             progress(f"  {tab.name}: {len(blocks)} character blocks")
 
         progress("Parsing SEA/GL Unique Kits...")
         sea_sheet = sheet_by_gid(payload, SEA_GID)
         sea_blocks = parse_sea_kits(sea_sheet) if sea_sheet else []
-        # Index SEA blocks under both raw display name and canonicalized name
-        # so alias-mapped role-tab spellings (e.g. 'Krauser'→'Clauser') resolve.
+        # Index SEA blocks under every alias-equivalent spelling, with the
+        # raw display name first so SEA precedence falls on the original
+        # block when an alias lookup races a same-key collision.
         sea_blocks_by_name: dict[str, Any] = {}
         for b in sea_blocks:
-            sea_blocks_by_name[b.display_name] = b
-            canon = canonicalize_name(b.display_name)
-            if canon != b.display_name:
-                sea_blocks_by_name.setdefault(canon, b)
+            for key in canonical_name_keys(b.display_name):
+                sea_blocks_by_name.setdefault(key, b)
         progress(f"  Parsed {len(sea_blocks)} SEA/GL kit blocks.")
 
         progress("Writing into SQLite (transactional)...")
@@ -180,8 +180,10 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             # caught up with — without this pass they'd be silently dropped.
             for block in sea_blocks:
                 key = block.display_name.lower()
-                canon_key = canonicalize_name(block.display_name).lower()
-                if key in index_name_keys or canon_key in index_name_keys:
+                if any(
+                    k.lower() in index_name_keys
+                    for k in canonical_name_keys(block.display_name)
+                ):
                     continue
                 base_weapon = infer_weapon_from_block(block)
                 base_role = WEAPON_TO_ROLE.get(base_weapon) if base_weapon else None
@@ -224,8 +226,10 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                     if block_key in used_role_blocks:
                         continue
                     key = block.display_name.lower()
-                    canon_key = canonicalize_name(block.display_name).lower()
-                    if key in index_name_keys or canon_key in index_name_keys:
+                    if any(
+                        k.lower() in index_name_keys
+                        for k in canonical_name_keys(block.display_name)
+                    ):
                         continue
                     variant_kind = _variant_kind_for(block.display_name)
                     if variant_kind not in {"ex", "ex2"}:
@@ -367,6 +371,9 @@ def _select_block_for(entry, candidates, blocks_by_tab):
 
     # 3. fuzzy match within the matching role+band tab — accept distance ≤ 2
     # (catches typos like 'Fior'↔'Fiore' and 'Krauser'↔'Clauser', both d=1).
+    # Compare bare names (variant marker stripped) so an EX form's word-order
+    # swap doesn't blow past the threshold; we only consider blocks whose
+    # variant kind matches the Index entry's.
     target_gid = next(
         (t.gid for t in TABS_BY_GID.values()
          if t.kind == "role" and t.role == entry.role and t.rarity_band == want_band),
@@ -377,15 +384,21 @@ def _select_block_for(entry, candidates, blocks_by_tab):
     pool = blocks_by_tab.get(target_gid, [])
     if not pool:
         return None
+    entry_prefix, entry_bare, entry_suffix = _split_variant(entry.canonical_name)
+    entry_has_variant = bool(entry_prefix or entry_suffix)
     best: Any = None
     best_dist = 999
     for b in pool:
-        d = _levenshtein(entry.canonical_name, b.display_name)
+        b_prefix, b_bare, b_suffix = _split_variant(b.display_name)
+        b_has_variant = bool(b_prefix or b_suffix)
+        if entry_has_variant != b_has_variant:
+            continue
+        d = _levenshtein(entry_bare, b_bare)
         if d < best_dist:
             best_dist = d
             best = b
     if best is not None and best_dist <= 2 and best_dist < min(
-        len(entry.canonical_name), len(best.display_name)
+        len(entry_bare), len(_split_variant(best.display_name)[1])
     ) // 2 + 1:
         return best
     return None

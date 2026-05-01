@@ -184,6 +184,64 @@ def test_autocomplete_surfaces_alias(tmp_db_path: Path) -> None:
     assert "Krauser" in matches[0].name
 
 
+def _seed_aliased_ex_form(conn, display_name: str) -> int:
+    """Seed a single EX form using the Index canonical spelling."""
+    ch = repo.upsert_character(conn, canonical_name=display_name,
+                                base_role="warrior", base_weapon="sword")
+    return repo.insert_form(conn, character_id=ch, display_name=display_name,
+                             rarity="5*", variant_kind="ex")
+
+
+@pytest.mark.parametrize("stored_name,typed", [
+    # Stored as suffix; typed as either order with the aliased bare name.
+    ("Araune EX", "Alaune EX"),
+    ("Araune EX", "EX Alaune"),
+    # Stored as prefix; typed as either order with the aliased bare name.
+    ("EX Araune", "Alaune EX"),
+    ("EX Araune", "EX Alaune"),
+])
+def test_resolve_form_id_via_alias_for_ex_forms(
+    tmp_db_path: Path, stored_name: str, typed: str,
+) -> None:
+    """NAME_ALIASES must apply to EX forms regardless of word order on either side."""
+    conn = repo.connect(tmp_db_path)
+    fid = _seed_aliased_ex_form(conn, stored_name)
+    try:
+        assert bot_commands._resolve_form_id(conn, typed) == fid, \
+            f"typed {typed!r} should resolve to stored {stored_name!r}"
+    finally:
+        conn.close()
+
+
+def test_resolve_form_id_via_alias_for_ex2_form(tmp_db_path: Path) -> None:
+    """EX2 with aliased bare name in either word order on the typed side."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="Erika EX2",
+                                base_role="scholar", base_weapon="tome")
+    fid = repo.insert_form(conn, character_id=ch, display_name="Erika EX2",
+                            rarity="5*", variant_kind="ex2")
+    try:
+        assert bot_commands._resolve_form_id(conn, "Elrica EX2") == fid
+        assert bot_commands._resolve_form_id(conn, "EX2 Elrica") == fid
+    finally:
+        conn.close()
+
+
+def test_autocomplete_surfaces_alias_for_ex_form(tmp_db_path: Path) -> None:
+    """Typing an aliased EX prefix should surface the EX form's row in autocomplete."""
+    conn = repo.connect(tmp_db_path)
+    fid = _seed_aliased_ex_form(conn, "Araune EX")
+    try:
+        choices = bot_commands._autocomplete_forms(conn, current="Alaune EX")
+        matches = [c for c in choices if int(c.value) == fid]
+        assert matches, \
+            f"expected Araune EX via alias for prefix 'Alaune EX': {[c.name for c in choices]}"
+        assert "Araune EX" in matches[0].name
+        assert "Alaune" in matches[0].name  # appears in the (a.k.a. ...) hint
+    finally:
+        conn.close()
+
+
 def test_filter_choices_caps_and_filters() -> None:
     values = [f"role-{i:02d}" for i in range(40)]
     out = bot_commands._filter_choices(values, current="")

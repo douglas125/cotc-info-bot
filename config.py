@@ -248,34 +248,111 @@ def rarity_from_color(hex_color: str | None) -> str | None:
 #
 # Add new entries here when verify/check.py reports unmatched live blocks.
 NAME_ALIASES: dict[str, str] = {
-    # role-tab spelling : Index spelling
+    # role-tab spelling : Index spelling. Keys are bare base names; the
+    # variant-aware helpers below reattach EX/EX2 markers automatically,
+    # so do NOT add EX-prefixed keys here.
     "Fior":     "Fiore",
     "Krauser":  "Clauser",
     "Alaune":   "Araune",     # JP↔EN transliteration drift; Index uses Araune
     "Elrica":   "Erika",      # JP↔EN transliteration drift
     "Lumis":    "Lyummis",    # JP↔EN transliteration drift; Index uses Lyummis
-    "EX Lumis": "EX Lyummis", # SEA-only "EX Lumis" merges into Index "EX Lyummis"
     "Tithi":    "Titi",       # SEA spells the dancer 'Tithi'; Index has 'Titi'
     "Nona":     "Nonya",      # community sheet sometimes spells the merchant 'Nona'
     "Zenia":    "Zegna",      # SEA spells the apothecary 'Zenia'; Index has 'Zegna'
 }
 
 
-def canonicalize_name(name: str) -> str:
-    """Return the Index canonical name for any role-tab spelling we know about."""
-    return NAME_ALIASES.get(name, name)
+def _split_variant(name: str) -> tuple[str, str, str]:
+    """Return (prefix_marker, bare_name, suffix_marker) for an EX/EX2 name.
+
+    Recognises EX2 before EX so 'EX2 Foo' isn't mistaken for an EX form.
+    Markers preserve their original casing; only one of prefix/suffix is
+    non-empty when a marker is present.
+    """
+    if not name:
+        return ("", "", "")
+    n = name.strip()
+    low = n.lower()
+    for marker in ("ex2", "ex"):
+        if low.startswith(marker + " "):
+            return (n[: len(marker)], n[len(marker) + 1 :].strip(), "")
+        if low.endswith(" " + marker):
+            return ("", n[: -(len(marker) + 1)].strip(), n[-len(marker) :])
+    return ("", n, "")
 
 
 _ALIAS_LOOKUP_CI: dict[str, str] = {k.casefold(): v for k, v in NAME_ALIASES.items()}
 
 
+def _alias_for_bare(bare: str) -> str | None:
+    """Case-insensitive alias lookup on a bare base name."""
+    if not bare:
+        return None
+    return _ALIAS_LOOKUP_CI.get(bare.casefold())
+
+
+def canonicalize_name(name: str) -> str:
+    """Return the Index canonical name for any role-tab spelling we know about.
+
+    Variant-aware: 'Alaune EX' → 'Araune EX', 'EX Alaune' → 'EX Araune'.
+    Preserves the typed word order (prefix vs suffix).
+    """
+    if not name:
+        return name
+    prefix, bare, suffix = _split_variant(name)
+    aliased_bare = _alias_for_bare(bare)
+    if aliased_bare is None:
+        return name
+    if prefix:
+        return f"{prefix} {aliased_bare}"
+    if suffix:
+        return f"{aliased_bare} {suffix}"
+    return aliased_bare
+
+
+def canonical_name_keys(name: str) -> list[str]:
+    """All alias-equivalent canonical spellings for a block/query name.
+
+    Always yields the input first. If the bare portion has a NAME_ALIASES
+    entry, also yields the aliased bare name with the EX/EX2 marker
+    reattached in BOTH prefix and suffix positions, so the runner can
+    register a block under every shape the Index might use, and the bot
+    can look up either word order without caring which the DB stored.
+    """
+    if not name:
+        return []
+    out: list[str] = [name]
+    prefix, bare, suffix = _split_variant(name)
+    aliased_bare = _alias_for_bare(bare)
+    bares = [bare] if aliased_bare is None else [bare, aliased_bare]
+    if prefix or suffix:
+        marker = (prefix or suffix).upper()
+        for b in bares:
+            out.append(f"{marker} {b}")
+            out.append(f"{b} {marker}")
+    elif aliased_bare is not None:
+        out.append(aliased_bare)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for k in out:
+        kk = k.casefold()
+        if kk not in seen:
+            seen.add(kk)
+            deduped.append(k)
+    return deduped
+
+
 def alias_to_canonical(name: str) -> str | None:
     """Case-insensitive alias lookup. Returns the canonical Index name if
-    `name` is a known alias, else None. Used by the bot at query time so
-    users can find characters by alternate spellings (e.g. 'Krauser')."""
+    `name` (or its bare portion, with EX/EX2 stripped) is a known alias,
+    else None. Used by the bot at query time so users can find characters
+    by alternate spellings (e.g. 'Krauser', 'Alaune EX')."""
     if not name:
         return None
-    return _ALIAS_LOOKUP_CI.get(name.casefold())
+    canon = canonicalize_name(name)
+    if canon.casefold() == name.casefold():
+        return None
+    return canon
 
 
 # Discord links and other constants useful in the UI footer.
