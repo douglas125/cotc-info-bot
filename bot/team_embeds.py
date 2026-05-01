@@ -1,11 +1,27 @@
-"""Render a :class:`analysis.types.TeamReport` into a Discord embed."""
+"""Build the two `/analyze_team` views — matrix and analysis.
+
+The slash command surfaces a dropdown selector with two options:
+
+  - **Damage matrix** (default) — minimal text header + the rendered
+    PNG matrix from :mod:`analysis.matrix_image` shown inline via
+    ``embed.set_image(url="attachment://...")``.
+  - **Analysis breakdown** — the full text-heavy embed (Best use, gaps,
+    survivability, cap, support roles).
+
+Both build functions return :class:`RenderedTeamMessage` so the view
+in :mod:`bot.team_views` can swap between them without re-rendering
+the matrix on every toggle.
+"""
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
+from io import BytesIO
 
 import discord
 
-from analysis import damage_estimate, insights
+from analysis import damage_estimate, insights, matrix_image
+from analysis.matrix_image import RenderedMatrixImage
 from analysis.types import (
     BucketedTeam,
     DamageReport,
@@ -18,7 +34,45 @@ from damage.types import ELEMENTS, WEAPONS
 from db import repo
 
 
-def build(conn: sqlite3.Connection, report: TeamReport) -> discord.Embed:
+@dataclass
+class RenderedTeamMessage:
+    """A built embed plus the optional file attachment for the matrix view."""
+
+    embed: discord.Embed
+    file: discord.File | None = None
+
+
+def build_matrix_message(
+    conn: sqlite3.Connection,
+    report: TeamReport,
+    *,
+    rendered_image: RenderedMatrixImage,
+) -> RenderedTeamMessage:
+    """Default view — minimal text header + the matrix image attached inline.
+
+    The caller is responsible for wrapping ``rendered_image.data`` in a
+    fresh :class:`discord.File` (the stream is consumed on send/edit;
+    on toggle-back we re-create from cached bytes).
+    """
+    embed = discord.Embed(
+        title="Team Analysis",
+        color=discord.Color.blurple(),
+    )
+    embed.description = _truncate(
+        _header_description(conn, report) + "\n" + _matrix_headline(report.bucketed),
+        EMBED_DESCRIPTION_LIMIT,
+    )
+    embed.set_image(url=f"attachment://{rendered_image.filename}")
+    _attach_footer(embed, repo.latest_sync_run(conn))
+    file = discord.File(BytesIO(rendered_image.data), filename=rendered_image.filename)
+    return RenderedTeamMessage(embed=embed, file=file)
+
+
+def build_analysis_message(
+    conn: sqlite3.Connection,
+    report: TeamReport,
+) -> RenderedTeamMessage:
+    """Second view — the full text breakdown from PR #44."""
     embed = discord.Embed(
         title="Team Analysis",
         color=discord.Color.blurple(),
@@ -68,7 +122,33 @@ def build(conn: sqlite3.Connection, report: TeamReport) -> discord.Embed:
         )
 
     _attach_footer(embed, repo.latest_sync_run(conn))
-    return embed
+    return RenderedTeamMessage(embed=embed, file=None)
+
+
+# Backwards-compatible alias — older callers pass through to the analysis
+# breakdown so existing tests don't all need updating in this PR.
+def build(conn: sqlite3.Connection, report: TeamReport) -> discord.Embed:
+    """Deprecated; use :func:`build_analysis_message` or
+    :func:`build_matrix_message`. Returns just the analysis embed."""
+    return build_analysis_message(conn, report).embed
+
+
+def _matrix_headline(bucketed: BucketedTeam) -> str:
+    """One-line summary of the top types — sits below the header block.
+
+    Picks the top 3 weapon and top 1 element multiplier so a reader
+    sees this team's identity without scrolling to the image.
+    """
+    weapon_pairs = sorted(
+        ((w, damage_estimate.final_multiplier_for_type(bucketed, w)) for w in WEAPONS),
+        key=lambda kv: kv[1], reverse=True,
+    )[:3]
+    element_pairs = sorted(
+        ((e, damage_estimate.final_multiplier_for_type(bucketed, e)) for e in ELEMENTS),
+        key=lambda kv: kv[1], reverse=True,
+    )[:1]
+    bits = [f"{n.title()} ×{m:.2f}" for n, m in weapon_pairs + element_pairs]
+    return f"_Top damage types:_ {' · '.join(bits)} — full breakdown in image below."
 
 
 def _header_description(conn: sqlite3.Connection, report: TeamReport) -> str:
