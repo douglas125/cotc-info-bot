@@ -203,6 +203,64 @@ def test_render_crit_column_differs_from_baseline(tmp_db_path: Path) -> None:
     )
 
 
+def test_build_rows_appends_guaranteed_crit_row_for_matching_columns() -> None:
+    """The matrix builder appends one ``Guaranteed Crit`` marker row
+    when ``bucketed.crit_types`` overlaps the column set, with 1.0
+    in the crit column(s) and 0.0 elsewhere."""
+    from analysis.types import AssumptionProfile, BucketedTeam
+    from damage.types import ELEMENTS, WEAPONS
+
+    bucketed = BucketedTeam(
+        frontrow_form_ids=(1,), backrow_form_ids=(), pet_id=None,
+        divine_beast=False, cap_orbs=0,
+        raw_sub_bucket_sums={}, team_damage_cap_up=0.0,
+        team_skill_potency_up=0.0, team_soul_potency_up=0.0,
+        classified=(), unparsed=(),
+        profile=AssumptionProfile(),
+        crit_types=frozenset({"sword"}),
+    )
+
+    physical_rows = matrix_image._build_rows(
+        bucketed, columns=WEAPONS, stat_up="atk_up", stat_down="def_down",
+    )
+    crit_rows = [r for r in physical_rows if r.label == matrix_image.GUARANTEED_CRIT_LABEL]
+    assert len(crit_rows) == 1
+    assert crit_rows[0].values == tuple(
+        1.0 if w == "sword" else 0.0 for w in WEAPONS
+    )
+
+    elemental_rows = matrix_image._build_rows(
+        bucketed, columns=ELEMENTS, stat_up="mag_up", stat_down="mdef_down",
+    )
+    # No element matches a sword crit — the row must NOT be appended.
+    assert not any(
+        r.label == matrix_image.GUARANTEED_CRIT_LABEL for r in elemental_rows
+    )
+
+
+def test_build_rows_omits_crit_row_when_crit_types_empty() -> None:
+    """No ``Guaranteed Crit`` row when no team member has guaranteed crit."""
+    from analysis.types import AssumptionProfile, BucketedTeam
+    from damage.types import WEAPONS
+
+    bucketed = BucketedTeam(
+        frontrow_form_ids=(1,), backrow_form_ids=(), pet_id=None,
+        divine_beast=False, cap_orbs=0,
+        raw_sub_bucket_sums={}, team_damage_cap_up=0.0,
+        team_skill_potency_up=0.0, team_soul_potency_up=0.0,
+        classified=(), unparsed=(),
+        profile=AssumptionProfile(),
+        crit_types=frozenset(),
+    )
+
+    rows = matrix_image._build_rows(
+        bucketed, columns=WEAPONS, stat_up="atk_up", stat_down="def_down",
+    )
+    assert not any(
+        r.label == matrix_image.GUARANTEED_CRIT_LABEL for r in rows
+    )
+
+
 def test_render_empty_team_returns_minimal_image(tmp_db_path: Path) -> None:
     """A team with no buffs still renders a valid PNG (header + footer)."""
     conn = repo.connect(tmp_db_path)
