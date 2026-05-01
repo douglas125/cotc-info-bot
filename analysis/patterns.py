@@ -86,6 +86,27 @@ _UMBRELLAS = {
 _PCT = r"(?P<pct>\d{1,3})%"
 _LIST = r"(?P<targets>[A-Za-z./, +\-]+?)"
 
+_RE_STAT_EFFECTS = re.compile(
+    rf"{_PCT}\s+{_LIST}\s+(?P<direction>Up|Down)\b", re.IGNORECASE,
+)
+_RE_TYPED_DAMAGE_UP = re.compile(
+    rf"{_PCT}\s+{_LIST}\s+(?:Damage|Dmg)\s+Up\b", re.IGNORECASE,
+)
+_RE_TYPED_RES_DOWN = re.compile(
+    rf"{_PCT}\s+{_LIST}\s+(?:Res|Resistance)\s+Down\b", re.IGNORECASE,
+)
+_RE_DAMAGE_CAP_UP = re.compile(
+    r"(?P<num>[+]?\d[\d,]*(?:\.\d+)?\s*k?)\s+Damage\s+Cap(?:\s+Up)?",
+    re.IGNORECASE,
+)
+_RE_POTENCY_UP = re.compile(rf"{_PCT}\s+Potency\s+Up\b", re.IGNORECASE)
+_RE_REGEN_SCOPE = re.compile(
+    r"\b(frontrow|self|all allies|all other allies)\s+regen\b",
+)
+_RE_DURATION = re.compile(
+    r"for\s+(\d+)(?:\s*[-~]\s*(\d+))?\s+turn", re.IGNORECASE,
+)
+
 
 def _handle_description(match: re.Match[str], row: dict) -> Sequence[ClassifiedEffect]:
     text = match.group(0)
@@ -160,11 +181,7 @@ def _effect(
 
 def _parse_stat_effects(text: str) -> list[ClassifiedEffect]:
     out: list[ClassifiedEffect] = []
-    pattern = re.compile(
-        rf"{_PCT}\s+{_LIST}\s+(?P<direction>Up|Down)\b",
-        re.IGNORECASE,
-    )
-    for m in pattern.finditer(text):
+    for m in _RE_STAT_EFFECTS.finditer(text):
         targets = tuple(_stat_targets(m.group("targets")))
         if not targets:
             continue
@@ -183,11 +200,7 @@ def _parse_stat_effects(text: str) -> list[ClassifiedEffect]:
 
 def _parse_typed_damage_up(text: str) -> list[ClassifiedEffect]:
     out: list[ClassifiedEffect] = []
-    pattern = re.compile(
-        rf"{_PCT}\s+{_LIST}\s+(?:Damage|Dmg)\s+Up\b",
-        re.IGNORECASE,
-    )
-    for m in pattern.finditer(text):
+    for m in _RE_TYPED_DAMAGE_UP.finditer(text):
         targets = tuple(_typed_targets(m.group("targets")))
         if not targets:
             continue
@@ -204,11 +217,7 @@ def _parse_typed_damage_up(text: str) -> list[ClassifiedEffect]:
 
 def _parse_typed_res_down(text: str) -> list[ClassifiedEffect]:
     out: list[ClassifiedEffect] = []
-    pattern = re.compile(
-        rf"{_PCT}\s+{_LIST}\s+(?:Res|Resistance)\s+Down\b",
-        re.IGNORECASE,
-    )
-    for m in pattern.finditer(text):
+    for m in _RE_TYPED_RES_DOWN.finditer(text):
         targets = tuple(_typed_targets(m.group("targets")))
         if not targets:
             continue
@@ -225,11 +234,7 @@ def _parse_typed_res_down(text: str) -> list[ClassifiedEffect]:
 
 def _parse_damage_cap_up(text: str) -> list[ClassifiedEffect]:
     out: list[ClassifiedEffect] = []
-    pattern = re.compile(
-        r"(?P<num>[+]?\d[\d,]*(?:\.\d+)?\s*k?)\s+Damage\s+Cap(?:\s+Up)?",
-        re.IGNORECASE,
-    )
-    for m in pattern.finditer(text):
+    for m in _RE_DAMAGE_CAP_UP.finditer(text):
         out.append(_effect(
             category="damage_cap_up",
             direction="up",
@@ -242,8 +247,7 @@ def _parse_damage_cap_up(text: str) -> list[ClassifiedEffect]:
 
 def _parse_potency_up(text: str) -> list[ClassifiedEffect]:
     out: list[ClassifiedEffect] = []
-    pattern = re.compile(rf"{_PCT}\s+Potency\s+Up\b", re.IGNORECASE)
-    for m in pattern.finditer(text):
+    for m in _RE_POTENCY_UP.finditer(text):
         out.append(_effect(
             category="skill_potency_up",
             direction="up",
@@ -293,7 +297,7 @@ def _parse_survivability(text: str) -> list[ClassifiedEffect]:
     # BP/SP regen does not preserve combat continuity; HP regen does.
     if (
         "hp regen" in lower
-        or re.search(r"\b(frontrow|self|all allies|all other allies)\s+regen\b", lower)
+        or _RE_REGEN_SCOPE.search(lower)
     ) and "bp regen" not in lower and "sp regen" not in lower:
         out.append(_effect(
             category="regen",
@@ -329,7 +333,7 @@ def _raw_number(raw: str) -> float:
 
 
 def _duration(text: str) -> int | None:
-    m = re.search(r"for\s+(\d+)(?:\s*[-~]\s*(\d+))?\s+turn", text, re.IGNORECASE)
+    m = _RE_DURATION.search(text)
     if not m:
         return None
     return int(m.group(2) or m.group(1))

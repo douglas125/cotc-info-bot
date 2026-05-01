@@ -194,6 +194,15 @@ class BucketedTeam:
         """Both rows combined — what the bucket math actually iterates over."""
         return self.frontrow_form_ids + self.backrow_form_ids
 
+    @property
+    def effective_cap_orbs(self) -> int:
+        """``cap_orbs`` clamped to [0, 3] and to the actual team size.
+
+        One orb per character is the in-game limit, hence the cap at the
+        team count; the global slot cap is 3.
+        """
+        return max(0, min(self.cap_orbs, 3, len(self.all_form_ids)))
+
 
 # ---------------------------------------------------------------------------
 # Survivability and coverage outputs.
@@ -294,6 +303,37 @@ class DamageReport:
 
 
 # ---------------------------------------------------------------------------
+# NameResolution — how a typed input name mapped to a DB form.
+# ---------------------------------------------------------------------------
+
+# Resolution outcomes — the embed surfaces only ``alias`` and ``unresolved``
+# (exact matches don't need flagging).
+NAME_RESOLUTION_KINDS: tuple[str, ...] = (
+    "exact", "alias", "fuzzy", "unresolved",
+)
+
+
+@dataclass(frozen=True)
+class NameResolution:
+    """One typed input → form_id outcome.
+
+    Built once per slot at command-parse time, attached to ``TeamReport``
+    so the embed can flag aliased / unresolved inputs without re-running
+    the resolver in the rendering layer.
+    """
+
+    typed: str                       # exactly what the user submitted
+    form_id: int | None              # None when ``via='unresolved'``
+    resolved_display_name: str | None  # display_name in DB after resolution
+    via: str                         # one of NAME_RESOLUTION_KINDS
+
+    @property
+    def is_alias(self) -> bool:
+        """True when the typed name needed alias substitution (or fuzzy)."""
+        return self.via in {"alias", "fuzzy"}
+
+
+# ---------------------------------------------------------------------------
 # TeamReport — the final output the embed builder consumes.
 # ---------------------------------------------------------------------------
 
@@ -303,3 +343,4 @@ class TeamReport:
     survivability: SurvivabilityVerdict
     coverage: CoverageMatrix
     damage: DamageReport
+    name_resolutions: tuple[NameResolution, ...] = ()

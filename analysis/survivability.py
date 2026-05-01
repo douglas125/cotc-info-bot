@@ -20,7 +20,7 @@ Phase 1 ships with an empty pattern table so every team classifies as
 from __future__ import annotations
 
 import sqlite3
-from typing import Iterable
+from typing import Callable
 
 from db import repo
 
@@ -32,19 +32,23 @@ from .types import (
 )
 
 
+_TierPredicate = Callable[[ClassifiedEffect], bool]
+
+_TIERS: tuple[tuple[str, _TierPredicate], ...] = (
+    ("Undying",          lambda e: e.category == "undying"),
+    ("Full-party regen", lambda e: e.category == "regen"
+                                   and e.target_scope in {"all_allies", "other_allies"}),
+    ("Frontrow regen",   lambda e: e.category == "regen" and e.target_scope == "frontrow"),
+    ("Heal-only",        lambda e: e.category == "heal"),
+)
+
+
 def assess(
     bucketed: BucketedTeam, conn: sqlite3.Connection,
 ) -> SurvivabilityVerdict:
     """Pick the highest tier matched on the active 4 and cite it."""
-    effects = bucketed.classified
-
-    by_tier = (
-        ("Undying",          _filter_undying(effects)),
-        ("Full-party regen", _filter_full_party_regen(effects)),
-        ("Frontrow regen",   _filter_frontrow_regen(effects)),
-        ("Heal-only",        _filter_heal_only(effects)),
-    )
-    for tier, hits in by_tier:
+    for tier, predicate in _TIERS:
+        hits = [e for e in bucketed.classified if predicate(e)]
         if hits:
             return _verdict(tier, hits, conn)
 
@@ -52,37 +56,6 @@ def assess(
         tier="None", primary_source_display="—", citations=(),
     )
 
-
-# ---------------------------------------------------------------------------
-# Tier filters.
-# ---------------------------------------------------------------------------
-
-def _filter_undying(effects: Iterable[ClassifiedEffect]) -> list[ClassifiedEffect]:
-    return [e for e in effects if e.category == "undying"]
-
-
-def _filter_full_party_regen(effects: Iterable[ClassifiedEffect]) -> list[ClassifiedEffect]:
-    return [
-        e for e in effects
-        if e.category == "regen"
-        and e.target_scope in {"all_allies", "other_allies"}
-    ]
-
-
-def _filter_frontrow_regen(effects: Iterable[ClassifiedEffect]) -> list[ClassifiedEffect]:
-    return [
-        e for e in effects
-        if e.category == "regen" and e.target_scope == "frontrow"
-    ]
-
-
-def _filter_heal_only(effects: Iterable[ClassifiedEffect]) -> list[ClassifiedEffect]:
-    return [e for e in effects if e.category == "heal"]
-
-
-# ---------------------------------------------------------------------------
-# Citation rendering.
-# ---------------------------------------------------------------------------
 
 def _verdict(
     tier: str,
@@ -115,4 +88,4 @@ def _short(text: str, limit: int = 120) -> str:
     text = " ".join((text or "").split())
     if len(text) <= limit:
         return text
-    return text[: limit - 1].rstrip() + "…"
+    return text[: max(0, limit - 1)].rstrip() + "…"

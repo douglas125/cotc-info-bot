@@ -62,6 +62,26 @@ MIN_DAMAGE_RELEVANT_EFFECTIVE_HITS: int = 4
 # hit can reach cap once the team has Good cap-up.
 POTENCY_TO_REACH_CAP: float = 240.0
 
+_RE_REPEAT_UPTO = re.compile(r"repeat this attack once \(up to (\d+)x\)")
+_RE_HIT_COUNT = re.compile(
+    r"\b(\d+)\s*x\s+(?:single-target|random-target|aoe|st|rt)\b",
+    re.IGNORECASE,
+)
+_RE_POWER_RANGE = re.compile(
+    r"\((\d+)x\s*(\d+)(?:\s*[~\-]\s*(\d+))?\s*Power",
+    re.IGNORECASE,
+)
+_TYPE_TOKENS = "|".join(WEAPONS + ELEMENTS)
+_RE_ATTACK_TYPE = re.compile(
+    rf"\b(?:\d+\s*x|counterattack)\b[^,\n(]*?\b({_TYPE_TOKENS})\b",
+    re.IGNORECASE,
+)
+_RE_DISPLAY_LABEL = re.compile(
+    rf"\b(?P<hits>\d+\s*x)\s+(?P<shape>single-target|random-target|aoe|st|rt)?\s*"
+    rf"(?P<type>{_TYPE_TOKENS})\b",
+    re.IGNORECASE,
+)
+
 
 def build(
     bucketed: BucketedTeam,
@@ -158,7 +178,7 @@ def cap_up_breakdown_for_dps(
     bucketed: BucketedTeam, dps_form_id: int,
 ) -> tuple[float, float]:
     """Split team cap-up into (team_wide, self_only) for one DPS."""
-    team_wide = float(max(0, min(bucketed.cap_orbs, 3, len(bucketed.all_form_ids)))) * DAMAGE_CAP_PER_FREE_ORB
+    team_wide = float(bucketed.effective_cap_orbs) * DAMAGE_CAP_PER_FREE_ORB
     self_only = 0.0
     for e in bucketed.classified:
         if e.category != "damage_cap_up":
@@ -403,7 +423,7 @@ def _skill_repeat_factor(description: str) -> float:
     before his ultimate double-cast is applied.
     """
     text = " ".join((description or "").split()).lower()
-    m = re.search(r"repeat this attack once \(up to (\d+)x\)", text)
+    m = _RE_REPEAT_UPTO.search(text)
     if m:
         return float(int(m.group(1)) + 1)
     if "repeat this attack once" in text or "cast this a second time in a row" in text:
@@ -414,11 +434,7 @@ def _skill_repeat_factor(description: str) -> float:
 def _skill_hit_count(description: str, *, hits: int | None) -> int:
     """Best available hit count under optimistic conditional assumptions."""
     candidates = [int(hits or 0)]
-    for m in re.finditer(
-        r"\b(\d+)\s*x\s+(?:single-target|random-target|aoe|st|rt)\b",
-        description or "",
-        re.IGNORECASE,
-    ):
+    for m in _RE_HIT_COUNT.finditer(description or ""):
         candidates.append(int(m.group(1)))
     return max(candidates) if candidates else 0
 
@@ -432,11 +448,7 @@ def _skill_power_range(
     """Use parsed DB power columns, falling back to the description."""
     if power_max is not None:
         return power_min, power_max
-    m = re.search(
-        r"\((\d+)x\s*(\d+)(?:\s*[~\-]\s*(\d+))?\s*Power",
-        description or "",
-        re.IGNORECASE,
-    )
+    m = _RE_POWER_RANGE.search(description or "")
     if not m:
         return power_min, power_max
     parsed_min = int(m.group(2))
@@ -446,14 +458,7 @@ def _skill_power_range(
 
 def _skill_attack_type(description: str) -> tuple[str | None, str | None]:
     """Infer the primary attack type from a skill description."""
-    text = description or ""
-    m = re.search(
-        r"\b(?:\d+\s*x|counterattack)\b[^,\n(]*?\b("
-        + "|".join(WEAPONS + ELEMENTS)
-        + r")\b",
-        text,
-        re.IGNORECASE,
-    )
+    m = _RE_ATTACK_TYPE.search(description or "")
     if not m:
         return None, None
     token = m.group(1).lower()
@@ -467,12 +472,7 @@ def _skill_attack_type(description: str) -> tuple[str | None, str | None]:
 def _skill_display_label(description: str) -> str | None:
     """Build a compact label for sheet rows that have no skill name."""
     text = " ".join((description or "").split())
-    m = re.search(
-        r"\b(?P<hits>\d+\s*x)\s+(?P<shape>single-target|random-target|aoe|st|rt)?\s*"
-        r"(?P<type>" + "|".join(WEAPONS + ELEMENTS) + r")\b",
-        text,
-        re.IGNORECASE,
-    )
+    m = _RE_DISPLAY_LABEL.search(text)
     if not m:
         return None
     parts = [m.group("hits").lower()]
@@ -514,3 +514,46 @@ def effective_hits(listed_hits: int | None, multi_cast: float) -> int:
 def effective_hits_for_skill(skill: SkillDamageRow, multi_cast: float) -> int:
     """Listed hits times skill-native repeats and self multi-cast."""
     return int(float(skill.hits or 0) * max(1.0, skill.repeat_factor) * multi_cast)
+
+
+# Default per-hit damage cap before any Damage Cap Up — the in-game ceiling
+# every hit is clamped to before stacking. See
+# ``buff_debuff/damage_cap_and_potency.md``.
+BASE_PER_HIT_CAP: float = 999_999.0
+
+
+def total_damage_estimate(
+    *,
+    effective_hits: int,
+    realised_potency: float,
+    total_cap_up: float,
+    caps_each_hit: bool,
+    base_per_hit_cap: float = BASE_PER_HIT_CAP,
+) -> tuple[float, int]:
+    """Estimate total damage this DPS deals in one cast.
+
+    Returns ``(estimated_total_damage, hits_at_cap)``.
+
+    ``total_cap_up`` is **per-DPS**: ``team_wide + self_only``. Some
+    Damage Cap Up sources (skill conditionals, A4 accessories) only
+    apply to the originating character, so two attackers on the same
+    team can have different per-hit ceilings — Black Knight with his
+    EX self-cap-up has a 1.7M+ ceiling while a teammate without it
+    sits at the 1.36M team-wide ceiling. Callers compute the value
+    via :func:`cap_up_breakdown_for_dps` and sum.
+
+    The per-hit ceiling is ``base_per_hit_cap + total_cap_up``. When
+    the 240-potency rule says the team caps each hit, total damage is
+    exactly ``effective_hits * per_hit_cap``. When the team does NOT
+    cap, per-hit damage is approximated linearly via
+    ``realised_potency / 240`` — conservative under the rule-of-thumb
+    in ``buff_debuff/damage_cap_and_potency.md``. The audit/embed
+    output labels this an estimate so users don't read it as exact.
+    """
+    if effective_hits <= 0:
+        return 0.0, 0
+    per_hit_cap = base_per_hit_cap + max(0.0, total_cap_up)
+    if caps_each_hit:
+        return float(effective_hits) * per_hit_cap, int(effective_hits)
+    quotient = max(0.0, min(1.0, realised_potency / POTENCY_TO_REACH_CAP))
+    return float(effective_hits) * per_hit_cap * quotient, 0

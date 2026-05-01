@@ -22,7 +22,7 @@ import discord
 from discord import app_commands
 
 from analysis import aggregator, coverage, damage_estimate, survivability
-from analysis.types import AssumptionProfile, TeamReport
+from analysis.types import AssumptionProfile, NameResolution, TeamReport
 from bot import team_embeds
 
 
@@ -51,11 +51,16 @@ def build_team_report(
     cap_orbs: int = 0,
     boost_level: int = 3,
     highlighted_dps: int | None = None,
+    name_resolutions: Iterable[NameResolution] = (),
 ) -> TeamReport:
     """Pure-logic entry point — returns a fully-built :class:`TeamReport`.
 
     Tests and the audit CLI exercise this directly; the dormant slash
-    command body delegates to it.
+    command body delegates to it. ``name_resolutions`` carries the
+    typed-input → form_id trail so the embed can surface aliased and
+    unresolved names; the audit CLI populates it via
+    :func:`analysis.resolve.resolve_form_id` and the (future) slash
+    command will populate it from its autocomplete callbacks.
     """
     profile = AssumptionProfile(boost_level=boost_level)
     bucketed = aggregator.aggregate_team(
@@ -77,6 +82,7 @@ def build_team_report(
         survivability=verdict,
         coverage=matrix,
         damage=damage,
+        name_resolutions=tuple(name_resolutions),
     )
 
 

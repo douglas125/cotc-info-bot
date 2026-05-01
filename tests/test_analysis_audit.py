@@ -6,9 +6,14 @@ from analysis import audit
 from db import repo
 
 
-def test_audit_summary_is_ascii_and_reports_unresolved_backrow(
+def test_audit_resolves_aliases_and_surfaces_alias_trail(
     tmp_db_path: Path, capsys,
 ) -> None:
+    """Aliased typed names resolve to real forms AND appear in the output.
+
+    The CLI now uses Unicode glyphs (≈, ×, →) to match the Discord embed
+    line format. stdout is reconfigured to UTF-8 at module load.
+    """
     conn = repo.connect(tmp_db_path)
     try:
         cid = repo.upsert_character(conn, "Black Knight", base_role="warrior", base_weapon="sword")
@@ -46,4 +51,11 @@ def test_audit_summary_is_ascii_and_reports_unresolved_backrow(
     assert "Backrow:  Black Maiden, Cygna" in out
     assert "Unresolved names:" not in out
     assert "3 counted" in out
-    out.encode("ascii")
+    # Alias trail surfaces the typed -> resolved mapping.
+    assert "Aliased inputs:" in out
+    assert "Dark Knight -> Black Knight" in out
+    assert "Dark Priestess -> Black Maiden" in out
+    assert "Signa -> Cygna" in out
+    # New output sections present.
+    assert "Damage potential by type:" in out
+    assert "Parser coverage:" in out
