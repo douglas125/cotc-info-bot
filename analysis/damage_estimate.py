@@ -252,7 +252,7 @@ def _buff_multiplier_for(
     """
     sums = bucketed.raw_sub_bucket_sums
 
-    g1 = full_calc.additive_group(_g1_keys_for_attack_type(sums, weapon, element))
+    g1 = full_calc.additive_group(_stats_keys_for_attack_type(sums, "g1", weapon, element))
     g2 = full_calc.additive_group(
         _keys_for_attack_type(sums, "g2", weapon, element, "dmg_up")
     )
@@ -260,12 +260,14 @@ def _buff_multiplier_for(
         _keys_for_attack_type(sums, "g3", weapon, element, "res_down")
     )
     g4 = full_calc.multiplicative_group(
-        stats_sums=_keys_with_prefix(sums, "g4.ultimate.")
-        if any(k.startswith("g4.ultimate.") for k in sums) else None,
+        stats_sums=_stats_keys_for_attack_type(sums, "g4", weapon, element) or None,
+        dmg_up_sums=_keys_for_attack_type(sums, "g4", weapon, element, "dmg_up") or None,
+        res_down_sums=_keys_for_attack_type(sums, "g4", weapon, element, "res_down") or None,
     )
     g5 = full_calc.multiplicative_group(
-        stats_sums=_keys_with_prefix(sums, "g5.")
-        if any(k.startswith("g5.") for k in sums) else None,
+        stats_sums=_stats_keys_for_attack_type(sums, "g5", weapon, element) or None,
+        dmg_up_sums=_keys_for_attack_type(sums, "g5", weapon, element, "dmg_up") or None,
+        res_down_sums=_keys_for_attack_type(sums, "g5", weapon, element, "res_down") or None,
     )
     g6 = full_calc.divine_beast_multiplier(bucketed.divine_beast)
 
@@ -340,7 +342,7 @@ def final_multiplier_for_type(bucketed: BucketedTeam, attack_type: str) -> float
     element = attack_type if attack_type in ELEMENTS else None
 
     sums = bucketed.raw_sub_bucket_sums
-    g1 = full_calc.additive_group(_g1_keys_for_attack_type(sums, weapon, element))
+    g1 = full_calc.additive_group(_stats_keys_for_attack_type(sums, "g1", weapon, element))
     g2 = full_calc.additive_group(
         _keys_for_attack_type(sums, "g2", weapon, element, "dmg_up")
     )
@@ -348,12 +350,14 @@ def final_multiplier_for_type(bucketed: BucketedTeam, attack_type: str) -> float
         _keys_for_attack_type(sums, "g3", weapon, element, "res_down")
     )
     g4 = full_calc.multiplicative_group(
-        stats_sums=_keys_with_prefix(sums, "g4.ultimate.")
-        if any(k.startswith("g4.ultimate.") for k in sums) else None,
+        stats_sums=_stats_keys_for_attack_type(sums, "g4", weapon, element) or None,
+        dmg_up_sums=_keys_for_attack_type(sums, "g4", weapon, element, "dmg_up") or None,
+        res_down_sums=_keys_for_attack_type(sums, "g4", weapon, element, "res_down") or None,
     )
     g5 = full_calc.multiplicative_group(
-        stats_sums=_keys_with_prefix(sums, "g5.")
-        if any(k.startswith("g5.") for k in sums) else None,
+        stats_sums=_stats_keys_for_attack_type(sums, "g5", weapon, element) or None,
+        dmg_up_sums=_keys_for_attack_type(sums, "g5", weapon, element, "dmg_up") or None,
+        res_down_sums=_keys_for_attack_type(sums, "g5", weapon, element, "res_down") or None,
     )
     g6 = full_calc.divine_beast_multiplier(bucketed.divine_beast)
 
@@ -389,30 +393,29 @@ def final_multipliers_for_team(bucketed: BucketedTeam) -> dict[str, float]:
     }
 
 
-def _keys_with_prefix(
-    sums: dict[str, float] | object, prefix: str,
-) -> dict[str, float]:
-    return {k: v for k, v in sums.items() if k.startswith(prefix)}
-
-
-def _g1_keys_for_attack_type(
+def _stats_keys_for_attack_type(
     sums: dict[str, float] | object,
+    group: str,
     weapon: str | None,
     element: str | None,
 ) -> dict[str, float]:
-    """Relevant G1 offensive terms for a weapon or elemental attack.
+    """Relevant stats sub-bucket terms for a weapon or elemental attack.
 
     Weapon attacks benefit from Atk Up and enemy Def Down. Elemental
     attacks benefit from Mag Up and enemy MDef Down. Defensive buffs,
     enemy Atk/Mag Down, and crit chance are rendered in the matrix but do
     not multiply the baseline damage estimate here.
+
+    ``group`` selects the bucket prefix: ``"g1"`` for active/passive
+    stats, ``"g4"`` for ultimate-source stats (sub-pool A), ``"g5"`` for
+    pet-source stats.
     """
     wanted = {"atk_up", "def_down"} if weapon else {"mag_up", "mdef_down"} if element else set()
     if not wanted:
         return {}
     return {
         k: v for k, v in sums.items()
-        if k.startswith("g1.") and k.split(".")[-1] in wanted
+        if k.startswith(f"{group}.") and k.split(".")[-1] in wanted
     }
 
 

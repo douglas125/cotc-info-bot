@@ -45,11 +45,29 @@ def test_equipment_kind_routes_to_passive_source():
     assert sums == {"g1.passive.atk_up": 0.10}
 
 
-def test_ultimate_kind_routes_to_ultimate_source():
+def test_ultimate_dmg_up_routes_to_g4_sub_pool_b():
+    """Per buff_debuff/README.md: ultimate-source DMG Up lives in G4
+    sub-pool B (Ultimate DMG Up), not G2."""
     e = _eff(source_kind="ultimate", category="dmg_up",
              targets=("sword",), direction="up", magnitude=0.30)
     sums = aggregator._bin_into_sub_buckets([e])
-    assert sums == {"g2.ultimate.sword_dmg_up": 0.30}
+    assert sums == {"g4.ultimate.sword_dmg_up": 0.30}
+
+
+def test_ultimate_stat_up_routes_to_g4_sub_pool_a():
+    """Ultimate-source stat buffs go to G4 sub-pool A, not G1."""
+    e = _eff(source_kind="ultimate", category="stat_up",
+             targets=("atk",), direction="up", magnitude=0.30)
+    sums = aggregator._bin_into_sub_buckets([e])
+    assert sums == {"g4.ultimate.atk_up": 0.30}
+
+
+def test_ultimate_res_down_routes_to_g4_sub_pool_c():
+    """Ultimate-source res_down goes to G4 sub-pool C, not G3."""
+    e = _eff(source_kind="ultimate", category="res_down",
+             targets=("fire",), direction="down", magnitude=0.30)
+    sums = aggregator._bin_into_sub_buckets([e])
+    assert sums == {"g4.ultimate.fire_res_down": 0.30}
 
 
 def test_dmg_up_with_specific_weapon_target():

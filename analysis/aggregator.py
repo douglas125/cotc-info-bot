@@ -178,21 +178,27 @@ def _keys_for_effect(e: ClassifiedEffect) -> list[str]:
 
     Most effects contribute to one key. Umbrella targets fan out across
     every per-type sub-bucket per ``buff_debuff/README.md`` rule 4.
+
+    Routing per ``buff_debuff/README.md``: ultimate-sourced effects all
+    live in **G4** (three multiplying sub-pools — Stats × DMG Up × Res
+    Down). Active and passive sources live in G1 / G2 / G3 (additive).
     """
     src = _bucket_source(e.source_kind)
+    stats_group = "g4" if src == "ultimate" else "g1"
+    dmg_group = "g4" if src == "ultimate" else "g2"
+    res_group = "g4" if src == "ultimate" else "g3"
     if e.category == "stat_up" or e.category == "stat_down":
-        # G1 — Stats. ``targets`` carries the stat name (atk/mag/def/mdef).
         direction = "up" if e.category == "stat_up" else "down"
         return [
-            f"g1.{src}.{t}_{direction}"
+            f"{stats_group}.{src}.{t}_{direction}"
             for t in (e.targets or ("atk",))
         ]
     if e.category == "dmg_up":
-        return _expand_typed(e, group="g2", suffix="dmg_up", source=src)
+        return _expand_typed(e, group=dmg_group, suffix="dmg_up", source=src)
     if e.category == "res_down":
-        return _expand_typed(e, group="g3", suffix="res_down", source=src)
+        return _expand_typed(e, group=res_group, suffix="res_down", source=src)
     if e.category == "crit_up":
-        return [f"g1.{src}.crit_up"]
+        return [f"{stats_group}.{src}.crit_up"]
     # Final-multiplier categories don't go in G1..G6 buckets; the
     # aggregator pulls them out separately when building the BucketedTeam.
     if e.category in {
