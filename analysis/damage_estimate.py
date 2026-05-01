@@ -223,7 +223,7 @@ def _buff_multiplier_for(
     """Compose G1..G6 + final multipliers for a DPS with given weapon/element."""
     sums = bucketed.raw_sub_bucket_sums
 
-    g1 = full_calc.additive_group(_keys_with_prefix(sums, "g1."))
+    g1 = full_calc.additive_group(_g1_keys_for_attack_type(sums, weapon, element))
     g2 = full_calc.additive_group(
         _keys_for_attack_type(sums, "g2", weapon, element, "dmg_up")
     )
@@ -251,10 +251,49 @@ def _buff_multiplier_for(
     return g1 * g2 * g3 * g4 * g5 * g6 * crit * alignment * soul * skill
 
 
+def final_multiplier_for_type(bucketed: BucketedTeam, attack_type: str) -> float:
+    """Team-wide final multiplier for a hypothetical weapon/element type.
+
+    This powers the coverage matrix. It intentionally excludes self-only
+    potency and cap effects because there is no specific DPS attached to
+    a type cell.
+    """
+    attack_type = (attack_type or "").lower()
+    weapon = attack_type if attack_type in full_calc.WEAPONS else None
+    element = attack_type if attack_type in full_calc.ELEMENTS else None
+    return _buff_multiplier_for(
+        bucketed,
+        weapon=weapon,
+        element=element,
+        dps_form_id=-1,
+    )
+
+
 def _keys_with_prefix(
     sums: dict[str, float] | object, prefix: str,
 ) -> dict[str, float]:
     return {k: v for k, v in sums.items() if k.startswith(prefix)}
+
+
+def _g1_keys_for_attack_type(
+    sums: dict[str, float] | object,
+    weapon: str | None,
+    element: str | None,
+) -> dict[str, float]:
+    """Relevant G1 offensive terms for a weapon or elemental attack.
+
+    Weapon attacks benefit from Atk Up and enemy Def Down. Elemental
+    attacks benefit from Mag Up and enemy MDef Down. Defensive buffs,
+    enemy Atk/Mag Down, and crit chance are rendered in the matrix but do
+    not multiply the baseline damage estimate here.
+    """
+    wanted = {"atk_up", "def_down"} if weapon else {"mag_up", "mdef_down"} if element else set()
+    if not wanted:
+        return {}
+    return {
+        k: v for k, v in sums.items()
+        if k.startswith("g1.") and k.split(".")[-1] in wanted
+    }
 
 
 def _keys_for_attack_type(

@@ -1,8 +1,4 @@
-"""Phase 1 contract tests for the classifier.
-
-The pattern table is empty; every non-blank description must classify
-as a single ``unparsed`` effect, blanks must classify as zero.
-"""
+"""Contract tests for the broad team-analysis classifier."""
 from __future__ import annotations
 
 from analysis import classifier
@@ -23,22 +19,20 @@ def test_blank_description_yields_no_effects():
     assert classifier.classify_skill(_skill(sid=1, kind="active", description="   "), form_id=1) == []
 
 
-def test_non_blank_description_yields_single_unparsed_effect():
+def test_buff_description_yields_classified_effects():
     skill = _skill(
         sid=99, kind="active",
         description="Frontrow 20% Atk Up + 15% Sword DMG Up for 3 turns",
     )
     out = classifier.classify_skill(skill, form_id=42)
-    assert len(out) == 1
-    eff = out[0]
-    assert eff.confidence == "unparsed"
-    assert eff.category == "unparsed"
-    assert eff.source_form_id == 42
-    assert eff.source_skill_id == 99
-    assert eff.source_kind == "active"
-    assert eff.magnitude == 0.0
-    assert eff.targets == ()
-    assert eff.direction == "n/a"
+    assert {(e.category, e.targets, e.magnitude) for e in out} == {
+        ("stat_up", ("atk",), 0.20),
+        ("dmg_up", ("sword",), 0.15),
+    }
+    assert {e.target_scope for e in out} == {"frontrow"}
+    assert all(e.source_form_id == 42 for e in out)
+    assert all(e.source_skill_id == 99 for e in out)
+    assert all(e.source_kind == "active" for e in out)
 
 
 def test_passive_skill_keeps_passive_kind():
@@ -60,6 +54,17 @@ def test_classify_equipment_uses_equipment_source_kind():
     assert out[0].source_form_id == 11
     # skill_id is sentinel -1 for equipment-derived effects.
     assert out[0].source_skill_id == -1
+    assert out[0].category == "damage_cap_up"
+    assert out[0].magnitude == 100_000.0
+
+
+def test_attack_only_description_is_ignored_not_unparsed():
+    skill = _skill(
+        sid=100,
+        kind="active",
+        description="3x AoE Axe, also hits Lightning weakness (3x 80 Power)",
+    )
+    assert classifier.classify_skill(skill, form_id=42) == []
 
 
 def test_unparsed_effect_carries_raw_description():

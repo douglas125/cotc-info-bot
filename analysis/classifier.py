@@ -125,6 +125,9 @@ def _run_patterns(
     if out:
         return out
 
+    if patterns.is_intentionally_ignored(description):
+        return []
+
     # No pattern fired — surface the description as unparsed for the audit.
     return [
         ClassifiedEffect(

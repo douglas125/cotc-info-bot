@@ -131,10 +131,19 @@ def _dedupe_same_skill(
     """
     best: dict[tuple, ClassifiedEffect] = {}
     for e in effects:
-        key = (
-            e.source_form_id, e.source_skill_id,
-            e.category, e.targets, e.direction,
-        )
+        if e.source_kind == "ultimate":
+            # The sheet stores multiple ultimate levels as separate rows.
+            # For a team-analysis ceiling, take the strongest tier instead
+            # of summing Lv.1/Lv.9/Lv.10 copies of the same effect.
+            key = (
+                e.source_form_id, "ultimate-tier",
+                e.category, e.targets, e.direction, e.target_scope,
+            )
+        else:
+            key = (
+                e.source_form_id, e.source_skill_id,
+                e.category, e.targets, e.direction,
+            )
         existing = best.get(key)
         if existing is None or e.magnitude > existing.magnitude:
             best[key] = e

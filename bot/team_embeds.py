@@ -139,9 +139,7 @@ def _per_dps_block(bucketed, damage: DamageReport) -> str:
     if not damage.per_dps:
         return "_No team members to evaluate._"
     rows: list[str] = []
-    qualifying = [d for d in damage.per_dps if d.best_skills]
-    rendering = qualifying if qualifying else damage.per_dps
-    for dps in rendering:
+    for dps in damage.per_dps:
         marker = "→ " if dps.is_highlighted_dps else "• "
         type_tag = f"{dps.weapon or '?'}/{dps.element or '?'}"
         team_wide_cap, self_cap = damage_estimate.cap_up_breakdown_for_dps(
@@ -153,8 +151,8 @@ def _per_dps_block(bucketed, damage: DamageReport) -> str:
         cap_for_dps = team_wide_cap + self_cap
         potency_for_dps = team_potency + self_potency
         multi_cast = damage_estimate.self_multi_cast_factor(bucketed, dps.form_id)
-        cap_self_str = f" (+{self_cap:,.0f} self)" if self_cap else ""
-        mcast_str = f", ×{multi_cast:.0f} multi-cast" if multi_cast > 1.0 else ""
+        cap_self_str = f" (+{_compact_number(self_cap)} self)" if self_cap else ""
+        mcast_str = f", x{multi_cast:.0f}" if multi_cast > 1.0 else ""
         best = dps.best_skills[0] if dps.best_skills else None
         if best:
             eff_hits = damage_estimate.effective_hits(best.hits, multi_cast)
@@ -164,23 +162,27 @@ def _per_dps_block(bucketed, damage: DamageReport) -> str:
                 skill_potency_up=potency_for_dps,
                 team_damage_cap_up=cap_for_dps,
             )
-            cap_flag = "✓" if caps else "✗"
+            cap_flag = "yes" if caps else "no"
             best_line = (
-                f"  best `{best.name or best.skill_kind}` "
-                f"power={best.power_min}-{best.power_max} hits={best.hits or '?'}"
-                f"{f' (eff {eff_hits})' if multi_cast > 1.0 else ''} "
-                f"realised={potency:.0f} cap_each={cap_flag}"
+                f"best {best.name or best.skill_kind} "
+                f"{best.power_max or '?'}p/{best.hits or '?'}h"
+                f"{f' eff{eff_hits}' if multi_cast > 1.0 else ''} "
+                f"real={potency:.0f} cap={cap_flag}"
             )
         else:
-            best_line = "  _no damage-relevant skill (effective_hits ≥ 4 required)_"
+            best_line = "no damage-relevant skill"
         rows.append(
-            f"{marker}**{dps.display_name}** ({type_tag}) — "
-            f"×{dps.buff_multiplier:.2f}, cap +{cap_for_dps:,.0f}{cap_self_str}{mcast_str}\n"
+            f"{marker}**{dps.display_name}** ({type_tag}) - "
+            f"x{dps.buff_multiplier:.2f}, cap +{_compact_number(cap_for_dps)}{cap_self_str}{mcast_str}; "
             f"{best_line}"
         )
-    if not qualifying:
-        rows.append("_No DPS has a skill with effective_hits ≥ 4 — classifier may be missing multi-cast patterns._")
     return "\n".join(rows)
+
+
+def _compact_number(value: float) -> str:
+    if abs(value) >= 1000 and value % 1000 == 0:
+        return f"{int(value // 1000)}k"
+    return f"{value:,.0f}"
 
 
 def _coverage_fields(report: TeamReport) -> list[tuple[str, str]]:
@@ -211,8 +213,22 @@ def _coverage_fields(report: TeamReport) -> list[tuple[str, str]]:
         fields.append(("G5 Pet sub-pools", _free_keys_text(report.coverage.g5)))
     if report.coverage.g6_active:
         fields.append(("G6 Divine Beast", "Active (×1.10)"))
+    fields.append(("Final multipliers by type", _type_multiplier_text(report)))
 
     return fields
+
+
+def _type_multiplier_text(report: TeamReport) -> str:
+    weapons = ("sword", "dagger", "bow", "axe", "staff", "tome", "fan", "spear")
+    elements = ("fire", "ice", "lightning", "wind", "light", "dark")
+
+    def fmt(items: tuple[str, ...]) -> str:
+        return ", ".join(
+            f"{t.title()} ×{damage_estimate.final_multiplier_for_type(report.bucketed, t):.2f}"
+            for t in items
+        )
+
+    return f"**Weapons:** {fmt(weapons)}\n**Elements:** {fmt(elements)}"
 
 
 def _g1_text(raw: dict | object) -> str:
