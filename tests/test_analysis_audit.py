@@ -25,19 +25,25 @@ def test_audit_summary_is_ascii_and_reports_unresolved_backrow(
                 "description": "5x AoE Sword (5x 100 Power)",
             },
         ])
+        cid = repo.upsert_character(conn, "Black Maiden", base_role="dancer", base_weapon="fan")
+        fid = repo.insert_form(conn, character_id=cid, display_name="Black Maiden", rarity="5*")
+        repo.insert_affinities(conn, fid, [("weapon", "Fan", None)])
+        cid = repo.upsert_character(conn, "Cygna", base_role="dancer", base_weapon="fan")
+        fid = repo.insert_form(conn, character_id=cid, display_name="Cygna", rarity="5*")
+        repo.insert_affinities(conn, fid, [("weapon", "Fan", None)])
     finally:
         conn.close()
 
     rc = audit.main([
         "Dark Knight",
-        "--backrow", "Dark Priestess",
+        "--backrow", "Dark Priestess, Signa",
         "--cap-orbs", "3",
         "--db", str(tmp_db_path),
     ])
     out = capsys.readouterr().out
 
     assert rc == 0
-    assert "Unresolved names:" in out
-    assert "Dark Priestess" in out
-    assert "1 counted" in out
+    assert "Backrow:  Black Maiden, Cygna" in out
+    assert "Unresolved names:" not in out
+    assert "3 counted" in out
     out.encode("ascii")

@@ -15,12 +15,16 @@ def test_audit_resolver_uses_team_aliases(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     try:
         black_knight = _seed_form(conn, "Black Knight")
+        black_maiden = _seed_form(conn, "Black Maiden")
         pardis = _seed_form(conn, "Pardis")
         lucette = _seed_form(conn, "Lucette")
+        cygna = _seed_form(conn, "Cygna")
 
         assert resolve.resolve_form_id(conn, "Dark Knight") == black_knight
+        assert resolve.resolve_form_id(conn, "Dark Priestess") == black_maiden
         assert resolve.resolve_form_id(conn, "Pardis III") == pardis
         assert resolve.resolve_form_id(conn, "Lucetta") == lucette
+        assert resolve.resolve_form_id(conn, "Signa") == cygna
     finally:
         conn.close()
 

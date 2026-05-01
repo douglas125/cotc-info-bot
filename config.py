@@ -260,8 +260,10 @@ NAME_ALIASES: dict[str, str] = {
     "Nona":     "Nonya",      # community sheet sometimes spells the merchant 'Nona'
     "Zenia":    "Zegna",      # SEA spells the apothecary 'Zenia'; Index has 'Zegna'
     "Dark Knight": "Black Knight",
+    "Dark Priestess": "Black Maiden",
     "Pardis III":  "Pardis",
     "Lucetta":     "Lucette",
+    "Signa":       "Cygna",
 }
 
 
