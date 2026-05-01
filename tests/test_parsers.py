@@ -136,6 +136,13 @@ def test_parse_skill_description_handles_singular_power() -> None:
     assert out["power_max"] == 500
 
 
+def test_parse_skill_description_handles_hyphen_power_range() -> None:
+    out = _parse_skill_description("5x Random-Target Sword (5x 65-120 Power)")
+    assert out["hits"] == 5
+    assert out["power_min"] == 65
+    assert out["power_max"] == 120
+
+
 def test_parse_skill_description_no_match_is_safe() -> None:
     out = _parse_skill_description("Self 15% Atk Up for 3 turns")
     assert "power_min" not in out  # not extracted, not a crash

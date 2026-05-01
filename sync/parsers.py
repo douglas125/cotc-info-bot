@@ -299,7 +299,7 @@ def _infer_weapon_from_descriptions(descriptions: list[str]) -> str | None:
 
 
 _LV_RE = re.compile(r"Lv\s*(\d+)", re.IGNORECASE)
-_POWER_RE = re.compile(r"\((\d+)x\s*(\d+)~?(\d+)?\s*Power", re.IGNORECASE)
+_POWER_RE = re.compile(r"\((\d+)x\s*(\d+)(?:\s*[~\-]\s*(\d+))?\s*Power", re.IGNORECASE)
 _BOARD_RE = re.compile(r"^\s*(\d)\*\s*$")  # prestige-board indicator (1*..6*)
 
 # Role-tab column indices. The layout is fixed across all role tabs.
