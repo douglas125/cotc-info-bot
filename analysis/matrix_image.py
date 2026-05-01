@@ -80,6 +80,9 @@ class RenderedMatrixImage:
     data: bytes
 
 
+GUARANTEED_CRIT_LABEL = "Guaranteed Crit"
+
+
 @dataclass(frozen=True)
 class _MatrixRow:
     label: str
@@ -218,6 +221,12 @@ def _build_rows(
     replicated(f"G4 Ult {down_label}",      f"g4.ultimate.{stat_down}")
     per_type("G4 Ult DMG Up",               "g4", "ultimate", "dmg_up")
     per_type("G4 Ult Res Down",             "g4", "ultimate", "res_down")
+    crit_values = tuple(
+        1.0 if t in bucketed.crit_types else 0.0
+        for t in columns
+    )
+    if any(v > 0 for v in crit_values):
+        rows.append(_MatrixRow(label=GUARANTEED_CRIT_LABEL, values=crit_values))
     return rows
 
 
@@ -292,6 +301,25 @@ def _render_matrix(
             (x + 6, cy + (CELL_HEIGHT - 14) // 2),
             row.label, font=label_font, fill=LABEL_COLOR,
         )
+        if row.label == GUARANTEED_CRIT_LABEL:
+            star_radius = 7
+            for ci, val in enumerate(row.values):
+                cx = x + LABEL_WIDTH + ci * CELL_WIDTH
+                draw.line((cx, cy, cx, cy + CELL_HEIGHT), fill=GRID_COLOR)
+                if val > 0:
+                    _draw_star(
+                        draw,
+                        cx=cx + CELL_WIDTH // 2,
+                        cy=cy + CELL_HEIGHT // 2,
+                        radius=star_radius,
+                        fill=CRIT_COLOR,
+                    )
+            draw.line(
+                (x + block_w, cy, x + block_w, cy + CELL_HEIGHT),
+                fill=GRID_COLOR,
+            )
+            cy += CELL_HEIGHT
+            continue
         cap = _cap_for(bucketed, row.label)
         for ci, val in enumerate(row.values):
             cx = x + LABEL_WIDTH + ci * CELL_WIDTH
