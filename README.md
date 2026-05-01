@@ -29,13 +29,40 @@ the result with SQLite FTS5, and lets you ask Discord:
 |---|---|---|
 | `/character name:<auto>` | anyone | Full kit, A4 accessories, profile, affinities. Section dropdown swaps among kit / equipment / profile. EX/EX2 variants resolve via prefix↔suffix swap and an alias map. |
 | `/enemy name:<auto>` | anyone | Stats grid, per-position break shields, weakness labels for one encounter. Rank dropdown swaps among the available ranks (Rank 1–3 / EX1–3 for ranked enemies; single-rank for NPCs). |
+| `/pet name:<auto>` | anyone | Single-screen embed: ability text, Max Boost, Turn Preparation (base / Lv10), Turn Cooldown (base / Lv5), the eight fixed stats, and the obtain string. Ambiguous English names (e.g. two "White Rabbit" entries) are disambiguated in the autocomplete via a short source hint. |
 | `/search role weapon rarity weakness text` | anyone | Top-10 results. All five parameters are optional, all use live-DB autocomplete. `text` is FTS over skills, equipment, and names. |
-| `/refresh` | admin | Re-syncs character + enemy spreadsheets in one transaction. Refuses if a refresh is already in flight. |
+| `/refresh` | admin | Re-syncs character, enemy, and pet spreadsheets in one transaction. Refuses if a refresh is already in flight. |
 | `/feedback text:<≤2000>` | anyone | Logs a correction or inconsistency report. Rate-limited to 3 submissions / 60 s per user (persisted in SQLite, survives restarts). Reply is ephemeral. |
 | `/feedback_list [limit:1-25]` | admin | Ephemeral embed of the newest feedback rows plus a per-day `/character` and `/enemy` usage breakdown for the last 10 days. |
 | `/feedback_clear confirm:bool` | admin | Deletes all feedback rows. No-op unless `confirm:true`. |
 
 Admin gating is by Discord user ID — see `BOT_ADMIN_USER_IDS` below.
+
+### Dormant features
+
+`/analyze_team` is implemented in source but **not** registered with
+Discord — the UX needed more iteration before it was worth shipping to
+users, so the slash command is currently un-hooked. The implementation
+is preserved in case we revisit it:
+
+- `bot/team_commands.py` — slash-command registration entry point
+  (currently uncalled).
+- `bot/team_embeds.py`, `bot/team_views.py` — embed + interactive view
+  that swap between the matrix and the analysis report.
+- `analysis/` — pure-Python team-analysis package
+  (`aggregator`, `coverage`, `damage_estimate`, `survivability`,
+  `matrix_image`, `classifier`, `insights`, `patterns`, `resolve`,
+  `types`).
+
+Even with the slash command un-hooked, `python -m analysis.audit` still
+runs the same analysis offline against the local SQLite mirror. The
+team-related tests under `tests/` (`test_team_analyze_integration.py`,
+`test_team_views.py`, `test_matrix_image.py`) keep running as a
+regression net so the dormant code does not bit-rot.
+
+To re-enable: add `team_commands.register(tree)` (and re-import
+`team_commands`) to `bot/commands.py`, redeploy. Discord picks up the
+new command on the next CommandTree sync.
 
 ## Quickstart (local)
 
@@ -99,8 +126,11 @@ Logs go to stdout via Python `logging` (configured in `bot/__main__.py`).
 
 ```
 bot/             Discord client + slash commands + embeds + views
+                 (bot/team_*.py is dormant — see "Dormant features")
 sync/            Sheets fetch · parse · transactional persist
 db/              SQLite schema (incl. FTS5) + repo helpers
+analysis/        Team-analysis package — dormant on Discord, still
+                 runnable as `python -m analysis.audit`
 verify/          Live verifier — re-reads the latest raw_snapshots payload
 tests/           Hermetic unit + integration tests (no network)
 config.py        Sheet IDs, gid → tab map, color → rarity, env helper
@@ -130,7 +160,7 @@ Windows on every push and PR.
 
 ## Data sources
 
-The bot mirrors two community spreadsheets — see
+The bot mirrors three community spreadsheets — see
 [`INFO_SOURCES.md`](INFO_SOURCES.md) for sheet IDs and tab inventory.
 
 - **Character data** is community-maintained. Spelling drift, EX-variant
@@ -138,6 +168,9 @@ The bot mirrors two community spreadsheets — see
   reconciles names via an alias map plus a Levenshtein-2 fallback.
 - **Enemy data** comes from the *Adversary Log CotC* sheet maintained by
   `:/Silence` and contributors.
+- **Pet data** comes from the *Seed Story Content* sheet — ability text,
+  base/Lv10 turn-prep, base/Lv5 cooldown, the eight fixed stats, and an
+  obtain string per pet.
 - **Inserted character artwork** is *not* exposed by the Sheets API and is
   intentionally not mirrored — the bot links back to the source sheet
   instead.

@@ -17,7 +17,7 @@ from discord import app_commands
 
 import config
 from bot import db as bot_db
-from bot import embeds, enemy_embeds, pet_embeds, team_commands
+from bot import embeds, enemy_embeds, pet_embeds
 from bot.enemy_views import EnemyView
 from bot.views import CharacterView
 from db import repo
@@ -717,5 +717,3 @@ def register(tree: app_commands.CommandTree) -> None:
             f"Deleted {deleted} feedback entr{'y' if deleted == 1 else 'ies'}.",
             ephemeral=True,
         )
-
-    team_commands.register(tree)
