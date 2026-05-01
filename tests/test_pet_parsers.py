@@ -331,6 +331,49 @@ def test_parse_pets_missing_sheet_warns() -> None:
     assert any("12345" in w for w in warnings)
 
 
+def test_parse_pets_long_multiline_source_does_not_swap_with_ability() -> None:
+    """Regression: the ability cell must be identified by its structured
+    `Turn Preparation:` / `Turn Cooldown:` markers, not by being the
+    longest multi-line cell in the row. A pet with a long multi-line
+    source (e.g. 'Awakening Exchange\\n(6K Shards)\\n\\nRequire …') used to
+    swap with the ability cell and lose all prep/cooldown fields.
+    """
+    short_ability = (
+        "Heal\n"
+        "Max Boost: Lv2\n"
+        "Turn Preparation: 2 (Lv10: 1)\n"
+        "Turn Cooldown: 5 (Lv5: 4)"
+    )
+    long_source = (
+        "Awakening Exchange\n"
+        "(6K Shards)\n"
+        "\n"
+        "Require Some Specific Long Prerequisite Character Name"
+    )
+    assert len(long_source) > len(short_ability)
+
+    payload = _payload(_block(
+        name="ハーゲン (Hägen)",
+        ability=short_ability,
+        source=long_source,
+    ))
+    pets, warnings = parse_pets(payload, gid=999)
+    assert len(pets) == 1
+    p = pets[0]
+    assert p.canonical_name == "Hägen"
+    # Structured fields must be populated — proves the ability cell was
+    # picked correctly even when the source cell was longer.
+    assert (p.prep_base, p.prep_lv10) == (2, 1)
+    assert (p.cooldown_base, p.cooldown_lv5) == (5, 4)
+    assert p.max_boost == "Lv2"
+    assert p.ability_text == "Heal"
+    # Source must round-trip whole.
+    assert p.source_text is not None
+    assert "Awakening Exchange" in p.source_text
+    assert "Specific Long Prerequisite" in p.source_text
+    assert warnings == []
+
+
 def test_parse_pets_label_lookup_handles_shuffled_columns() -> None:
     """Stat values are read by *label*, so swapping column positions still works."""
     # Shuffle: name | HP | hpval | Patk | patk | SP | spval | Pdef | pdef | …

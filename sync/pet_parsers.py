@@ -139,8 +139,35 @@ def _stat_pair_from_row(
     return out
 
 
+# Marker regexes used to *identify* the ability cell. They look for the
+# structured trailers anchored at line-start so prose elsewhere can't
+# match. Only `Turn Preparation` / `Turn Cooldown` are used: every pet has
+# at least one of these, and they don't appear in source-text cells like
+# "Awakening Exchange" or "Quest".
+_ABILITY_MARKER_RE = re.compile(
+    r"^[ \t]*Turn[ \t]+(?:Preparation|Cooldown)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
 def _ability_field(row: list[dict[str, Any]]) -> str:
-    """Pick the ability cell out of a name-row: longest multi-line cell."""
+    """Pick the ability cell out of a name-row.
+
+    Identification is by *content marker*: the cell whose text contains
+    a `Turn Preparation:` or `Turn Cooldown:` line. A longest-multiline
+    heuristic was used previously, but that swapped fields when a pet's
+    source-text cell happened to be longer than the ability cell (e.g.
+    `'Awakening Exchange\\n(6K Shards)\\n\\nRequire <long prerequisite>'`).
+    Falling back to longest-multiline only if no cell carries the
+    structured markers — covers pets without prep/cooldown lines, which
+    aren't expected to exist in the live sheet today but shouldn't crash
+    the parser if one ever does.
+    """
+    for cell in row:
+        t = cell.get("formattedValue") or ""
+        if t and _ABILITY_MARKER_RE.search(t):
+            return t
+    # Fallback: longest multi-line cell.
     best = ""
     for cell in row:
         t = cell.get("formattedValue") or ""
@@ -148,12 +175,10 @@ def _ability_field(row: list[dict[str, Any]]) -> str:
             best = t
     if best:
         return best
-    # Some pets have a single-line effect with no embedded newlines (rare);
-    # fall back to the longest cell after the source/name positions.
+    # Final fallback: longest non-stat-label, non-numeric cell.
     longest = ""
     for cell in row:
         t = cell.get("formattedValue") or ""
-        # Skip pure stat labels / values / source-like short strings.
         if len(t) > len(longest) and t not in _STAT_LABELS and not t.isdigit():
             longest = t
     return longest
