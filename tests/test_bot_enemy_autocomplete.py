@@ -82,3 +82,21 @@ def test_resolve_returns_none_for_blank(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     assert _resolve_enemy_id(conn, "") is None
     assert _resolve_enemy_id(conn, "   ") is None
+
+
+def test_resolve_strips_diacritics(tmp_db_path: Path) -> None:
+    """Typing 'Kaine?' on an English keyboard resolves the canonical 'Kainé?'."""
+    conn = repo.connect(tmp_db_path)
+    eid = _seed(conn, "Kainé?", category="Lvl 50")
+    assert _resolve_enemy_id(conn, "Kaine?") == eid
+    assert _resolve_enemy_id(conn, "kaine?") == eid
+    assert _resolve_enemy_id(conn, "Kainé?") == eid
+
+
+def test_resolve_collapses_fullwidth(tmp_db_path: Path) -> None:
+    """Typing '9S?' (halfwidth) resolves the fullwidth canonical '９Ｓ？'."""
+    conn = repo.connect(tmp_db_path)
+    eid = _seed(conn, "９Ｓ？", category="Lvl 75")
+    assert _resolve_enemy_id(conn, "9S?") == eid
+    assert _resolve_enemy_id(conn, "9s?") == eid
+    assert _resolve_enemy_id(conn, "９Ｓ？") == eid

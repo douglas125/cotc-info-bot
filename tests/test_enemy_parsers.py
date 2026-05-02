@@ -17,7 +17,7 @@ from sync.enemy_parsers import (
     rank_order,
     _index_to_col_letters,
 )
-from config import EnemyTabSpec
+from config import ENEMY_NAME_ALIASES, EnemyTabSpec
 
 
 def _cell(text: str = "", bg: str | None = None) -> dict[str, Any]:
@@ -610,6 +610,31 @@ def test_reconcile_alias_lookup() -> None:
 
 def test_reconcile_returns_none_for_unknown() -> None:
     assert reconcile_display_to_data("Wave 1", ["Mirgardi", "Jafford"]) is None
+
+
+def test_reconcile_cursed_master_auguste_via_alias() -> None:
+    """Regression: 'Cursed Master Auguste' on Lvl 75 has no exact, whitespace,
+    or substring match against the data key 'Cursed Auguste' because the word
+    'Master' sits between the two tokens. Resolution must come from the
+    explicit alias entry — without it, the enemy is dropped from /enemy."""
+    assert reconcile_display_to_data(
+        "Cursed Master Auguste", ["Cursed Auguste"]
+    ) == "Cursed Auguste"
+
+
+def test_reconcile_fullwidth_unicode_via_nfkc() -> None:
+    """The Lvl 75 NieR collab boss is named with fullwidth Japanese letters
+    ('９Ｓ？'), but the data tab uses ASCII ('9 S ?'). NFKC normalization in
+    `_squish` collapses fullwidth → halfwidth so they match without an alias."""
+    assert reconcile_display_to_data("９Ｓ？", ["9 S ?"]) == "9 S ?"
+
+
+@pytest.mark.parametrize("display_name,data_key", list(ENEMY_NAME_ALIASES.items()))
+def test_every_enemy_alias_resolves(display_name: str, data_key: str) -> None:
+    """Each alias key must reconcile to its mapped data-tab name. If anyone
+    breaks an entry (typo, removal, refactor), exactly one parametrization
+    fails with the offending (display, data) pair in the test id."""
+    assert reconcile_display_to_data(display_name, [data_key]) == data_key
 
 
 # --- helpers ---------------------------------------------------------------

@@ -286,7 +286,8 @@ def _resolve_enemy_id(conn: sqlite3.Connection, name_or_id: str) -> int | None:
     """Resolve a /enemy `name` parameter to an enemy_id.
 
     Accepts either the stringified id from autocomplete or a raw name typed
-    by the user. Falls back to a case-insensitive exact match, then prefix.
+    by the user. Falls back to an NFKC + accent-folded exact match against
+    `search_key` (so 'Kaine?' resolves 'Kainé?'), then a prefix match.
     """
     s = (name_or_id or "").strip()
     if not s:
@@ -294,17 +295,16 @@ def _resolve_enemy_id(conn: sqlite3.Connection, name_or_id: str) -> int | None:
     if s.isdigit():
         if conn.execute("SELECT 1 FROM enemies WHERE id = ?", (int(s),)).fetchone():
             return int(s)
+    needle = repo._search_key(s)
     row = conn.execute(
-        "SELECT id FROM enemies WHERE LOWER(canonical_name) = LOWER(?) "
-        "ORDER BY id LIMIT 1",
-        (s,),
+        "SELECT id FROM enemies WHERE search_key = ? ORDER BY id LIMIT 1",
+        (needle,),
     ).fetchone()
     if row:
         return row[0]
     row = conn.execute(
-        "SELECT id FROM enemies WHERE LOWER(canonical_name) LIKE LOWER(?) "
-        "ORDER BY id LIMIT 1",
-        (f"{s}%",),
+        "SELECT id FROM enemies WHERE search_key LIKE ? ORDER BY id LIMIT 1",
+        (f"{needle}%",),
     ).fetchone()
     if row:
         return row[0]

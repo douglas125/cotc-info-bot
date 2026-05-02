@@ -25,6 +25,7 @@ here against the live sheet — see verify/out/*.txt for the raw grids.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -482,7 +483,10 @@ def parse_display_tab(sheet: dict[str, Any], spec: EnemyTabSpec) -> list[Display
 # --- name reconciliation ----------------------------------------------------
 
 def _normalize(s: str) -> str:
-    return re.sub(r"\s+", " ", s).strip().lower()
+    # NFKC collapses fullwidth Japanese letters/digits/punctuation to their
+    # halfwidth equivalents (e.g. '９Ｓ？' → '9S?'), so a display tab using
+    # fullwidth characters lines up with a data tab that uses ASCII.
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", s)).strip().lower()
 
 
 _ARTICLES_RE = re.compile(r"\b(the|of|a|an)\b", re.IGNORECASE)
@@ -498,7 +502,9 @@ def _squish(s: str) -> str:
       'Ignazio of Greed'       vs 'Ignazio Greed'        → 'ignaziogreed'
       'Ring-Sealed Beast'      vs 'RingBeast'            → drops to substring fallback
       "M'suhi the Viper"       vs 'Msushi'               → 'msuhiviper' (still no match — alias needed)
+      '９Ｓ？' (fullwidth)      vs '9 S ?'                → '9s?' (NFKC collapses fullwidth)
     """
+    s = unicodedata.normalize("NFKC", s)
     s = _ARTICLES_RE.sub(" ", s)
     s = _PUNCT_RE.sub("", s)
     return s.lower()

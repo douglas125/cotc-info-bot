@@ -4,12 +4,35 @@ from __future__ import annotations
 import gzip
 import json
 import sqlite3
+import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from config import DATA_DIR, DB_PATH, SCHEMA_PATH
+
+
+def _search_key(name: str | None) -> str:
+    """Fold a name to a typing-friendly form for autocomplete/resolver.
+
+    Mirrors the `unicode61 remove_diacritics 2` tokenizer used by FTS5:
+      * NFKD splits accented letters into base + combining marks
+      * combining marks are dropped, so 'Kainé?' → 'kaine?'
+      * NFKC then re-composes (and folds fullwidth → halfwidth, e.g.
+        '９Ｓ？' → '9s?')
+      * casefold for case-insensitive matching
+
+    The result is what the bot's `/enemy` autocomplete and exact-name
+    resolver query against, and is also what the user's typed input is
+    folded through, so a user typing 'kaine?' or '9s?' resolves the
+    canonical 'Kainé?' / '９Ｓ？' rows.
+    """
+    if not name:
+        return ""
+    decomposed = unicodedata.normalize("NFKD", name)
+    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return unicodedata.normalize("NFKC", stripped).casefold()
 
 
 def _now_iso() -> str:
@@ -33,6 +56,9 @@ def bootstrap(conn: sqlite3.Connection) -> None:
     before CREATE TABLE IF NOT EXISTS is a no-op against them.
     """
     _migrate_raw_snapshots_kind(conn)
+    # Add new columns before executescript so the schema's CREATE INDEX
+    # statements that reference them don't fail on legacy DBs.
+    _migrate_enemies_search_key(conn)
     sql = SCHEMA_PATH.read_text(encoding="utf-8")
     conn.executescript(sql)
     _migrate_skills_columns(conn)
@@ -84,6 +110,25 @@ def _migrate_sync_runs_pets_count(conn: sqlite3.Connection) -> None:
     _ensure_columns(conn, "sync_runs", (
         ("pets_count", "INTEGER"),
     ))
+
+
+def _migrate_enemies_search_key(conn: sqlite3.Connection) -> None:
+    """Add `enemies.search_key` and backfill from existing canonical_name.
+
+    Pre-migration DBs lack the column, so the autocomplete query would
+    crash. Backfilling lets existing data answer accent/fullwidth folded
+    queries before the next /refresh re-populates everything.
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(enemies)")}
+    if not cols or "search_key" in cols:
+        return
+    conn.execute("ALTER TABLE enemies ADD COLUMN search_key TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_enemies_search_key ON enemies(search_key)")
+    for row in conn.execute("SELECT id, canonical_name FROM enemies").fetchall():
+        conn.execute(
+            "UPDATE enemies SET search_key = ? WHERE id = ?",
+            (_search_key(row[1]), row[0]),
+        )
 
 
 def _migrate_raw_snapshots_kind(conn: sqlite3.Connection) -> None:
@@ -550,6 +595,7 @@ def upsert_enemy(
     hyperlink_url: str | None,
     is_npc: bool,
 ) -> int:
+    skey = _search_key(canonical_name)
     row = conn.execute(
         "SELECT id FROM enemies WHERE canonical_name = ? AND category = ? "
         "AND COALESCE(sheet_gid, -1) = COALESCE(?, -1)",
@@ -558,16 +604,18 @@ def upsert_enemy(
     if row:
         conn.execute(
             "UPDATE enemies SET region = ?, source_row = ?, "
-            "name_color_hex = ?, hyperlink_url = ?, is_npc = ? WHERE id = ?",
-            (region, source_row, name_color_hex, hyperlink_url, int(is_npc), row[0]),
+            "name_color_hex = ?, hyperlink_url = ?, is_npc = ?, search_key = ? "
+            "WHERE id = ?",
+            (region, source_row, name_color_hex, hyperlink_url, int(is_npc),
+             skey, row[0]),
         )
         return row[0]
     cur = conn.execute(
         "INSERT INTO enemies(canonical_name, category, region, sheet_gid, "
-        "source_row, name_color_hex, hyperlink_url, is_npc) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "source_row, name_color_hex, hyperlink_url, is_npc, search_key) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (canonical_name, category, region, sheet_gid, source_row,
-         name_color_hex, hyperlink_url, int(is_npc)),
+         name_color_hex, hyperlink_url, int(is_npc), skey),
     )
     return cur.lastrowid
 
@@ -693,9 +741,11 @@ def get_enemy_weaknesses(
 def enemy_choices_by_name(
     conn: sqlite3.Connection, current: str, limit: int,
 ) -> list[sqlite3.Row]:
-    """Autocomplete source. Returns enemies whose canonical_name matches `current`,
-    prefix matches first, then substring matches. One row per enemy."""
-    needle = (current or "").strip().lower()
+    """Autocomplete source. Returns enemies whose name matches `current`,
+    prefix matches first, then substring matches. Both the user's input
+    and the stored canonical_name are NFKC + accent-folded so users can
+    type 'Kaine?' to match 'Kainé?' and '9S?' to match '９Ｓ？'."""
+    needle = _search_key((current or "").strip())
     if not needle:
         return list(conn.execute(
             "SELECT id AS enemy_id, canonical_name, category, region, is_npc "
@@ -705,9 +755,9 @@ def enemy_choices_by_name(
     sql = """
         SELECT id AS enemy_id, canonical_name, category, region, is_npc
         FROM enemies
-        WHERE LOWER(canonical_name) LIKE ?
+        WHERE search_key LIKE ?
         ORDER BY
-            CASE WHEN LOWER(canonical_name) LIKE ? THEN 0 ELSE 1 END,
+            CASE WHEN search_key LIKE ? THEN 0 ELSE 1 END,
             canonical_name
         LIMIT ?
     """
