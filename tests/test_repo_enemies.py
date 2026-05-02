@@ -115,6 +115,61 @@ def test_enemy_choices_by_name_prefix_first(tmp_db_path: Path) -> None:
     conn.close()
 
 
+def test_search_key_strips_diacritics_and_collapses_fullwidth() -> None:
+    """`_search_key` must produce equal output for ASCII vs accented and
+    halfwidth vs fullwidth, so the bot's typing-folded queries match."""
+    assert repo._search_key("Kainé?") == repo._search_key("Kaine?")
+    assert repo._search_key("９Ｓ？") == repo._search_key("9S?")
+    assert repo._search_key("Cursed Master Auguste") == "cursed master auguste"
+    assert repo._search_key("") == ""
+    assert repo._search_key(None) == ""
+
+
+def test_enemy_choices_match_ascii_for_accented_canonical(tmp_db_path: Path) -> None:
+    """Typing 'kaine?' on an English keyboard should resolve 'Kainé?'."""
+    conn = repo.connect(tmp_db_path)
+    repo.upsert_enemy(
+        conn, canonical_name="Kainé?", category="Lvl 50",
+        region="Osterra", sheet_gid=1105319828, source_row=5,
+        name_color_hex=None, hyperlink_url=None, is_npc=False,
+    )
+    for needle in ("Kaine?", "kaine", "Kainé?"):
+        rows = repo.enemy_choices_by_name(conn, needle, limit=10)
+        assert [r["canonical_name"] for r in rows] == ["Kainé?"], (
+            f"input {needle!r} did not resolve"
+        )
+    conn.close()
+
+
+def test_enemy_choices_match_halfwidth_for_fullwidth_canonical(tmp_db_path: Path) -> None:
+    """Typing '9S?' (halfwidth ASCII) should resolve the fullwidth '９Ｓ？'."""
+    conn = repo.connect(tmp_db_path)
+    repo.upsert_enemy(
+        conn, canonical_name="９Ｓ？", category="Lvl 75",
+        region="Osterra", sheet_gid=441922710, source_row=5,
+        name_color_hex=None, hyperlink_url=None, is_npc=False,
+    )
+    for needle in ("9S?", "9s?", "９Ｓ？"):
+        rows = repo.enemy_choices_by_name(conn, needle, limit=10)
+        assert [r["canonical_name"] for r in rows] == ["９Ｓ？"], (
+            f"input {needle!r} did not resolve"
+        )
+    conn.close()
+
+
+def test_enemy_choices_empty_input_returns_all(tmp_db_path: Path) -> None:
+    """Regression: empty string in autocomplete still lists all enemies."""
+    conn = repo.connect(tmp_db_path)
+    repo.upsert_enemy(
+        conn, canonical_name="Dokabro", category="Solistia Lvl 1",
+        region="Solistia", sheet_gid=1, source_row=3,
+        name_color_hex=None, hyperlink_url=None, is_npc=False,
+    )
+    rows = repo.enemy_choices_by_name(conn, "", limit=10)
+    assert len(rows) == 1
+    conn.close()
+
+
 def test_insert_and_get_enemy_weaknesses(tmp_db_path: Path) -> None:
     conn = repo.connect(tmp_db_path)
     enemy_id = _seed_lloris(conn)

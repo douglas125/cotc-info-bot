@@ -8,6 +8,7 @@ import pytest
 from sync.enemy_parsers import (
     _DISPLAY_BLOCK_HEIGHT,
     _detect_display_blocks,
+    _extract_inline_block_stats,
     _find_block_anchors,
     parse_all,
     parse_data_tab,
@@ -17,7 +18,7 @@ from sync.enemy_parsers import (
     rank_order,
     _index_to_col_letters,
 )
-from config import EnemyTabSpec
+from config import ENEMY_NAME_ALIASES, EnemyTabSpec
 
 
 def _cell(text: str = "", bg: str | None = None) -> dict[str, Any]:
@@ -610,6 +611,185 @@ def test_reconcile_alias_lookup() -> None:
 
 def test_reconcile_returns_none_for_unknown() -> None:
     assert reconcile_display_to_data("Wave 1", ["Mirgardi", "Jafford"]) is None
+
+
+# --- inline display-tab stats fallback -------------------------------------
+
+def _display_block_rows(
+    *,
+    name_col: int,
+    rank_label: str,
+    rank_col_offset: int,
+    member_stats_by_position: list[list[str]],
+    first_stat_col_offset: int,
+) -> list[list[dict[str, Any]]]:
+    """Synthesize a Lvl-N display block at name_row=3 (the canonical position).
+
+    `member_stats_by_position[i]` is the 9 visible stat values for member i,
+    in the order [HP, P.Atk, P.Def, E.Atk, E.Def, Speed, Crit, CritDef, Equip Atk].
+    Stats start at `name_col + first_stat_col_offset` and step rightward by
+    one column per position. The rank label is placed at `name_col + rank_col_offset`.
+    """
+    width = name_col + 16
+    rows: list[list[dict[str, Any]]] = [[_cell()] * width for _ in range(20)]
+    rows[3][name_col] = _cell("Test Boss")
+    rows[3][name_col + rank_col_offset] = _cell(rank_label)
+    for pos, stats in enumerate(member_stats_by_position):
+        col = name_col + first_stat_col_offset + pos
+        for s_offset, val in enumerate(stats):
+            rows[3 + 4 + s_offset][col] = _cell(val)
+    return rows
+
+
+def test_inline_stats_extracts_single_position_block() -> None:
+    """Mirror the Lvl 75 'Fallen Mendoza' shape: 1 position, EX3 stats inline."""
+    rows = _display_block_rows(
+        name_col=160, rank_label="EX3", rank_col_offset=2,
+        first_stat_col_offset=1,
+        member_stats_by_position=[
+            ["7,284,963", "2,912", "1,191", "2,991", "1,062",
+             "523", "607", "566", "280"],
+        ],
+    )
+    rank, stat_rows = _extract_inline_block_stats(rows, 3, 160, 162)
+    assert rank == "EX3"
+    by_pos: dict[int, dict[str, str]] = {}
+    for r in stat_rows:
+        by_pos.setdefault(r["position"], {})[r["stat_name"]] = r["stat_value"]
+    assert by_pos[0]["HP"] == "7,284,963"
+    assert by_pos[0]["Equip Atk"] == "280"
+    assert set(by_pos.keys()) == {0}
+
+
+def test_inline_stats_extracts_multi_position_block() -> None:
+    """Mirror the 'Divine Beast Lutiya' shape: 2 members at adjacent columns."""
+    rows = _display_block_rows(
+        name_col=171, rank_label="EX3", rank_col_offset=3,
+        first_stat_col_offset=0,
+        member_stats_by_position=[
+            ["4,442,235", "2,286", "846", "2,541", "1,003",
+             "416", "800", "665", "280"],
+            ["2,622,651", "2,214", "478", "2,271", "504",
+             "594", "525", "436", "280"],
+        ],
+    )
+    rank, stat_rows = _extract_inline_block_stats(rows, 3, 171, 174)
+    assert rank == "EX3"
+    by_pos: dict[int, dict[str, str]] = {}
+    for r in stat_rows:
+        by_pos.setdefault(r["position"], {})[r["stat_name"]] = r["stat_value"]
+    assert set(by_pos.keys()) == {0, 1}
+    assert by_pos[0]["HP"] == "4,442,235"
+    assert by_pos[1]["HP"] == "2,622,651"
+
+
+def test_inline_stats_rejects_ref_error_block() -> None:
+    """Mirror 'Fallen Lady-in-Waiting': stat formulas resolve to '#REF!' so
+    the cell text is the error string, not a number. Fallback must produce
+    no positions — otherwise the bot would surface the enemy with garbage."""
+    width = 110
+    rows: list[list[dict[str, Any]]] = [[_cell()] * width for _ in range(20)]
+    rows[3][92] = _cell("Fallen Lady-in-Waiting")
+    rows[3][94] = _cell("EX3")
+    # All stat cells are #REF! (no comma-int or 4+ digit value anywhere).
+    for s_offset in range(9):
+        rows[3 + 4 + s_offset][93] = _cell("#REF!")
+    rank, stat_rows = _extract_inline_block_stats(rows, 3, 92, 94)
+    assert (rank, stat_rows) == (None, [])
+
+
+def test_inline_stats_rejects_small_digit_noise() -> None:
+    """Position-indicator and shield-count cells ('1', '2', '34') at the HP
+    row must not register as positions. Without the >=4-digit / comma rule,
+    we'd miscount and emit garbage stats."""
+    width = 110
+    rows: list[list[dict[str, Any]]] = [[_cell()] * width for _ in range(20)]
+    rows[3][50] = _cell("Tiny Boss")
+    rows[3][52] = _cell("EX3")
+    # HP row: small digits everywhere — no real stats.
+    rows[3 + 4][50] = _cell("1")
+    rows[3 + 4][51] = _cell("2")
+    rows[3 + 4][52] = _cell("34")
+    rank, stat_rows = _extract_inline_block_stats(rows, 3, 50, 52)
+    assert (rank, stat_rows) == (None, [])
+
+
+def test_parse_all_uses_inline_fallback_for_unmatched_block(monkeypatch) -> None:
+    """End-to-end: a ranked display block with inline stats and no data-tab
+    counterpart still produces a ParsedEnemy with one rank's stats filled in."""
+    from sync import enemy_parsers as ep
+
+    # Synthesize a display tab with one block at name_col=10.
+    width = 30
+    drows: list[list[dict[str, Any]]] = [[_cell()] * width for _ in range(20)]
+    drows[3][10] = _cell("Mystery Encounter")
+    drows[3][12] = _cell("EX3")
+    drows[3 + 4][11] = _cell("123,456")  # HP
+    drows[3 + 4 + 1][11] = _cell("789")
+    drows[3 + 4 + 2][11] = _cell("321")
+    drows[3 + 4 + 3][11] = _cell("700")
+    drows[3 + 4 + 4][11] = _cell("250")
+    drows[3 + 4 + 5][11] = _cell("145")
+    drows[3 + 4 + 6][11] = _cell("220")
+    drows[3 + 4 + 7][11] = _cell("180")
+    drows[3 + 4 + 8][11] = _cell("280")
+    display_sheet = {
+        "properties": {"sheetId": 999, "title": "Lvl 75"},
+        "data": [{"rowData": [{"values": r} for r in drows]}],
+    }
+    # Empty data tab — reconciliation will fail.
+    data_sheet = {
+        "properties": {"sheetId": 758398692, "title": "Osterra Data"},
+        "data": [{"rowData": [{"values": [_cell()] * 13}]}],
+    }
+    npc_sheet = {
+        "properties": {"sheetId": 1230510791, "title": "120 NPCs Data"},
+        "data": [{"rowData": [{"values": [_cell()] * 13}]}],
+    }
+    payload = {"sheets": [display_sheet, data_sheet, npc_sheet]}
+
+    # Override ENEMIES_TABS to the synthetic sheet for this test.
+    monkeypatch.setattr(ep, "ENEMIES_TABS", [
+        EnemyTabSpec(999, "Lvl 75", "Lvl 75", "Osterra"),
+    ])
+    result = ep.parse_all(payload, {
+        "Osterra": 758398692, "Solistia": -1, "NPCs": 1230510791,
+    })
+    assert result.unmatched == []
+    assert len(result.enemies) == 1
+    e = result.enemies[0]
+    assert e.canonical_name == "Mystery Encounter"
+    assert list(e.rank_stats.keys()) == ["EX3"]
+    by_pos: dict[int, dict[str, str]] = {}
+    for r in e.rank_stats["EX3"]:
+        by_pos.setdefault(r["position"], {})[r["stat_name"]] = r["stat_value"]
+    assert by_pos[0]["HP"] == "123,456"
+    assert by_pos[0]["Equip Atk"] == "280"
+
+
+def test_reconcile_cursed_master_auguste_via_alias() -> None:
+    """Regression: 'Cursed Master Auguste' on Lvl 75 has no exact, whitespace,
+    or substring match against the data key 'Cursed Auguste' because the word
+    'Master' sits between the two tokens. Resolution must come from the
+    explicit alias entry — without it, the enemy is dropped from /enemy."""
+    assert reconcile_display_to_data(
+        "Cursed Master Auguste", ["Cursed Auguste"]
+    ) == "Cursed Auguste"
+
+
+def test_reconcile_fullwidth_unicode_via_nfkc() -> None:
+    """The Lvl 75 NieR collab boss is named with fullwidth Japanese letters
+    ('９Ｓ？'), but the data tab uses ASCII ('9 S ?'). NFKC normalization in
+    `_squish` collapses fullwidth → halfwidth so they match without an alias."""
+    assert reconcile_display_to_data("９Ｓ？", ["9 S ?"]) == "9 S ?"
+
+
+@pytest.mark.parametrize("display_name,data_key", list(ENEMY_NAME_ALIASES.items()))
+def test_every_enemy_alias_resolves(display_name: str, data_key: str) -> None:
+    """Each alias key must reconcile to its mapped data-tab name. If anyone
+    breaks an entry (typo, removal, refactor), exactly one parametrization
+    fails with the offending (display, data) pair in the test id."""
+    assert reconcile_display_to_data(display_name, [data_key]) == data_key
 
 
 # --- helpers ---------------------------------------------------------------

@@ -174,10 +174,16 @@ CREATE TABLE IF NOT EXISTS enemies (
     name_color_hex  TEXT,
     hyperlink_url   TEXT,                 -- '#gid=...&range=...' anchor into the sheet
     is_npc          INTEGER NOT NULL DEFAULT 0,
+    -- NFKC-normalized + diacritic-stripped + casefolded `canonical_name`,
+    -- used by the bot's autocomplete and exact-name resolver so a user
+    -- typing 'Kaine?' on an English keyboard still matches 'Kainé?', and
+    -- '9S?' matches the fullwidth '９Ｓ？'. Repopulated on every upsert.
+    search_key      TEXT,
     UNIQUE(canonical_name, category, sheet_gid)
 );
 CREATE INDEX IF NOT EXISTS ix_enemies_category ON enemies(category);
 CREATE INDEX IF NOT EXISTS ix_enemies_name ON enemies(canonical_name);
+CREATE INDEX IF NOT EXISTS ix_enemies_search_key ON enemies(search_key);
 
 CREATE TABLE IF NOT EXISTS enemy_forms (
     id              INTEGER PRIMARY KEY,

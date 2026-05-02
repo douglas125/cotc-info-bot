@@ -175,13 +175,31 @@ ENEMY_SKIP_TABS: frozenset[str] = frozenset({
 # Reasons each entry exists (left = visible name, right = data-tab spelling):
 #   community-sheet typos and abbreviations.
 ENEMY_NAME_ALIASES: dict[str, str] = {
-    "Ring-Sealed Beast":        "RingBeast",
-    "Black-Clad Shadow":        "Black Shadow",
-    "Ignazio the Hungry Fang":  "Ignazio HUNGY",
-    "M'suhi the Viper":         "Msushi",
-    "Avar the Conqueror":       "Aval Conqueror",
-    "Avar the Bestial Claw":    "Aval",
+    "Ring-Sealed Beast":               "RingBeast",
+    "Black-Clad Shadow":               "Black Shadow",
+    "Ignazio the Hungry Fang":         "Ignazio HUNGY",
+    "M'suhi the Viper":                "Msushi",
+    "Avar the Conqueror":              "Aval Conqueror",
+    "Avar the Bestial Claw":           "Aval",
+    # Display name has an extra word between two tokens that DO appear in the
+    # data key (e.g. "cursed _master_ auguste"), so the substring fallback in
+    # reconcile_display_to_data does not catch these.
+    "Cursed Master Auguste":           "Cursed Auguste",
+    "Cursed Princess Elrica":          "Cursed Elrica",
+    "Guardian of the Tainted Flame":   "Guardian Flame",
+    "Towering Idol":                   "Statue",
+    # Collab bosses keyed by franchise / abbreviation in the data tab.
+    "Cecil the Dreadborn Dark Knight": "FF4",
+    "Knave of Hearts":                 "Jack Cards",
 }
+
+# Display tabs reference these enemies but the upstream community sheet has
+# no matching row in any *Data tab as of 2026-05-02 — so they remain in the
+# verifier's unmatched-enemies count by design until upstream adds stats:
+#   Rondo of the Knights Ardante (Lvl 75)
+#   Fallen Lady-in-Waiting       (Lvl 75)
+#   Fallen Mendoza               (Lvl 75)
+#   Divine Beast Lutiya          (Lvl 75)
 
 
 # Color → rarity mapping. The reference sheet legend (row 5):
