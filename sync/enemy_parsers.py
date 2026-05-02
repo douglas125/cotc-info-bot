@@ -139,6 +139,14 @@ class DisplayBlock:
     # block. For ranked encounters the member names come from the data tab,
     # so this stays empty. Indexed parallel to `weaknesses_by_position`.
     member_names_by_position: list[str] = field(default_factory=list)
+    # Single-rank stats lifted directly from the display block's grid (the
+    # 9 numbers visible to the user). Populated only for ranked blocks; used
+    # by `parse_all` as a fallback when the encounter has no Data-tab match,
+    # so enemies whose stats live on the display tab itself still surface in
+    # /enemy. List of stat-row dicts ({"position", "member_name",
+    # "stat_name", "stat_value"}) and the rank label to bucket them under.
+    inline_rank: str | None = None
+    inline_stats: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -402,6 +410,108 @@ def _extract_weaknesses_for_block(
     return out
 
 
+# Stat order on every Lvl-N display block, top-down from the row right under
+# the shield-count strip. The visible grid is exactly these 9 stats; Shields
+# itself sits on the row above (alongside the weakness panel).
+_DISPLAY_STAT_NAMES: tuple[str, ...] = (
+    "HP", "P. Atk", "P. Def", "E. Atk", "E. Def",
+    "Speed", "Crit", "CritDef", "Equip Atk",
+)
+# A "stat-shaped" cell is a number wide enough to be HP (>= 4 digits) or has
+# at least one thousands separator. The narrower form intentionally rejects
+# 1-3 digit values that appear in display blocks as weakness slot indicators
+# ('1', '2'), shield counts in the wrong column ('34'), or stub values that
+# would otherwise inflate the position count.
+_HP_INT_RE = re.compile(r"^-?\d{1,3}(?:,\d{3})+$|^-?\d{4,}$")
+_STAT_INT_RE = re.compile(r"^-?\d{1,3}(?:,\d{3})+$|^-?\d+$")
+
+
+def _is_hp_value(s: str) -> bool:
+    return bool(_HP_INT_RE.match(s))
+
+
+def _is_stat_value(s: str) -> bool:
+    return bool(_STAT_INT_RE.match(s))
+
+
+def _extract_inline_block_stats(
+    rows: list[list[dict[str, Any]]],
+    name_row: int,
+    name_col: int,
+    rank_col: int | None,
+) -> tuple[str | None, list[dict[str, str]]]:
+    """Extract single-rank stats from a display block's visible grid.
+
+    Used as a fallback when an unmatched display block has its stats hard-
+    coded in cell values (rather than VLOOKUPs into the data tab). Three of
+    the four Lvl-75 unmatched encounters are this shape — the data tab has
+    no row for them, but the maintainer typed the EX3 stat numbers straight
+    onto the display widget.
+
+    Returns (rank_key, [stat_rows]) or (None, []) if the block has no
+    parseable inline stats (e.g. the formulas resolve to '#REF!').
+
+    Layout (1-indexed cell coords, with the title at row 4 col N):
+      row 4  col rank_col      → rank label, e.g. 'EX3' or 'Rank 1'
+      row 8  col first_stat..  → HP for each member position (comma-int)
+      row 9  ...               → P. Atk
+      ...                      → through row 16 col first_stat = Equip Atk
+
+    The first stat column slides one to the right of `name_col` for
+    single-position blocks (where the title cell visually merges into
+    cell N) and starts at `name_col` for multi-position ones; we detect
+    it by scanning row name_row+4 (HP row) for the leftmost comma-int.
+    Member position count is the number of consecutive comma-int cells.
+    """
+    if rank_col is None or rank_col >= len(rows[name_row]):
+        return None, []
+    rank_label_raw = _cell_text(rows[name_row][rank_col])
+    if not rank_label_raw:
+        return None, []
+    rank_key = _RANK_BY_NORMALIZED.get(re.sub(r"\s+", "", rank_label_raw).lower())
+    if rank_key is None:
+        return None, []
+
+    hp_row_idx = name_row + 4
+    if hp_row_idx >= len(rows):
+        return None, []
+    hp_row = rows[hp_row_idx]
+    first_col: int | None = None
+    for c in range(name_col, min(name_col + 4, len(hp_row))):
+        if _is_hp_value(_cell_text(hp_row[c])):
+            first_col = c
+            break
+    if first_col is None:
+        return None, []
+    n_positions = 0
+    for c in range(first_col, min(name_col + 12, len(hp_row))):
+        if _is_hp_value(_cell_text(hp_row[c])):
+            n_positions += 1
+        else:
+            break
+
+    stat_rows: list[dict[str, str]] = []
+    for pos in range(n_positions):
+        col = first_col + pos
+        for s_offset, stat_name in enumerate(_DISPLAY_STAT_NAMES):
+            r = name_row + 4 + s_offset
+            if r >= len(rows):
+                break
+            row = rows[r]
+            val = _cell_text(row[col]) if col < len(row) else ""
+            # Only keep cells that look like stat values; reject leaked
+            # weakness/shields panel content like 'Notes' or single-digit
+            # slot indicators that aren't real stats for this position.
+            if val and _is_stat_value(val):
+                stat_rows.append({
+                    "position": pos,
+                    "member_name": None,
+                    "stat_name": stat_name,
+                    "stat_value": val,
+                })
+    return rank_key, stat_rows
+
+
 def _extract_npc_member_names(
     rows: list[list[dict[str, Any]]],
     name_row: int,
@@ -452,7 +562,7 @@ def parse_display_tab(sheet: dict[str, Any], spec: EnemyTabSpec) -> list[Display
     out: list[DisplayBlock] = []
     is_npc = spec.gid in ENEMY_NPC_TAB_GIDS
     detected = _detect_display_blocks(rows, use_separator_fallback=is_npc)
-    for name_row, name_col, _rank_col in detected:
+    for name_row, name_col, rank_col in detected:
         cell = rows[name_row][name_col]
         name = _cell_text(cell)
         if not name:
@@ -465,6 +575,11 @@ def parse_display_tab(sheet: dict[str, Any], spec: EnemyTabSpec) -> list[Display
             _extract_npc_member_names(rows, name_row, name_col, name)
             if is_npc else []
         )
+        inline_rank, inline_stats = (
+            (None, [])
+            if is_npc
+            else _extract_inline_block_stats(rows, name_row, name_col, rank_col)
+        )
         out.append(DisplayBlock(
             display_name=name,
             category=spec.category,
@@ -474,6 +589,8 @@ def parse_display_tab(sheet: dict[str, Any], spec: EnemyTabSpec) -> list[Display
             name_color_hex=color,
             hyperlink_url=anchor,
             is_npc=is_npc,
+            inline_rank=inline_rank,
+            inline_stats=inline_stats,
             weaknesses_by_position=weaknesses,
             member_names_by_position=member_names,
         ))
@@ -585,6 +702,30 @@ class ParseResult:
     unmatched: list[tuple[str, str]] = field(default_factory=list)
 
 
+def _try_inline_fallback(block: DisplayBlock, result: ParseResult) -> bool:
+    """Append a single-rank ParsedEnemy from the block's display-grid stats.
+
+    Returns True if a fallback enemy was added (caller should `continue`),
+    False if no inline stats were available (caller falls through to the
+    normal unmatched path).
+    """
+    if not block.inline_stats or not block.inline_rank:
+        return False
+    result.enemies.append(ParsedEnemy(
+        canonical_name=block.display_name,
+        category=block.category,
+        region=block.region,
+        sheet_gid=block.sheet_gid,
+        source_row=block.source_row,
+        name_color_hex=block.name_color_hex,
+        hyperlink_url=block.hyperlink_url,
+        is_npc=False,
+        rank_stats={block.inline_rank: list(block.inline_stats)},
+        weaknesses_by_position=block.weaknesses_by_position,
+    ))
+    return True
+
+
 def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseResult:
     """Top-level: produce a list of fully-merged ParsedEnemy records.
 
@@ -663,10 +804,14 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseRe
             # Ranked enemy: look up in the corresponding region's data tab.
             region_index = region_indexes.get(block.region or "")
             if region_index is None:
+                if _try_inline_fallback(block, result):
+                    continue
                 result.unmatched.append((block.display_name, spec.name))
                 continue
             key = reconcile_display_to_data(block.display_name, region_index)
             if key is None:
+                if _try_inline_fallback(block, result):
+                    continue
                 result.unmatched.append((block.display_name, spec.name))
                 continue
             encounter = encounters_by_region[block.region][key]
