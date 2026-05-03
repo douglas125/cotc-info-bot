@@ -274,13 +274,48 @@ def test_fight_notes_embed_paginates_dense_structured_note(tmp_db_path: Path) ->
 
     message = enemy_embeds.build_enemy_fight_notes_message(conn, enemy_id)
     assert message is not None
-    assert len(message.embeds) > 1
     assert all(len(embed.fields) <= 25 for embed in message.embeds)
     assert all(
         len(field.value) <= enemy_embeds.FIELD_VALUE_LIMIT
         for embed in message.embeds
         for field in embed.fields
     )
+    assert all(
+        "```" not in field.value
+        for embed in message.embeds
+        for field in embed.fields
+    )
+
+
+def test_fight_notes_embed_renders_aoi_actions_without_table_truncation(
+    tmp_db_path: Path,
+) -> None:
+    conn = repo.connect(tmp_db_path)
+    enemy_id = repo.upsert_enemy(
+        conn,
+        canonical_name="Aoi",
+        category="Solistia Lvl 100",
+        region="Solistia",
+        sheet_gid=1,
+        source_row=1,
+        name_color_hex="#ffffff",
+        hyperlink_url=None,
+        is_npc=False,
+    )
+
+    message = enemy_embeds.build_enemy_fight_notes_message(conn, enemy_id)
+    assert message is not None
+    field_values = [field.value for embed in message.embeds for field in embed.fields]
+    rendered = "\n".join(field_values)
+    assert all("```" not in value for value in field_values)
+    assert "turn-end debuff cleanse" in rendered
+    assert "Front row quietude" in rendered
+    assert "Repeats Flowing Heaven and Cessation cycles" in rendered
+    assert "..." not in rendered
+    assert "\u2026" not in rendered
+    assert "\u00e2\u20ac\u00a6" not in rendered
+    assert all(len(value) <= enemy_embeds.FIELD_VALUE_LIMIT for value in field_values)
+    assert all(len(embed.fields) <= 25 for embed in message.embeds)
 
 
 def test_action_renderer_handles_structured_section_kinds() -> None:
@@ -309,4 +344,9 @@ def test_action_renderer_handles_structured_section_kinds() -> None:
     names = [name for name, _ in fields]
     assert names[:3] == ["Turns", "States", "Catalog"]
     assert any(name == "Catalog Notes" for name in names)
-    assert all(value.startswith("```") or value.startswith("- ") for _, value in fields)
+    values = {name: value for name, value in fields}
+    assert values["Turns"] == "**Turn 1** - Action: Attack.\n**Turn 2** - Action: Brace."
+    assert values["States"] == "**Counter** - Guidance: Do not hit physical."
+    assert values["Catalog"] == "**Trigger: BP max** - Effect: Big AoE."
+    assert values["Catalog Notes"] == "- Paraphrased from source table."
+    assert all("```" not in value for _, value in fields)
