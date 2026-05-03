@@ -463,6 +463,45 @@ def test_parse_accessory_stats_no_stats_yields_empty_list() -> None:
     assert eq[0]["stats"] == []
 
 
+def test_parse_accessory_blank_spacer_row_before_first_stat() -> None:
+    """Rique/Cygna/Pia layout: a blank spacer row sits between the accessory
+    header and the first stat row. The parser must skip past it and still
+    read the description (c23 of the first stat row) and the stats."""
+    rows: list[list[dict]] = []
+    # Header row: name in c0, SP/Active markers, accessory icon at c20, name at c21.
+    header = [_cell("Rique"), _cell(), _cell(), _cell(), _cell(), _cell(),
+              _cell("SP"), _cell("Active")] + [_cell()] * 12 + [
+        _cell(formula="=A4Icon"),
+        _cell("Cait Merchant's Thick Account Book"),
+        _cell(), _cell(), _cell(),
+    ]
+    rows.append(header)
+    # Spacer row — this is the row the old parser was reading (and finding empty).
+    rows.append([_cell()] * 26)
+    # First stat row carries the description in c23.
+    r1 = [_cell()] * 26
+    r1[20] = _cell(formula="=SP")
+    r1[21] = _cell(number=40)
+    r1[23] = _cell("When using 3 BP, Self 10% Max HP Heal and 10% SP Restore")
+    rows.append(r1)
+    # Two more stat rows.
+    for sname, sval in [("ATK", 50), ("MAG", 50)]:
+        r = [_cell()] * 26
+        r[20] = _cell(formula=f"={sname}")
+        r[21] = _cell(number=sval)
+        rows.append(r)
+    rows.append([_cell()] * 26)  # trailing separator
+
+    eq = parse_role_tab(_make_role_sheet(rows), gid=999)[0].equipment
+    assert len(eq) == 1
+    assert eq[0]["name"] == "Cait Merchant's Thick Account Book"
+    assert eq[0]["description"] == (
+        "When using 3 BP, Self 10% Max HP Heal and 10% SP Restore"
+    )
+    assert eq[0]["stats"] == [("SP", 40), ("ATK", 50), ("MAG", 50)]
+    assert eq[0]["is_exclusive"] is False
+
+
 def test_parse_role_tab_ignores_rows_without_sp_active_marker() -> None:
     """Stat rows or stray text must NOT be picked up as block starts."""
     rows = [
