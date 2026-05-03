@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from io import BytesIO
 import json
 import sqlite3
-from typing import Literal
+from typing import Any, Literal
 
 import discord
 
@@ -73,6 +73,7 @@ _STAT_DISPLAY_ORDER: tuple[str, ...] = (
 _STAT_RANK: dict[str, int] = {s: i for i, s in enumerate(_STAT_DISPLAY_ORDER)}
 _SHEET_EDIT_URL = f"{ENEMIES_SPREADSHEET_URL}/edit"
 _MEMBER_NAME_DISPLAY_LIMIT = 14
+_EMBED_TOTAL_SOFT_LIMIT = 3000
 
 
 def _shorten_member_name(name: str) -> str:
@@ -199,6 +200,39 @@ def _action_lines(actions: list[dict[str, str]]) -> list[str]:
     return lines
 
 
+def _new_fight_notes_page_embed(
+    enemy: sqlite3.Row,
+    note: sqlite3.Row,
+    page: int,
+    footer: str,
+) -> discord.Embed:
+    embed = discord.Embed(
+        title=_truncate(f"{note['display_name']} - Fight notes ({page})", TITLE_LIMIT),
+        url=_safe_url(note["source_url"]),
+        color=_color_from_hex(enemy["name_color_hex"]),
+    )
+    embed.set_footer(text=footer)
+    return embed
+
+
+def _embed_text_size(embed: discord.Embed) -> int:
+    total = len(embed.title or "") + len(embed.description or "")
+    for field in embed.fields:
+        total += len(field.name or "") + len(field.value or "")
+    return total
+
+
+def _normalize_notes(notes: Any) -> list[str]:
+    if notes is None:
+        return []
+    if isinstance(notes, str):
+        return [notes.strip()] if notes.strip() else []
+    if isinstance(notes, list):
+        return [str(note).strip() for note in notes if str(note).strip()]
+    text = str(notes).strip()
+    return [text] if text else []
+
+
 def _chunk_lines(lines: list[str], limit: int) -> list[str]:
     chunks: list[str] = []
     current: list[str] = []
@@ -215,6 +249,144 @@ def _chunk_lines(lines: list[str], limit: int) -> list[str]:
     if current:
         chunks.append("\n".join(current))
     return chunks
+
+
+def _row_values(row: Any, columns: list[str]) -> list[str]:
+    if isinstance(row, dict):
+        return [str(row.get(column, "")) for column in columns]
+    if isinstance(row, list):
+        values = [str(value) for value in row]
+        if len(values) < len(columns):
+            values.extend([""] * (len(columns) - len(values)))
+        return values[: len(columns)]
+    return [str(row)] + [""] * max(0, len(columns) - 1)
+
+
+def _short_table_cell(value: str, width: int = 30) -> str:
+    value = " ".join(value.split())
+    if len(value) <= width:
+        return value
+    return value[: width - 1] + "…"
+
+
+def _table_lines(columns: list[str], rows: list[Any]) -> list[str]:
+    rendered_rows = [
+        [_short_table_cell(value) for value in _row_values(row, columns)]
+        for row in rows
+    ]
+    widths = [
+        min(
+            max(
+                [len(_short_table_cell(column))]
+                + [len(row[idx]) for row in rendered_rows],
+                default=0,
+            ),
+            30,
+        )
+        for idx, column in enumerate(columns)
+    ]
+    header = " | ".join(
+        _short_table_cell(column).ljust(widths[idx])
+        for idx, column in enumerate(columns)
+    )
+    divider = "-+-".join("-" * width for width in widths)
+    body = [
+        " | ".join(value.ljust(widths[idx]) for idx, value in enumerate(row))
+        for row in rendered_rows
+    ]
+    return [header, divider, *body]
+
+
+def _chunk_code_lines(lines: list[str], limit: int) -> list[str]:
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = len("```\n\n```")
+    for line in lines:
+        line_len = len(line) + (1 if current else 0)
+        if current and current_len + line_len > limit:
+            chunks.append("```\n" + "\n".join(current) + "\n```")
+            current = [line]
+            current_len = len("```\n\n```") + len(line)
+        else:
+            current.append(line)
+            current_len += line_len
+    if current:
+        chunks.append("```\n" + "\n".join(current) + "\n```")
+    return chunks
+
+
+def _section_fields(section: dict[str, Any]) -> list[tuple[str, str]]:
+    title = str(section.get("title") or "Actions").strip()
+    kind = str(section.get("kind") or "").strip()
+    columns = [str(column) for column in section.get("columns") or []]
+    rows = section.get("rows") or []
+    notes = _normalize_notes(section.get("notes"))
+    fields: list[tuple[str, str]] = []
+
+    if columns and isinstance(rows, list):
+        chunks = _chunk_code_lines(_table_lines(columns, rows), FIELD_VALUE_LIMIT)
+        for idx, chunk in enumerate(chunks, start=1):
+            name = title if len(chunks) == 1 else f"{title} ({idx}/{len(chunks)})"
+            fields.append((_truncate(name, FIELD_NAME_LIMIT), chunk))
+    elif isinstance(rows, list):
+        lines = [str(row).strip() for row in rows if str(row).strip()]
+        chunks = _chunk_lines(lines, FIELD_VALUE_LIMIT)
+        for idx, chunk in enumerate(chunks, start=1):
+            name = title if len(chunks) == 1 else f"{title} ({idx}/{len(chunks)})"
+            fields.append((_truncate(name, FIELD_NAME_LIMIT), chunk))
+
+    if notes:
+        note_lines = [f"- {note}" for note in notes]
+        for idx, chunk in enumerate(_chunk_lines(note_lines, FIELD_VALUE_LIMIT), start=1):
+            name = f"{title} Notes" if idx == 1 else f"{title} Notes ({idx})"
+            fields.append((_truncate(name, FIELD_NAME_LIMIT), chunk))
+
+    if not fields and kind:
+        fields.append((_truncate(title, FIELD_NAME_LIMIT), kind))
+    return fields
+
+
+def _action_fields(actions: Any) -> list[tuple[str, str]]:
+    if not isinstance(actions, list):
+        return []
+    structured = any(
+        isinstance(action, dict) and {"title", "kind", "columns", "rows"} & set(action)
+        for action in actions
+    )
+    if not structured:
+        chunks = _chunk_lines(_action_lines(actions), FIELD_VALUE_LIMIT)
+        return [
+            (
+                "Action List" if len(chunks) == 1 else f"Action List ({idx}/{len(chunks)})",
+                chunk,
+            )
+            for idx, chunk in enumerate(chunks, start=1)
+        ]
+
+    fields: list[tuple[str, str]] = []
+    for section in actions:
+        if isinstance(section, dict):
+            fields.extend(_section_fields(section))
+    return fields
+
+
+def _append_fight_note_field(
+    embeds: list[discord.Embed],
+    enemy: sqlite3.Row,
+    note: sqlite3.Row,
+    footer: str,
+    name: str,
+    value: str,
+) -> None:
+    target = embeds[-1]
+    needs_new = (
+        len(target.fields) >= 25
+        or _embed_text_size(target) + len(name) + len(value) > _EMBED_TOTAL_SOFT_LIMIT
+    )
+    if needs_new:
+        target = _new_fight_notes_page_embed(enemy, note, len(embeds) + 1, footer)
+        embeds.append(target)
+    target.add_field(name=name, value=value, inline=False)
 
 
 def _weakness_filename(enemy_id: int, rank: Rank) -> str:
@@ -309,21 +481,9 @@ def build_enemy_fight_notes_message(
 
     embeds = [first]
     actions = json.loads(note["actions_json"] or "[]")
-    chunks = _chunk_lines(_action_lines(actions), FIELD_VALUE_LIMIT)
-    for idx, chunk in enumerate(chunks, start=1):
-        target = first if idx == 1 and len(first.fields) < 25 else discord.Embed(
-            title=_truncate(f"{note['display_name']} - Fight notes ({idx})", TITLE_LIMIT),
-            url=_safe_url(note["source_url"]),
-            color=_color_from_hex(enemy["name_color_hex"]),
-        )
-        target.add_field(
-            name="Action List" if len(chunks) == 1 else f"Action List ({idx}/{len(chunks)})",
-            value=chunk,
-            inline=False,
-        )
-        if target is not first:
-            target.set_footer(text=first.footer.text or "Notes paraphrased from Game8")
-            embeds.append(target)
+    footer = first.footer.text or "Notes paraphrased from Game8"
+    for name, value in _action_fields(actions):
+        _append_fight_note_field(embeds, enemy, note, footer, name, value)
         if len(embeds) >= 10:
             break
     return EnemyMessage(embed=embeds[0], embeds=tuple(embeds))

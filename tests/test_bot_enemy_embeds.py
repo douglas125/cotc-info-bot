@@ -255,4 +255,58 @@ def test_fight_notes_embed_renders_seeded_note(tmp_db_path: Path) -> None:
     field_names = [field.name for field in message.embed.fields]
     assert "Mechanics" in field_names
     assert "Strategy" in field_names
-    assert any(field.name.startswith("Action List") for field in message.embed.fields)
+    assert any("Kagemune" in field.name for embed in message.embeds for field in embed.fields)
+
+
+def test_fight_notes_embed_paginates_dense_structured_note(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    enemy_id = repo.upsert_enemy(
+        conn,
+        canonical_name="Hammy",
+        category="Osterra Lvl 80",
+        region="Osterra",
+        sheet_gid=1,
+        source_row=1,
+        name_color_hex="#ffffff",
+        hyperlink_url=None,
+        is_npc=False,
+    )
+
+    message = enemy_embeds.build_enemy_fight_notes_message(conn, enemy_id)
+    assert message is not None
+    assert len(message.embeds) > 1
+    assert all(len(embed.fields) <= 25 for embed in message.embeds)
+    assert all(
+        len(field.value) <= enemy_embeds.FIELD_VALUE_LIMIT
+        for embed in message.embeds
+        for field in embed.fields
+    )
+
+
+def test_action_renderer_handles_structured_section_kinds() -> None:
+    fields = enemy_embeds._action_fields([
+        {
+            "title": "Turns",
+            "kind": "turn_table",
+            "columns": ["T", "Action"],
+            "rows": [["1", "Attack"], ["2", "Brace"]],
+        },
+        {
+            "title": "States",
+            "kind": "state_table",
+            "columns": ["State", "Guidance"],
+            "rows": [["Counter", "Do not hit physical"]],
+        },
+        {
+            "title": "Catalog",
+            "kind": "action_catalog",
+            "columns": ["Trigger", "Effect"],
+            "rows": [["BP max", "Big AoE"]],
+            "notes": ["Paraphrased from source table."],
+        },
+    ])
+
+    names = [name for name, _ in fields]
+    assert names[:3] == ["Turns", "States", "Catalog"]
+    assert any(name == "Catalog Notes" for name in names)
+    assert all(value.startswith("```") or value.startswith("- ") for _, value in fields)

@@ -1,6 +1,7 @@
 """DB-layer tests: schema bootstrap, CRUD, FTS5, search filters."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,18 @@ def test_arena_fight_notes_seeded_and_refresh_safe(tmp_db_path: Path) -> None:
     rows = repo.list_arena_fight_notes(conn)
     assert len(rows) == 13
     assert {row["display_name"] for row in rows} >= {"Tikilen", "Kagemune", "Rayme"}
+    for row in rows:
+        sections = json.loads(row["actions_json"])
+        assert sections
+        assert all(
+            {"title", "kind", "columns", "rows"} <= set(section)
+            for section in sections
+        )
+        assert {section["kind"] for section in sections} <= {
+            "turn_table",
+            "state_table",
+            "action_catalog",
+        }
 
     repo.clear_enemy_tables(conn)
     assert len(repo.list_arena_fight_notes(conn)) == 13
