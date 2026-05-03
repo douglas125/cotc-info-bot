@@ -2,232 +2,2329 @@
   {
     "fight_key": "tikilen",
     "display_name": "Tikilen",
-    "enemy_aliases": ["Tikilen", "Tiki", "ティキレン"],
+    "enemy_aliases": [
+      "Tikilen",
+      "Tiki",
+      "ティキレン"
+    ],
     "source_url": "https://game8.jp/octopathtraveler-sp/371120",
     "source_updated_at": "2026-03-06 15:38",
     "summary": "Wind/sword Arena fight with two mercenary adds. Tikilen becomes much harder below 40% HP when her shield drops and non-critical hits stop shaving shields.",
     "mechanics": "Main weaknesses are bow, fan, and light. Both adds share bow/light coverage, use counters or party buffs, and can slow the fight if left alive. Tikilen follows scripted HP-band patterns and gains a critical-only shield phase at low HP.",
     "strategy": "Bring bow/light multi-hit coverage, a tank or strong mitigation, and steady P.Atk/E.Atk debuffs. Avoid feeding physical counters, remove adds before committing to Tikilen, and prepare hunters or guaranteed-crit support for the low-HP phase.",
     "actions": [
-      {"name": "Gale Blades", "effect": "Two wind hits to the front row."},
-      {"name": "Flash Strike", "effect": "Sword attack to the front row."},
-      {"name": "Wind Thrust", "effect": "Heavy single-target wind hit."},
-      {"name": "Flurry Slash", "effect": "Three random sword hits."},
-      {"name": "Swift Step", "effect": "Raises Tikilen's speed."},
-      {"name": "Windfang Flurry", "effect": "Three random wind hits."},
-      {"name": "Last Stand", "effect": "At low HP, enables critical-only shield damage and lowers max shields."},
-      {"name": "Shield Repair", "effect": "Mercenary restores Tikilen's shields when they are low."}
+      {
+        "title": "Tikilen HP Pattern",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "Above 80%",
+          "80-60%",
+          "60-40%",
+          "40% and below"
+        ],
+        "rows": [
+          [
+            "0",
+            "-",
+            "-",
+            "-",
+            "Last Stand"
+          ],
+          [
+            "1",
+            "2x front-row wind",
+            "Speed up",
+            "3 random wind hits",
+            "Front-row sword; braces"
+          ],
+          [
+            "2",
+            "Front-row sword",
+            "3 random wind hits",
+            "Speed up",
+            "4 strong random wind hits"
+          ],
+          [
+            "3",
+            "Strong single wind",
+            "Strong single wind",
+            "2x front-row wind",
+            "Speed up"
+          ],
+          [
+            "4",
+            "3 random sword hits",
+            "Self-heal",
+            "Very strong single wind",
+            "3 random wind hits"
+          ],
+          [
+            "5",
+            "-",
+            "Very strong single wind",
+            "Front-row sword; braces",
+            "3 random wind hits"
+          ],
+          [
+            "6",
+            "-",
+            "-",
+            "4 strong random wind hits",
+            "Self-heal"
+          ],
+          [
+            "7",
+            "-",
+            "-",
+            "3 random sword hits",
+            "-"
+          ]
+        ],
+        "notes": [
+          "Loops from turn 1 and resumes after break. Last Stand is one-time and enables critical-only shield damage until broken."
+        ]
+      },
+      {
+        "title": "Skilled Mercenary",
+        "kind": "turn_table",
+        "columns": [
+          "Turn",
+          "Action"
+        ],
+        "rows": [
+          [
+            "1",
+            "Dark single hit with blind"
+          ],
+          [
+            "2",
+            "Physical counter stance"
+          ],
+          [
+            "3",
+            "Dark single hit with blind"
+          ],
+          [
+            "4",
+            "Physical counter stance"
+          ],
+          [
+            "5",
+            "Party regen after a brace turn"
+          ]
+        ],
+        "notes": [
+          "If Tikilen has 1-6 shields, this add restores 3 shields instead, unless Last Stand is active."
+        ]
+      },
+      {
+        "title": "Veteran Mercenary",
+        "kind": "turn_table",
+        "columns": [
+          "Turn",
+          "Action"
+        ],
+        "rows": [
+          [
+            "1",
+            "Dark single hit"
+          ],
+          [
+            "2",
+            "Physical counter stance, then braces"
+          ],
+          [
+            "3",
+            "Party P.Atk/E.Atk buff"
+          ],
+          [
+            "4",
+            "Physical counter stance"
+          ],
+          [
+            "5",
+            "Dark single hit"
+          ]
+        ],
+        "notes": [
+          "Loops from turn 1 and resumes after break."
+        ]
+      }
     ]
   },
   {
     "fight_key": "glossom",
     "display_name": "Glossom",
-    "enemy_aliases": ["Glossom", "グロッサム"],
+    "enemy_aliases": [
+      "Glossom",
+      "グロッサム"
+    ],
     "source_url": "https://game8.jp/octopathtraveler-sp/373532",
     "source_updated_at": "2026-03-06 15:36",
     "summary": "Physical-heavy dancer fight with two dancer adds and a dangerous late phase that locks some of Glossom's weaknesses.",
     "mechanics": "Glossom starts weak to spear, axe, and dark, while the adds give useful axe/dark overlap. At low HP, spear and axe are locked, forcing dark-focused breaks or off-weakness shield tools.",
     "strategy": "Use physical defense gear, P.Atk debuffs, axe/dark coverage, and stable healing. Remove adds first so buffs and extra actions do not snowball, then plan the final break around dark damage.",
     "actions": [
-      {"name": "Dance of Enthrallment", "effect": "Can inflict charm-style disruption."},
-      {"name": "Fan Strike", "effect": "Single-target fan physical damage."},
-      {"name": "Sweeping Fan", "effect": "Front-row fan physical damage."},
-      {"name": "Dark Dance", "effect": "Dark-element pressure."},
-      {"name": "Radiant Step", "effect": "Buffs Glossom or allies."},
-      {"name": "Weakness Lock", "effect": "Late phase locks spear and axe weaknesses."}
+      {
+        "title": "Glossom Above 50%",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "Above 75%",
+          "75-50%"
+        ],
+        "rows": [
+          [
+            "1",
+            "Fan AoE",
+            "P.Def-down dance"
+          ],
+          [
+            "2",
+            "Party P.Atk buff",
+            "2x single fan"
+          ],
+          [
+            "3",
+            "Single fan",
+            "Fan AoE"
+          ],
+          [
+            "4",
+            "Lightning AoE",
+            "Lightning AoE"
+          ],
+          [
+            "5",
+            "Basic attack",
+            "Strong lightning AoE"
+          ]
+        ],
+        "notes": [
+          "Loops from turn 1 and resumes after break."
+        ]
+      },
+      {
+        "title": "Glossom Below 50%",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "50-25%",
+          "25% and below"
+        ],
+        "rows": [
+          [
+            "0",
+            "Power-up; 2 actions",
+            "2 actions"
+          ],
+          [
+            "1",
+            "Lightning AoE",
+            "Martial stance"
+          ],
+          [
+            "2",
+            "Single fan",
+            "Party P.Atk buff III"
+          ],
+          [
+            "3",
+            "Strong lightning AoE",
+            "Strong lightning AoE"
+          ],
+          [
+            "4",
+            "2x single fan",
+            "Brace; single fan"
+          ],
+          [
+            "5",
+            "Destructive fan AoE",
+            "Strong lightning AoE"
+          ],
+          [
+            "6",
+            "Fan AoE",
+            "Lightning AoE"
+          ],
+          [
+            "7",
+            "-",
+            "P.Def-down dance"
+          ],
+          [
+            "8",
+            "-",
+            "2x single fan"
+          ],
+          [
+            "9",
+            "-",
+            "Fan AoE"
+          ]
+        ],
+        "notes": [
+          "The power-up is one-time. After the brace, Destructive fan AoE is used next, then the table resumes."
+        ]
+      },
+      {
+        "title": "Dancer Adds",
+        "kind": "turn_table",
+        "columns": [
+          "Unit",
+          "Turn",
+          "Action"
+        ],
+        "rows": [
+          [
+            "Bright Dancer",
+            "1",
+            "Light single hit"
+          ],
+          [
+            "Bright Dancer",
+            "2",
+            "Enemy E.Atk buff"
+          ],
+          [
+            "Bright Dancer",
+            "3",
+            "Front-row light AoE"
+          ],
+          [
+            "Bright Dancer",
+            "4",
+            "Front-row light resistance down"
+          ],
+          [
+            "Passionate Dancer",
+            "1",
+            "Enemy speed buff"
+          ],
+          [
+            "Passionate Dancer",
+            "2",
+            "2x single fan"
+          ],
+          [
+            "Passionate Dancer",
+            "3",
+            "Front-row fan"
+          ],
+          [
+            "Passionate Dancer",
+            "4",
+            "Enemy crit buff"
+          ],
+          [
+            "Passionate Dancer",
+            "5",
+            "Front-row fan"
+          ]
+        ]
+      }
     ]
   },
   {
     "fight_key": "varkyn",
     "display_name": "Varkyn",
-    "enemy_aliases": ["Varkyn", "Varkan", "ヴァルカン"],
+    "enemy_aliases": [
+      "Varkyn",
+      "Varkan",
+      "ヴァルカン"
+    ],
     "source_url": "https://game8.jp/octopathtraveler-sp/378306",
     "source_updated_at": "2026-03-06 15:35",
     "summary": "Element-heavy scholar fight with adds and a spiritstone that changes its weakness among Varkyn's main weaknesses.",
     "mechanics": "Varkyn is weak to sword, staff, and ice. Adds cover sword/spear/bow/tome/ice/light, and the autonomous spiritstone has an infinite shield count with a changing weakness.",
     "strategy": "Favor elemental defense, keep E.Atk debuffs active, and use sword/ice coverage to hit multiple targets. Handle adds before racing Varkyn, and do not waste turns trying to break the infinite-shield stone.",
     "actions": [
-      {"name": "Elemental Magic", "effect": "Strong elemental pressure, often front-row focused."},
-      {"name": "Researcher's Tactics", "effect": "Support add can enable party pressure."},
-      {"name": "Autonomous Spiritstone", "effect": "Infinite shields; weakness changes between sword, staff, and ice."},
-      {"name": "Buff Removal", "effect": "Later turns can punish reliance on front-row buffs."},
-      {"name": "High-Power Spell", "effect": "Major single-target elemental damage."}
+      {
+        "title": "Varkyn HP Pattern",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "Above 35%",
+          "35-34%",
+          "34% and below"
+        ],
+        "rows": [
+          [
+            "0",
+            "-",
+            "-",
+            "Unthinking Mind"
+          ],
+          [
+            "1",
+            "Single light II",
+            "Front-row light res down III",
+            "Strong front-row light; braces"
+          ],
+          [
+            "2",
+            "Double tome hit",
+            "Strong front-row light",
+            "3x single light"
+          ],
+          [
+            "3",
+            "Elemental crush",
+            "Random light hits",
+            "Strong front-row light"
+          ],
+          [
+            "4",
+            "Front-row light II",
+            "Double tome hit",
+            "Front-row light II"
+          ],
+          [
+            "5",
+            "Random light hits",
+            "Elemental crush",
+            "-"
+          ],
+          [
+            "6",
+            "-",
+            "Front-row light II",
+            "-"
+          ],
+          [
+            "7",
+            "-",
+            "Single light II",
+            "-"
+          ]
+        ],
+        "notes": [
+          "Loops from turn 1 and resumes after break. The middle 35-34% band is rarely seen. Unthinking Mind is one-time."
+        ]
+      },
+      {
+        "title": "Human Adds",
+        "kind": "turn_table",
+        "columns": [
+          "Unit",
+          "Turn",
+          "Action"
+        ],
+        "rows": [
+          [
+            "Strategist",
+            "1",
+            "Front-row dark AoE"
+          ],
+          [
+            "Strategist",
+            "2",
+            "Front-row tome"
+          ],
+          [
+            "Strategist",
+            "3",
+            "Front-row E.Def down"
+          ],
+          [
+            "Strategist",
+            "4",
+            "Strong single dark"
+          ],
+          [
+            "Tactician Dancer",
+            "1",
+            "Enemy E.Atk buff"
+          ],
+          [
+            "Tactician Dancer",
+            "2",
+            "Front-row dark AoE"
+          ],
+          [
+            "Tactician Dancer",
+            "3",
+            "Enemy speed buff"
+          ],
+          [
+            "Tactician Dancer",
+            "4",
+            "Front-row fan"
+          ],
+          [
+            "Tactician Dancer",
+            "5",
+            "Front-row light res down"
+          ]
+        ]
+      },
+      {
+        "title": "Autonomous Spiritstone",
+        "kind": "action_catalog",
+        "columns": [
+          "Trigger",
+          "Action",
+          "Detail"
+        ],
+        "rows": [
+          [
+            "Normal action",
+            "Random light hits",
+            "3 random light hits; each can lower light resistance."
+          ],
+          [
+            "Turn end",
+            "Weakness shift",
+            "Cycles staff -> sword -> ice, then randomizes after Unthinking Mind."
+          ],
+          [
+            "Turn end",
+            "Buff purge",
+            "Removes non-permanent front-row buffs."
+          ],
+          [
+            "Varkyn at or below 50%",
+            "Weakness counter",
+            "Gains a permanent counter against weakness hits."
+          ],
+          [
+            "After 50% trigger",
+            "Brightens",
+            "Raises threat after the weakness-counter setup."
+          ]
+        ]
+      }
     ]
   },
   {
     "fight_key": "ritu",
     "display_name": "Ri'tu",
-    "enemy_aliases": ["Ri'tu", "Ritu", "リトゥ"],
+    "enemy_aliases": [
+      "Ri'tu",
+      "Ritu",
+      "リトゥ"
+    ],
     "source_url": "https://game8.jp/octopathtraveler-sp/386171",
     "source_updated_at": "2026-03-06 15:36",
     "summary": "Fast dagger/lightning boss with two adds. Her second half adds pursuit hits and her final quarter increases pursuit pressure.",
     "mechanics": "Ri'tu is weak to fire, wind, and light. Adds offer wind/light overlap, but one has very narrow weaknesses. At 50% HP she starts pursuing her last target; at 25% HP pursuit becomes stronger and she speeds up.",
     "strategy": "Control speed, maintain physical mitigation, and use wind/light coverage to keep adds under control. Avoid entering the 50% and 25% thresholds without healing and debuffs already established.",
     "actions": [
-      {"name": "Twin Break", "effect": "Two dagger hits to one target."},
-      {"name": "Leg Snare", "effect": "Speed down to the front row."},
-      {"name": "Twin Instant Blades", "effect": "Random multi-hit dagger attack."},
-      {"name": "Absolute", "effect": "Very heavy single-target dagger hit."},
-      {"name": "Dual-Blade Stance", "effect": "At half HP, adds pursuit against the last attacked target."},
-      {"name": "Thunder Flash", "effect": "Front-row lightning attack with paralysis chance."}
+      {
+        "title": "Ri'tu HP Pattern",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "Above 75%",
+          "75-50%",
+          "50-25%",
+          "25% and below"
+        ],
+        "rows": [
+          [
+            "0",
+            "-",
+            "-",
+            "Dual-blade stance",
+            "Stone-cutting stance"
+          ],
+          [
+            "1",
+            "2x dagger single",
+            "2-5 random dagger hits",
+            "2x dagger single",
+            "2-5 random dagger hits"
+          ],
+          [
+            "2",
+            "Front-row speed down",
+            "2x dagger single",
+            "3 random lightning + P.Def down",
+            "Very strong dagger single"
+          ],
+          [
+            "3",
+            "2-5 random dagger hits",
+            "Front-row speed down",
+            "Strong dagger single",
+            "Very strong dagger single"
+          ],
+          [
+            "4",
+            "2x dagger single",
+            "Very strong dagger single",
+            "2-5 random dagger hits",
+            "Very strong dagger single"
+          ],
+          [
+            "5",
+            "2-5 random dagger hits",
+            "2-5 random dagger hits",
+            "2-5 random dagger hits",
+            "Lightning front row + paralysis"
+          ],
+          [
+            "6",
+            "-",
+            "-",
+            "Front-row speed down",
+            "Very strong dagger single"
+          ],
+          [
+            "7",
+            "-",
+            "-",
+            "2x front-row dagger",
+            "Very strong dagger single"
+          ],
+          [
+            "8",
+            "-",
+            "-",
+            "-",
+            "Very strong dagger single"
+          ]
+        ],
+        "notes": [
+          "Loops from turn 1 and resumes after break. The 50% and 25% stances are each one-time threshold actions."
+        ]
+      },
+      {
+        "title": "Ri'tu Adds",
+        "kind": "turn_table",
+        "columns": [
+          "Unit",
+          "Turn",
+          "Action"
+        ],
+        "rows": [
+          [
+            "Free Dancer",
+            "1",
+            "Enemy P.Atk buff"
+          ],
+          [
+            "Free Dancer",
+            "2",
+            "Enemy crit buff"
+          ],
+          [
+            "Free Dancer",
+            "3",
+            "2x single fan"
+          ],
+          [
+            "Free Dancer",
+            "4",
+            "Front-row fan"
+          ],
+          [
+            "Free Dancer",
+            "5",
+            "2x single fan"
+          ],
+          [
+            "Steady Swordsman",
+            "1",
+            "Cover Ri'tu + self P.Def up"
+          ],
+          [
+            "Steady Swordsman",
+            "2",
+            "Sword hit + P.Atk down"
+          ],
+          [
+            "Steady Swordsman",
+            "3",
+            "Single sword hit"
+          ],
+          [
+            "Steady Swordsman",
+            "4",
+            "Sword hit + P.Atk down"
+          ],
+          [
+            "Steady Swordsman",
+            "5",
+            "Strong sword hit"
+          ]
+        ]
+      }
     ]
   },
   {
     "fight_key": "gertrude",
     "display_name": "Gertrude",
-    "enemy_aliases": ["Gertrude", "ガートルード"],
+    "enemy_aliases": [
+      "Gertrude",
+      "ガートルード"
+    ],
     "source_url": "https://game8.jp/octopathtraveler-sp/391040",
     "source_updated_at": "2026-03-06 15:38",
     "summary": "Solo axe boss that limits multi-hit shield shaving and escalates from two actions to three actions late.",
     "mechanics": "Gertrude is weak to dagger, bow, and fire. She repeatedly applies a shield-lock effect that prevents one character's multi-hit action from shaving more than one shield. HP thresholds increase shields, change patterns, and eventually grant three actions.",
     "strategy": "Use physical-defense gear, strong P.Atk debuffs, and single-hit or follow-up shaving. Do setup on turn 1, avoid relying on multi-hit shield shaving, and prepare burst to skip the 75% shield increase if possible.",
     "actions": [
-      {"name": "Strong Guard", "effect": "Applies multi-hit shield lock on start and break recovery."},
-      {"name": "Combat Drug", "effect": "Threshold action that buffs, changes action count, or increases max shields."},
-      {"name": "Heavy Cleave", "effect": "Strong single-target axe hit."},
-      {"name": "Dark Heavy Blow", "effect": "Single-target dark hit with speed down."},
-      {"name": "Triple Sever", "effect": "Three random axe hits."},
-      {"name": "Heal Slash", "effect": "Front-row axe hit that heals Gertrude."}
+      {
+        "title": "Gertrude Above 50%",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "Above 75%",
+          "75-50%"
+        ],
+        "rows": [
+          [
+            "0",
+            "Combat drug; then 2 actions",
+            "Combat drug; pattern changes; 2 actions"
+          ],
+          [
+            "1",
+            "Heavy axe single",
+            "Heavy axe single"
+          ],
+          [
+            "2",
+            "Dark single + speed down",
+            "Guillotine"
+          ],
+          [
+            "3",
+            "Heavy axe single",
+            "3 random axe hits"
+          ],
+          [
+            "4",
+            "3 random axe hits",
+            "3 random axe hits"
+          ],
+          [
+            "5",
+            "Heavy axe single",
+            "Heavy axe single"
+          ],
+          [
+            "6",
+            "Guillotine",
+            "Guillotine"
+          ],
+          [
+            "7",
+            "-",
+            "Grand cleave + speed down"
+          ],
+          [
+            "8",
+            "-",
+            "3 random axe hits"
+          ]
+        ],
+        "notes": [
+          "Loops from turn 1 with two actions and resumes after break. Combat drug is one-time in each band."
+        ]
+      },
+      {
+        "title": "Gertrude Below 50%",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "50-33%",
+          "33% and below"
+        ],
+        "rows": [
+          [
+            "0",
+            "Combat drug; then 2 actions",
+            "Combat drug + heal slash; then 3 actions"
+          ],
+          [
+            "1",
+            "Dark single + speed down",
+            "Dark single + speed down"
+          ],
+          [
+            "2",
+            "Heal slash",
+            "Dark single + speed down"
+          ],
+          [
+            "3",
+            "Guillotine",
+            "Dark single + speed down"
+          ],
+          [
+            "4",
+            "3 random axe hits",
+            "Heavy axe single"
+          ],
+          [
+            "5",
+            "3 random axe hits",
+            "3 random axe hits"
+          ],
+          [
+            "6",
+            "Heavy axe single",
+            "Heavy axe single"
+          ],
+          [
+            "7",
+            "Guillotine",
+            "3 random axe hits"
+          ],
+          [
+            "8",
+            "Grand cleave + speed down",
+            "3 random axe hits"
+          ],
+          [
+            "9",
+            "-",
+            "3 random axe hits"
+          ],
+          [
+            "10",
+            "-",
+            "Grand cleave + speed down"
+          ],
+          [
+            "11",
+            "-",
+            "Guillotine"
+          ],
+          [
+            "12",
+            "-",
+            "Guillotine"
+          ],
+          [
+            "13",
+            "-",
+            "Heal slash"
+          ],
+          [
+            "14",
+            "-",
+            "Heal slash"
+          ],
+          [
+            "15",
+            "-",
+            "Heal slash"
+          ]
+        ],
+        "notes": [
+          "Below 50%, break recovery restarts from turn 1. Shield-lock is re-applied at battle start and break recovery."
+        ]
+      }
     ]
   },
   {
     "fight_key": "yunnie",
     "display_name": "Yunnie",
-    "enemy_aliases": ["Yunnie", "ユーニィ"],
+    "enemy_aliases": [
+      "Yunnie",
+      "ユーニィ"
+    ],
     "source_url": "https://game8.jp/octopathtraveler-sp/396589",
     "source_updated_at": "2026-03-06 15:37",
     "summary": "Large multi-enemy fight against Yunnie and the Yuunagi group. Several adds have different weakness sets, so broad coverage matters.",
     "mechanics": "Yunnie is weak to sword, axe, and fan. The adds cover sword/axe/fan plus lightning, fire, ice, dagger, and staff depending on position. The fight pressures the party through many concurrent actions.",
     "strategy": "Bring wide AoE shield coverage, especially sword/axe/fan, and remove adds methodically before focusing Yunnie. Defensive stability matters more than a narrow burst plan because the encounter has many bodies.",
     "actions": [
-      {"name": "Yunnie Shot", "effect": "Bow pressure from the leader."},
-      {"name": "Group Assault", "effect": "Multiple adds act in the same turn cycle."},
-      {"name": "Hunter Add Actions", "effect": "Ranged physical damage."},
-      {"name": "Thief Add Actions", "effect": "Fast physical pressure and disruption."},
-      {"name": "Merchant Add Actions", "effect": "Spear-style pressure."},
-      {"name": "Warrior/Add Support", "effect": "Additional physical attacks that punish slow add clears."}
+      {
+        "title": "Yunnie HP Pattern",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "Above 75%",
+          "75-40%",
+          "40% and below"
+        ],
+        "rows": [
+          [
+            "0",
+            "-",
+            "Call thief + merchant",
+            "Call swordsman + apothecary"
+          ],
+          [
+            "1",
+            "Bow hit + poison",
+            "Bow hit + blind",
+            "Bow hit + random ailments"
+          ],
+          [
+            "2",
+            "3 random bow hits",
+            "2x bow + fire",
+            "2x front-row fire"
+          ],
+          [
+            "3",
+            "2x front-row bow + paralysis",
+            "Bow hit + poison",
+            "2x front-row bow + paralysis; braces"
+          ],
+          [
+            "4",
+            "Bow hit + poison",
+            "2x front-row bow + paralysis",
+            "Four-weapon assault"
+          ],
+          [
+            "5",
+            "2x front-row fire",
+            "3 random bow hits",
+            "Bow hit + random ailments"
+          ],
+          [
+            "6",
+            "-",
+            "Bow hit + random ailments",
+            "2x bow + fire; braces"
+          ],
+          [
+            "7",
+            "-",
+            "-",
+            "Four-weapon assault"
+          ]
+        ],
+        "notes": [
+          "Call actions are one-time and do not consume an action, but only happen if the relevant add wave has been defeated."
+        ]
+      },
+      {
+        "title": "Yuunagi Adds",
+        "kind": "turn_table",
+        "columns": [
+          "Unit",
+          "Turn",
+          "Action"
+        ],
+        "rows": [
+          [
+            "Hunter",
+            "1",
+            "Front-row bow + P.Def down"
+          ],
+          [
+            "Hunter",
+            "2",
+            "Front-row bow"
+          ],
+          [
+            "Hunter",
+            "3",
+            "2x front-row bow"
+          ],
+          [
+            "Hunter",
+            "4",
+            "4x weak front-row bow"
+          ],
+          [
+            "Thief",
+            "1",
+            "Remove regen + SP damage"
+          ],
+          [
+            "Thief",
+            "2",
+            "Front-row dagger"
+          ],
+          [
+            "Thief",
+            "3",
+            "Dagger hit + self-heal"
+          ],
+          [
+            "Thief",
+            "4",
+            "Strong dagger hit"
+          ],
+          [
+            "Merchant",
+            "0",
+            "AoE counter stance"
+          ],
+          [
+            "Merchant",
+            "1",
+            "Front-row spear + spear res down"
+          ],
+          [
+            "Merchant",
+            "2",
+            "2 random spear hits"
+          ],
+          [
+            "Merchant",
+            "3",
+            "3 random spear hits"
+          ],
+          [
+            "Swordsman",
+            "0",
+            "AoE counter stance"
+          ],
+          [
+            "Swordsman",
+            "1",
+            "Front-row sword"
+          ],
+          [
+            "Swordsman",
+            "2",
+            "Front-row sword"
+          ],
+          [
+            "Swordsman",
+            "3",
+            "Front-row sword res down"
+          ],
+          [
+            "Swordsman",
+            "4",
+            "Strong front-row sword; braces"
+          ],
+          [
+            "Swordsman",
+            "5",
+            "Strong front-row sword"
+          ],
+          [
+            "Apothecary",
+            "1",
+            "Front-row axe; removes regen"
+          ],
+          [
+            "Apothecary",
+            "2",
+            "Heal + regen for Yunnie"
+          ],
+          [
+            "Apothecary",
+            "3",
+            "Axe hit + bleed"
+          ],
+          [
+            "Apothecary",
+            "4",
+            "Front-row axe"
+          ],
+          [
+            "Apothecary",
+            "5",
+            "2x front-row axe"
+          ]
+        ],
+        "notes": [
+          "Several adds use a brace/self-destruct finisher when they or Yunnie cross HP thresholds."
+        ]
+      }
     ]
   },
   {
     "fight_key": "yan_long",
     "display_name": "Yan Long",
-    "enemy_aliases": ["Yan Long", "Yanlong", "Yen Long", "イェンロン"],
+    "enemy_aliases": [
+      "Yan Long",
+      "Yanlong",
+      "Yen Long",
+      "イェンロン"
+    ],
     "source_url": "https://game8.jp/octopathtraveler-sp/409368",
     "source_updated_at": "2026-03-06 15:38",
     "summary": "Staff martial-arts fight with weakness locks, counter states, and crow adds that join after HP thresholds.",
     "mechanics": "Yan Long is weak to sword, spear, and light, but locks and rotates countered weaknesses. Crows are weak to axe and tome. Hitting a countered locked weakness increases his next action count.",
     "strategy": "Track which weakness is locked before attacking, use safe weakness coverage, and clear crows quickly. Keep physical mitigation high and avoid giving Yan Long extra actions through careless attacks.",
     "actions": [
-      {"name": "Body-Sealing Art", "effect": "Starts two-action mode and locks spear/light with counters."},
-      {"name": "Evil-Repelling Turn", "effect": "Rotates locked weaknesses and counter state."},
-      {"name": "Double Staff Strike", "effect": "Two staff hits to one target."},
-      {"name": "Spinning Staff Dance", "effect": "Staff physical damage to the front row."},
-      {"name": "Ice Aura", "effect": "Random ice hits that lower staff resistance."},
-      {"name": "Call Crows", "effect": "Summons crow adds after HP thresholds."}
+      {
+        "title": "Yan Long Above 50%",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "Above 85%",
+          "85-50%"
+        ],
+        "rows": [
+          [
+            "0",
+            "Body-seal art; then 2 actions",
+            "Call crows"
+          ],
+          [
+            "1",
+            "2x staff single",
+            "Very strong single hit"
+          ],
+          [
+            "2",
+            "Front-row staff",
+            "2 random ice + staff res down"
+          ],
+          [
+            "3",
+            "2 random ice + staff res down",
+            "3-5 random staff + P.Def down"
+          ],
+          [
+            "4",
+            "Very strong single hit",
+            "4 random staff"
+          ],
+          [
+            "5",
+            "Self P.Atk/speed up",
+            "Front-row ice + staff res down"
+          ],
+          [
+            "6",
+            "2 random ice + staff res down",
+            "3-5 random staff + P.Def down"
+          ],
+          [
+            "7",
+            "-",
+            "Self-heal + P.Def up"
+          ],
+          [
+            "8",
+            "-",
+            "Very strong single hit"
+          ],
+          [
+            "9",
+            "-",
+            "2 random ice + staff res down"
+          ],
+          [
+            "10",
+            "-",
+            "Front-row staff"
+          ]
+        ],
+        "notes": [
+          "Weakness locks/counters rotate at turn end. Counter hits add one action to the next turn."
+        ]
+      },
+      {
+        "title": "Yan Long Below 50%",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "Action"
+        ],
+        "rows": [
+          [
+            "-1",
+            "Fighting-spirit art; removes locks/counters and enables 3 actions"
+          ],
+          [
+            "0",
+            "Front-row ice + staff res down; then 3 actions"
+          ],
+          [
+            "1",
+            "3-5 random staff + P.Def down"
+          ],
+          [
+            "2",
+            "Very strong single hit"
+          ],
+          [
+            "3",
+            "Front-row staff"
+          ],
+          [
+            "4",
+            "3-5 random staff + P.Def down"
+          ],
+          [
+            "5",
+            "4 random staff"
+          ],
+          [
+            "6",
+            "Very strong single hit"
+          ],
+          [
+            "7",
+            "Front-row ice + staff res down"
+          ],
+          [
+            "8",
+            "Self P.Atk/speed up"
+          ],
+          [
+            "9",
+            "3-5 random staff + P.Def down"
+          ],
+          [
+            "10",
+            "3-5 random staff + P.Def down"
+          ],
+          [
+            "11",
+            "Very strong single hit"
+          ],
+          [
+            "12",
+            "3-5 random staff + P.Def down"
+          ],
+          [
+            "13",
+            "Front-row staff"
+          ],
+          [
+            "14",
+            "Very strong single hit"
+          ],
+          [
+            "15",
+            "3-5 random staff + P.Def down"
+          ],
+          [
+            "16",
+            "Self-heal + P.Def up"
+          ],
+          [
+            "17",
+            "4 random staff"
+          ],
+          [
+            "18",
+            "Front-row ice + staff res down"
+          ]
+        ],
+        "notes": [
+          "Turn-end purge changes to a debuff cleanse below 50%."
+        ]
+      },
+      {
+        "title": "Crow Adds",
+        "kind": "turn_table",
+        "columns": [
+          "Unit",
+          "Turn",
+          "Action"
+        ],
+        "rows": [
+          [
+            "Wu",
+            "1",
+            "Yan Long P.Atk/crit up"
+          ],
+          [
+            "Wu",
+            "2",
+            "Front-row physical"
+          ],
+          [
+            "Wu",
+            "3",
+            "Strong single physical"
+          ],
+          [
+            "Wu",
+            "4",
+            "Strong single physical"
+          ],
+          [
+            "Xiu",
+            "1",
+            "2 random wind + speed down"
+          ],
+          [
+            "Xiu",
+            "2",
+            "3 random wind"
+          ],
+          [
+            "Xiu",
+            "3",
+            "Yan Long regen"
+          ],
+          [
+            "Xiu",
+            "4",
+            "2 random wind + blind"
+          ]
+        ]
+      }
     ]
   },
   {
     "fight_key": "largo",
     "display_name": "Largo",
-    "enemy_aliases": ["Largo", "ラルゴ"],
+    "enemy_aliases": [
+      "Largo",
+      "ラルゴ"
+    ],
     "source_url": "https://game8.jp/octopathtraveler-sp/420192",
     "source_updated_at": "2026-03-06 15:39",
     "summary": "Machine-heavy fight where Largo is supported by several magic machines with different weakness sets.",
     "mechanics": "Largo is weak to dagger, bow, and ice. Machines add broad but changing coverage including sword, staff, bow, fan, ice, lightning, and wind. The fight becomes dangerous if machines stay up while Largo advances his pattern.",
     "strategy": "Bring ice plus dagger/bow coverage and enough AoE to clear machines. Keep mitigation active during machine waves, then use breaks to burst Largo once the field is stable.",
     "actions": [
-      {"name": "Largo Shot", "effect": "Physical pressure from Largo."},
-      {"name": "Magic Machine I", "effect": "Add with sword/staff/ice/lightning/wind style coverage."},
-      {"name": "Magic Machine II", "effect": "Add with sword/bow/fan/ice/lightning style coverage."},
-      {"name": "Machine Support", "effect": "Adds increase incoming turn pressure while alive."},
-      {"name": "Late Pattern", "effect": "Largo becomes harder to stabilize if add waves are not controlled."}
+      {
+        "title": "Largo Above 65%",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "Above 85%",
+          "85-65%"
+        ],
+        "rows": [
+          [
+            "0",
+            "-",
+            "Call machines III + IV"
+          ],
+          [
+            "1",
+            "2x front-row spear",
+            "2x front-row spear"
+          ],
+          [
+            "2",
+            "Spear hit + poison",
+            "Spear hit + poison"
+          ],
+          [
+            "3",
+            "Front-row fire",
+            "Stronger front-row fire"
+          ],
+          [
+            "4",
+            "2x front-row spear; braces",
+            "2x front-row spear; braces"
+          ],
+          [
+            "5",
+            "3 random fire + bleed",
+            "3 random fire + bleed"
+          ]
+        ]
+      },
+      {
+        "title": "Largo Below 65%",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "65-45%",
+          "45% and below"
+        ],
+        "rows": [
+          [
+            "0",
+            "Call machines V + VI",
+            "Call red + blue machines"
+          ],
+          [
+            "1",
+            "2x front-row spear",
+            "Very strong spear + SP restore; braces"
+          ],
+          [
+            "2",
+            "Spear hit + poison",
+            "Very strong lightning + paralysis"
+          ],
+          [
+            "3",
+            "Stronger front-row fire",
+            "Stronger front-row fire"
+          ],
+          [
+            "4",
+            "Very strong spear + SP restore; braces",
+            "2x front-row spear"
+          ],
+          [
+            "5",
+            "Very strong lightning + paralysis",
+            "-"
+          ]
+        ],
+        "notes": [
+          "If either final machine dies, or Largo reaches 25%, he uses Boost Shoes and enters the 3-action pattern."
+        ]
+      },
+      {
+        "title": "Largo 3-Action Pattern",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "Action"
+        ],
+        "rows": [
+          [
+            "0",
+            "Boost Shoes; then 3 actions"
+          ],
+          [
+            "1",
+            "Very strong spear + SP restore"
+          ],
+          [
+            "2",
+            "Front-row fire"
+          ],
+          [
+            "3",
+            "Spear hit + poison; braces"
+          ],
+          [
+            "4",
+            "Very strong lightning + paralysis"
+          ],
+          [
+            "5",
+            "2x front-row spear"
+          ],
+          [
+            "6",
+            "3 random fire + bleed"
+          ],
+          [
+            "7",
+            "2x front-row spear"
+          ],
+          [
+            "8",
+            "Spear hit + poison"
+          ],
+          [
+            "9",
+            "Stronger front-row fire"
+          ]
+        ],
+        "notes": [
+          "Boost Shoes is one-time and consumes that turn. Break timing can defer the braced lightning shot by one action cycle."
+        ]
+      },
+      {
+        "title": "Machine Patterns",
+        "kind": "turn_table",
+        "columns": [
+          "Unit",
+          "Turn",
+          "Action"
+        ],
+        "rows": [
+          [
+            "I",
+            "0",
+            "Cover Largo"
+          ],
+          [
+            "I",
+            "1",
+            "Bite"
+          ],
+          [
+            "I",
+            "2",
+            "Bite"
+          ],
+          [
+            "I",
+            "3",
+            "Front-row physical"
+          ],
+          [
+            "II",
+            "1",
+            "Front-row fire"
+          ],
+          [
+            "II",
+            "2",
+            "Single fire"
+          ],
+          [
+            "II",
+            "3",
+            "Stronger front-row fire"
+          ],
+          [
+            "II",
+            "4",
+            "Single fire"
+          ],
+          [
+            "III",
+            "0",
+            "Cover Largo"
+          ],
+          [
+            "III",
+            "1",
+            "Enemy P.Atk buff II"
+          ],
+          [
+            "III",
+            "2",
+            "Front-row physical"
+          ],
+          [
+            "III",
+            "3",
+            "Stronger front-row physical"
+          ],
+          [
+            "IV",
+            "1",
+            "Front-row dark"
+          ],
+          [
+            "IV",
+            "2",
+            "Enemy E.Atk buff II"
+          ],
+          [
+            "IV",
+            "3",
+            "Stronger front-row dark"
+          ],
+          [
+            "IV",
+            "4",
+            "Heal all enemies"
+          ],
+          [
+            "V",
+            "0",
+            "Cover Largo"
+          ],
+          [
+            "V",
+            "1",
+            "Enemy P.Atk buff III"
+          ],
+          [
+            "V",
+            "2",
+            "Single physical"
+          ],
+          [
+            "V",
+            "3",
+            "Front-row physical"
+          ],
+          [
+            "V",
+            "4",
+            "Front-row physical"
+          ],
+          [
+            "VI",
+            "1",
+            "Front-row dark"
+          ],
+          [
+            "VI",
+            "2",
+            "Enemy E.Atk buff III"
+          ],
+          [
+            "VI",
+            "3",
+            "Stronger front-row dark"
+          ],
+          [
+            "VI",
+            "4",
+            "Heal all enemies"
+          ],
+          [
+            "VI",
+            "5",
+            "3 random dark"
+          ],
+          [
+            "Red",
+            "0",
+            "Cover Largo"
+          ],
+          [
+            "Red",
+            "1",
+            "Enemy P.Atk/P.Def buff"
+          ],
+          [
+            "Red",
+            "2",
+            "2 random physical"
+          ],
+          [
+            "Red",
+            "3",
+            "Strong front-row physical"
+          ],
+          [
+            "Red",
+            "4",
+            "Self-heal + shields"
+          ],
+          [
+            "Blue",
+            "0",
+            "Cover after Red falls"
+          ],
+          [
+            "Blue",
+            "1",
+            "3 random lightning"
+          ],
+          [
+            "Blue",
+            "2",
+            "Enemy E.Atk/E.Def buff"
+          ],
+          [
+            "Blue",
+            "3",
+            "Heal all enemies"
+          ],
+          [
+            "Blue",
+            "4",
+            "Strong front-row lightning"
+          ]
+        ]
+      }
     ]
   },
   {
     "fight_key": "hammy",
     "display_name": "Hammy",
-    "enemy_aliases": ["Hammy", "H'aanit?", "ハミィ"],
+    "enemy_aliases": [
+      "Hammy",
+      "H'aanit?",
+      "ハミィ"
+    ],
     "source_url": "https://game8.jp/octopathtraveler-sp/493451",
     "source_updated_at": "2025-11-21 00:05",
     "summary": "Three-enemy fight with Hammy and two assistants. Cover, evasion, traps, counters, and BP-based finishers make target order important.",
     "mechanics": "Hammy is weak to spear, fan, and wind. Her assistants can cover her, gain physical or elemental evasion, and punish the wrong damage type. HP thresholds change all enemy patterns.",
     "strategy": "Use fan/wind overlap, watch which assistant is covering, and avoid triggering trap counters. Clear the support enemies cleanly, then handle Hammy's final self-buff and shield-lock phase with planned breaks.",
     "actions": [
-      {"name": "Shift Blame (Physical)", "effect": "Gives an assistant cover and physical evasion."},
-      {"name": "Shift Blame (Elemental)", "effect": "Gives an assistant cover and elemental evasion."},
-      {"name": "Weakness Analysis", "effect": "Lowers party P.Def and E.Def."},
-      {"name": "Hammy Trap (Heal)", "effect": "Counter state that heals enemies when hit."},
-      {"name": "Hammy Trap (Attack)", "effect": "Counter state that retaliates with heavy book damage."},
-      {"name": "Hammy Finish", "effect": "Powerful single-target attack when BP is full."},
-      {"name": "Main Event", "effect": "After both assistants fall, Hammy gains offensive buffs and shield lock."}
+      {
+        "title": "Opening Pattern",
+        "kind": "turn_table",
+        "columns": [
+          "Turn",
+          "Action",
+          "End of turn"
+        ],
+        "rows": [
+          [
+            "1",
+            "Shift blame (physical)",
+            "-"
+          ],
+          [
+            "2",
+            "Weakness analysis",
+            "-"
+          ],
+          [
+            "3",
+            "3-4 random tome hits",
+            "-"
+          ],
+          [
+            "4",
+            "3x front-row ice",
+            "-"
+          ],
+          [
+            "5",
+            "Strong tome hit + random ailment",
+            "-"
+          ]
+        ],
+        "notes": [
+          "After Hammy Finish, restart from turn 1. Break recovery resumes from the current position."
+        ]
+      },
+      {
+        "title": "After 'Careless'",
+        "kind": "turn_table",
+        "columns": [
+          "Turn",
+          "Action",
+          "End of turn"
+        ],
+        "rows": [
+          [
+            "1",
+            "Shift blame (elemental)",
+            "-"
+          ],
+          [
+            "2",
+            "3-4 random tome hits",
+            "Heal trap"
+          ],
+          [
+            "3",
+            "Introduce fighters; buffs + BP",
+            "-"
+          ],
+          [
+            "4",
+            "Weakness analysis",
+            "Heal trap"
+          ],
+          [
+            "5",
+            "3x front-row ice",
+            "-"
+          ],
+          [
+            "6",
+            "Strong tome hit + random ailment",
+            "Heal trap"
+          ]
+        ],
+        "notes": [
+          "This phase starts when one enemy drops below 75% HP."
+        ]
+      },
+      {
+        "title": "After 'Pinch'",
+        "kind": "turn_table",
+        "columns": [
+          "Turn",
+          "Action",
+          "End of turn"
+        ],
+        "rows": [
+          [
+            "1",
+            "Shift blame (physical)",
+            "-"
+          ],
+          [
+            "2",
+            "Introduce fighters; buffs + BP",
+            "Attack trap"
+          ],
+          [
+            "3",
+            "Second's cheer; regen another enemy",
+            "-"
+          ],
+          [
+            "4",
+            "Weakness analysis",
+            "Attack trap"
+          ],
+          [
+            "5",
+            "Strong tome hit + random ailment",
+            "-"
+          ],
+          [
+            "6",
+            "1-8 random tome hits",
+            "Attack trap"
+          ]
+        ],
+        "notes": [
+          "This phase starts when one enemy drops below 50% HP. Triggering the attack trap can heavily damage the front row."
+        ]
+      },
+      {
+        "title": "After 'Fight Starts Now'",
+        "kind": "turn_table",
+        "columns": [
+          "Turn",
+          "Action",
+          "End of turn"
+        ],
+        "rows": [
+          [
+            "1",
+            "Weakness analysis",
+            "Heal or attack trap"
+          ],
+          [
+            "2",
+            "Introduce fighters; buffs + BP",
+            "Shift blame"
+          ],
+          [
+            "3",
+            "Second's cheer; regen another enemy",
+            "Heal or attack trap"
+          ],
+          [
+            "4",
+            "Strong tome hit + random ailment",
+            "Shift blame"
+          ],
+          [
+            "5",
+            "1-8 random tome hits",
+            "Heal or attack trap"
+          ],
+          [
+            "6",
+            "Return to 1",
+            "Shift blame"
+          ]
+        ],
+        "notes": [
+          "This phase starts when an enemy falls below 25% HP; the trap/blame type varies."
+        ]
+      },
+      {
+        "title": "Solo Hammy",
+        "kind": "turn_table",
+        "columns": [
+          "Turn",
+          "Action",
+          "End of turn"
+        ],
+        "rows": [
+          [
+            "0",
+            "Main-event self buff + shield lock",
+            "-"
+          ],
+          [
+            "1",
+            "1-8 random tome hits",
+            "-"
+          ],
+          [
+            "2",
+            "Strong tome hit + random ailment",
+            "-"
+          ],
+          [
+            "3",
+            "Attack trap",
+            "-"
+          ],
+          [
+            "4",
+            "1-8 random tome hits",
+            "-"
+          ],
+          [
+            "5",
+            "3x front-row ice",
+            "-"
+          ]
+        ],
+        "notes": [
+          "Starts after both assistants are defeated. Hammy's shield max becomes 11 and multi-hit shield lock is applied."
+        ]
+      }
     ]
   },
   {
     "fight_key": "mirgardi",
     "display_name": "Mirgardi",
-    "enemy_aliases": ["Mirgardi", "Milgardi", "ミルガルディ"],
+    "enemy_aliases": [
+      "Mirgardi",
+      "Milgardi",
+      "ミルガルディ"
+    ],
     "source_url": "https://game8.jp/octopathtraveler-sp/583644",
     "source_updated_at": "2026-03-06 15:41",
     "summary": "Fan boss with normal and shadow versions. The fight revolves around Dragon Tail points, changing weaknesses, and punishing over-attacking outside break windows.",
     "mechanics": "Mirgardi begins with sword, axe, tome, and ice-style coverage, then changes weaknesses as HP falls. Dragon Tail points build when she is hit outside break and raise her threat until spent.",
     "strategy": "Do not overbuild Dragon Tail points with low-value attacks. Break decisively, burst during break, and use mitigation for fan and elemental pressure. Track the current weakness set before planning each break.",
     "actions": [
-      {"name": "Dragon Tail - Swift", "effect": "Starts Dragon Tail point tracking; points increase when hit outside break."},
-      {"name": "Dragon Severing Fan", "effect": "Three fan hits to one target."},
-      {"name": "Offensive Fan Sweep", "effect": "Front-row fan damage and self P.Atk up."},
-      {"name": "Flexible Tempo", "effect": "Applies permanent speed down to self outside break flow."},
-      {"name": "Wild Sweep", "effect": "Three random fan hits."},
-      {"name": "Flame Talisman", "effect": "Front-row fire pressure."}
+      {
+        "title": "Mirgardi Normal",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "Above 70%",
+          "70-40%",
+          "40% and below"
+        ],
+        "rows": [
+          [
+            "0",
+            "Dragon Tail Quick",
+            "Weakness shift",
+            "Weakness shift"
+          ],
+          [
+            "1",
+            "Dragon-cutting fan",
+            "Random fire talismans",
+            "Random fire talismans"
+          ],
+          [
+            "2",
+            "Fan AoE + P.Atk up",
+            "Fan AoE + P.Atk up",
+            "Defensive stance; braces"
+          ],
+          [
+            "3",
+            "3 random fan hits",
+            "Defensive stance",
+            "Dragon thrust"
+          ],
+          [
+            "4",
+            "Front-row fire",
+            "Dragon thrust; braces",
+            "Dark-axe mimic"
+          ],
+          [
+            "5",
+            "Dragon-cutting fan",
+            "Dragon thrust",
+            "Front-row fire"
+          ],
+          [
+            "6",
+            "Dark-axe mimic",
+            "Front-row fire",
+            "Dragon thrust"
+          ],
+          [
+            "7",
+            "-",
+            "3 random fan hits",
+            "Fan AoE + P.Atk up"
+          ],
+          [
+            "8",
+            "-",
+            "Dragon-cutting fan",
+            "Random fire talismans; braces"
+          ],
+          [
+            "9",
+            "-",
+            "-",
+            "Dragon thrust"
+          ],
+          [
+            "10",
+            "-",
+            "-",
+            "Dragon-cutting fan"
+          ]
+        ],
+        "notes": [
+          "Turn-end tempo effect fires outside break. At 40% or lower, break recovery also triggers weakness shift."
+        ]
+      },
+      {
+        "title": "Mirgardi Shadow",
+        "kind": "turn_table",
+        "columns": [
+          "T",
+          "Above 90%",
+          "90-65%",
+          "65-35%",
+          "35% and below"
+        ],
+        "rows": [
+          [
+            "0",
+            "Dragon Tail Quick",
+            "Raging weakness shift",
+            "Sky-scale tail",
+            "Night concealment"
+          ],
+          [
+            "1",
+            "Flurry fan",
+            "Random fire/wind talismans",
+            "Death omen",
+            "Death omen"
+          ],
+          [
+            "2",
+            "Fan AoE + P.Atk up",
+            "Fan AoE + P.Atk up",
+            "Fan AoE + P.Atk up",
+            "Dragon thrust"
+          ],
+          [
+            "3",
+            "Dragon thrust",
+            "Free-form guard",
+            "Dragon thrust",
+            "Sealing dark-axe mimic"
+          ],
+          [
+            "4",
+            "Fire/wind talisman",
+            "Dragon thrust",
+            "Fire/wind talisman",
+            "Fan AoE + P.Atk up"
+          ],
+          [
+            "5",
+            "Muddy dragon fan",
+            "Fire/wind talisman",
+            "Muddy dragon fan",
+            "Free-form guard"
+          ],
+          [
+            "6",
+            "Random fire/wind talismans",
+            "Dragon thrust",
+            "Flurry fan",
+            "Muddy dragon fan"
+          ],
+          [
+            "7",
+            "-",
+            "Muddy dragon fan",
+            "Free-form guard",
+            "Random fire/wind talismans"
+          ],
+          [
+            "8",
+            "-",
+            "Flurry fan",
+            "Dragon fan",
+            "Wicked dragon thrust"
+          ],
+          [
+            "9",
+            "-",
+            "-",
+            "Sealing dark-axe mimic",
+            "Fire/wind talisman"
+          ],
+          [
+            "10",
+            "-",
+            "-",
+            "Muddy dragon fan",
+            "Flurry fan"
+          ]
+        ],
+        "notes": [
+          "Turn-end tempo effect continues outside break. At 90% or lower, break recovery also triggers weakness shift."
+        ]
+      }
     ]
   },
   {
     "fight_key": "kagemune",
     "display_name": "Kagemune",
-    "enemy_aliases": ["Kagemune", "Kagemume", "カゲムネ"],
+    "enemy_aliases": [
+      "Kagemune",
+      "Kagemume",
+      "カゲムネ"
+    ],
     "source_url": "https://game8.jp/octopathtraveler-sp/659640",
     "source_updated_at": "2026-03-06 15:42",
     "summary": "Spear/bow/fire/light fight with a stronger shadow version. The shadow version has very high shields and demands planned breaks.",
     "mechanics": "Base Kagemune has spear, bow, fire, and light weaknesses; the shadow version keeps the same weakness theme with much higher shield pressure. Patterns lean into physical pressure and strict break timing.",
     "strategy": "Bring redundant spear/bow/fire/light shaving, keep defensive debuffs active, and do not enter the shadow version without enough burst saved for break windows.",
     "actions": [
-      {"name": "Spear Assault", "effect": "Physical spear pressure."},
-      {"name": "Bow Assault", "effect": "Ranged physical pressure."},
-      {"name": "Fire Technique", "effect": "Fire-element pressure."},
-      {"name": "Shadow Form", "effect": "Higher shield count and stronger pattern."},
-      {"name": "Burst Window", "effect": "Most damage should be concentrated during planned breaks."}
+      {
+        "title": "Kagemune Triggers",
+        "kind": "action_catalog",
+        "columns": [
+          "Trigger",
+          "Action",
+          "Detail"
+        ],
+        "rows": [
+          [
+            "Battle start / after clones vanish",
+            "Two-body counter art",
+            "Gains 2 actions plus random-target evasion above 90%, AoE evasion from about 90-60%, and both evasion types plus offensive buffs below about 60%."
+          ],
+          [
+            "Turn end",
+            "False-body counter art",
+            "Refreshes random-target, AoE, or both evasion types based on HP band."
+          ],
+          [
+            "At or below about 90%, no clones alive",
+            "Clone technique",
+            "Summons two clones, or three below about 25%, and gives body/clone evasion and buffs."
+          ],
+          [
+            "Break recovery below 90%",
+            "Binding false body",
+            "Front row cannot swap and physical attacks fail; back row elemental attacks fail; Kagemune gains shield lock and refreshes evasion."
+          ],
+          [
+            "BP max",
+            "Purple rain",
+            "5x party dagger attack with burn, frostbite, corrosion, and self potency up."
+          ],
+          [
+            "Evasion triggers",
+            "Counter blades",
+            "Counters the attacker or front row and can inflict burn, frostbite, or corrosion."
+          ],
+          [
+            "Clone only",
+            "Countdown seal",
+            "Clone starts a 2-count timer, then uses a full-party status attack."
+          ]
+        ],
+        "notes": [
+          "Game8 lists a detailed action catalog and trigger rules, not a simple repeating turn loop for this fight."
+        ]
+      },
+      {
+        "title": "Kagemune Action Catalog",
+        "kind": "action_catalog",
+        "columns": [
+          "Action",
+          "Effect"
+        ],
+        "rows": [
+          [
+            "Fire art",
+            "Front-row fire plus P.Def down and burn."
+          ],
+          [
+            "Poison blades",
+            "2x single physical plus poison."
+          ],
+          [
+            "Mist-breaking blade",
+            "3 random physical hits; each can lower P.Atk/E.Atk."
+          ],
+          [
+            "Sweep",
+            "Front-row physical plus speed down."
+          ],
+          [
+            "Twilight",
+            "2x single physical."
+          ],
+          [
+            "Wind corrosion art",
+            "3 random wind hits; each can inflict corrosion."
+          ],
+          [
+            "Snake sweep",
+            "3x full-party physical with poison/bleed chance."
+          ],
+          [
+            "Clone twilight",
+            "3x single physical."
+          ],
+          [
+            "Soul-draining wind",
+            "3 random wind hits with dagger-res down and corrosion."
+          ],
+          [
+            "Soul-draining fire",
+            "Front-row fire with P.Def/E.Def down and burn."
+          ],
+          [
+            "Countdown finisher",
+            "Full-party physical plus burn, frostbite, and corrosion for 6 turns."
+          ]
+        ]
+      }
     ]
   },
   {
     "fight_key": "aoi",
     "display_name": "Aoi",
-    "enemy_aliases": ["Aoi", "アオイ"],
+    "enemy_aliases": [
+      "Aoi",
+      "アオイ"
+    ],
     "source_url": "https://game8.jp/octopathtraveler-sp/699639",
     "source_updated_at": "2026-03-06 15:43",
     "summary": "Modern Arena fight with a base version and a much tougher shadow version. The shadow version has huge HP and high shields.",
     "mechanics": "Base Aoi has broad weaknesses; the shadow version focuses on dagger, bow, ice, and wind with very high shield count and about ten million HP. The fight rewards stable break cycles over quick racing.",
     "strategy": "Use dagger/bow/ice/wind coverage, strong sustain, and long-fight SP planning. Save major burst for break turns and keep debuffs up through the long HP pool.",
     "actions": [
-      {"name": "Base Pattern", "effect": "Broad weakness set with lower shields."},
-      {"name": "Shadow Pattern", "effect": "High-shield version focused on dagger, bow, ice, and wind."},
-      {"name": "High HP Pool", "effect": "Requires repeated break-and-burst cycles."},
-      {"name": "Sustain Check", "effect": "Long fight stresses healing, SP, and debuff uptime."}
+      {
+        "title": "Aoi Shadow EX Pattern",
+        "kind": "state_table",
+        "columns": [
+          "Turn",
+          "Form",
+          "State",
+          "Actions"
+        ],
+        "rows": [
+          [
+            "1",
+            "-",
+            "-",
+            "Front-row attack + P.Def down; single attack"
+          ],
+          [
+            "2",
+            "-",
+            "-",
+            "3 random hits; front-row attack + silence"
+          ],
+          [
+            "3",
+            "Flowing Heaven",
+            "Multi-hit damage cut; elemental evasion; turn-end debuff cleanse",
+            "Front row quietude; single attack; 3 random hits"
+          ],
+          [
+            "4",
+            "Flowing Heaven",
+            "Multi-hit damage cut; physical evasion; turn-end debuff cleanse",
+            "3 random hits; 2 random hits + silence; front-row attack + P.Def down"
+          ],
+          [
+            "5",
+            "Flowing Heaven",
+            "Multi-hit damage cut; elemental evasion; turn-end debuff cleanse",
+            "6x front-row hit + halves parameter buffs"
+          ],
+          [
+            "6",
+            "Cessation",
+            "Offense boosted; physical full evasion + counter",
+            "Front-row 3-hit ignore-defense attack; 10-hit mixed random attack"
+          ],
+          [
+            "7",
+            "Cessation",
+            "Offense boosted; elemental full evasion + counter",
+            "6x full-party hit + halves buffs; front-row quietude"
+          ],
+          [
+            "8+",
+            "Flowing Heaven",
+            "Alternates physical/elemental evasion",
+            "Repeats Flowing Heaven and Cessation cycles"
+          ]
+        ],
+        "notes": [
+          "Break recovery returns to Flowing Heaven for 4 turns while HP is green, or 2 turns while HP is yellow, then Cessation for 2 turns."
+        ]
+      },
+      {
+        "title": "Aoi EX2 Start",
+        "kind": "state_table",
+        "columns": [
+          "Turn",
+          "Form",
+          "State",
+          "Actions"
+        ],
+        "rows": [
+          [
+            "1",
+            "Flowing Heaven",
+            "Elemental evasion",
+            "Front row quietude; single attack; 3 random hits"
+          ],
+          [
+            "2",
+            "Flowing Heaven",
+            "Physical evasion",
+            "3 random hits; 2 random hits + silence; front-row attack + P.Def down"
+          ],
+          [
+            "3",
+            "Flowing Heaven",
+            "Elemental evasion",
+            "6x front-row hit + halves buffs"
+          ],
+          [
+            "4",
+            "Cessation",
+            "Physical full evasion + counter",
+            "Front-row 3-hit ignore-defense attack; 10-hit mixed random attack"
+          ],
+          [
+            "5",
+            "Cessation",
+            "Elemental full evasion + counter",
+            "6x full-party hit + halves buffs; front-row quietude"
+          ],
+          [
+            "6+",
+            "Flowing Heaven",
+            "Alternating evasion",
+            "Repeats the same cycle as Shadow EX"
+          ]
+        ],
+        "notes": [
+          "Game8 notes EX2 begins from the Shadow EX turn-3 behavior."
+        ]
+      }
     ]
   },
   {
     "fight_key": "rayme",
     "display_name": "Rayme",
-    "enemy_aliases": ["Rayme", "Reime", "レイメ"],
+    "enemy_aliases": [
+      "Rayme",
+      "Reime",
+      "レイメ"
+    ],
     "source_url": "https://game8.jp/octopathtraveler-sp/750802",
     "source_updated_at": "2026-03-06 15:42",
     "summary": "Shorter but gimmick-heavy fight built around Silence-like ability sealing and alternating physical/elemental interception.",
     "mechanics": "Rayme is weak to spear, dagger, and wind and has about 950k HP. She opens by sealing battle abilities, intercepts all physical and elemental attacks for two turns, then alternates physical and elemental interception. Her BP max attack is dangerous.",
     "strategy": "Equip silence/special-effect countermeasures on key units, use EX skills/ultimates/latent-style tools when sealed, and avoid attacking into the active interception type. Smaller teams can reduce forced basic attacks during the opening.",
     "actions": [
-      {"name": "Silence Field", "effect": "At battle start, seals multiple battle abilities for several turns."},
-      {"name": "Full Interception", "effect": "Turns 1-2 negate and counter both physical and elemental attacks."},
-      {"name": "Physical Interception", "effect": "From turn 3, odd turns punish physical attacks."},
-      {"name": "Elemental Interception", "effect": "From turn 4, even turns punish elemental attacks."},
-      {"name": "BP Max Attack", "effect": "Strong full-party attack when BP reaches max."}
+      {
+        "title": "Rayme Interception",
+        "kind": "state_table",
+        "columns": [
+          "Turn",
+          "Rayme state",
+          "Recommended action"
+        ],
+        "rows": [
+          [
+            "Start",
+            "Applies quietude to front and back rows for 3 turns",
+            "Use quietude immunity, EX skills, ultimates, latent-style tools, or a smaller team."
+          ],
+          [
+            "1-2",
+            "Physical and elemental interception",
+            "Prepare with buffs, debuffs, and regen; avoid attacks that will be nullified and countered."
+          ],
+          [
+            "3 and odd turns",
+            "Physical interception",
+            "Use elemental attacks or non-attacking setup."
+          ],
+          [
+            "4 and even turns",
+            "Elemental interception",
+            "Use physical attacks or non-attacking setup."
+          ],
+          [
+            "BP max",
+            "Strong full-party attack",
+            "Expect first BP-max attack around the end of turn 4 from battle start."
+          ]
+        ],
+        "notes": [
+          "Interception means the attack is nullified and countered. Rayme has about 950k HP, so clean burst windows matter more than a long rotation."
+        ]
+      }
     ]
   }
 ]
