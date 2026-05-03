@@ -374,6 +374,34 @@ def _scan_accessory_stats(
         out.append((name, val))
     return out
 
+
+# Some accessory blocks (Rique, Cygna, Pia) interpose a blank row between the
+# header row and the first stat row; tolerate up to this many blanks before
+# giving up.
+_ACC_MAX_BLANK_SKIP = 3
+
+
+def _find_first_stat_row(
+    block_rows: list[list[dict[str, Any]]], after_idx: int,
+) -> int | None:
+    """Return the index of the first row at or after ``after_idx`` whose
+    col 20 is a known ``=STAT`` formula. Skips up to ``_ACC_MAX_BLANK_SKIP``
+    fully-blank-c20 rows; bails on any non-blank, non-stat c20 (e.g. an
+    'Exclusive Accessory N' or 'Notes' marker for the next section)."""
+    skipped = 0
+    for ridx in range(after_idx, len(block_rows)):
+        r = block_rows[ridx]
+        if _COL_STAT_VAL >= len(r):
+            return None
+        if _formula_stat_name(r[_COL_STAT_ICON]):
+            return ridx
+        if _cell_text(r[_COL_STAT_ICON]).strip():
+            return None
+        skipped += 1
+        if skipped > _ACC_MAX_BLANK_SKIP:
+            return None
+    return None
+
 # The sheet calls the unit's ultimate "Special"; both labels collapse to
 # kind="ultimate". TP rows are the unit's divine skill (still consumes SP).
 _KIND_LABEL_MAP = {
@@ -498,19 +526,24 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
     # Accessory N" / "Unique Effects" markers in col 20 demarcate extra
     # accessory entries. Stat boosts live in the rows immediately below
     # each accessory header as `=STAT` formula icons (col 20) paired with
-    # numeric values (col 21).
+    # numeric values (col 21). The first stat row also carries the
+    # accessory's effect description in c23. Some blocks (Rique, Cygna,
+    # Pia) interpose a blank spacer between header and stats — locate the
+    # first stat row dynamically rather than hardcoding offset 1.
     if _COL_EQUIP < len(header_row):
         primary_name = _cell_text(header_row[_COL_EQUIP])
-        primary_effect: str | None = None
-        if len(block_rows) > 1 and _COL_EQUIP_EFF < len(block_rows[1]):
-            primary_effect = _cell_text(block_rows[1][_COL_EQUIP_EFF]) or None
         if primary_name and primary_name.lower() != "other info":
+            stat_start = _find_first_stat_row(block_rows, 1)
+            desc_idx = stat_start if stat_start is not None else 1
+            primary_effect: str | None = None
+            if desc_idx < len(block_rows) and _COL_EQUIP_EFF < len(block_rows[desc_idx]):
+                primary_effect = _cell_text(block_rows[desc_idx][_COL_EQUIP_EFF]) or None
             block.equipment.append({
                 "slot": None,
                 "name": primary_name,
                 "description": primary_effect,
                 "is_exclusive": False,
-                "stats": _scan_accessory_stats(block_rows, 1),
+                "stats": _scan_accessory_stats(block_rows, stat_start) if stat_start is not None else [],
             })
         for ridx, r in enumerate(block_rows):
             if _COL_EXCL_TAG >= len(r):
@@ -523,11 +556,14 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
             is_unique = label_lower == _TAG_UNIQUE_EFFECTS
             if not (is_excl or is_unique):
                 continue
-            # Effect text: prefer c23 of the next row, fall back to c21
-            # if c21 is non-numeric (Cardona's "Unique Effects" layout).
+            # Effect text: prefer c23 of the first stat row, fall back to
+            # c21 of the row immediately after the marker if c21 is
+            # non-numeric (Cardona's "Unique Effects" layout).
+            stat_start = _find_first_stat_row(block_rows, ridx + 1)
+            desc_idx = stat_start if stat_start is not None else (ridx + 1)
             eff = ""
-            if ridx + 1 < len(block_rows):
-                nr = block_rows[ridx + 1]
+            if desc_idx < len(block_rows):
+                nr = block_rows[desc_idx]
                 if _COL_EQUIP_EFF < len(nr):
                     eff = _cell_text(nr[_COL_EQUIP_EFF])
                 if not eff and _COL_EQUIP < len(nr):
@@ -539,7 +575,7 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
                 "name": label,
                 "description": eff or None,
                 "is_exclusive": is_excl,
-                "stats": _scan_accessory_stats(block_rows, ridx + 1),
+                "stats": _scan_accessory_stats(block_rows, stat_start) if stat_start is not None else [],
             })
 
     # Profile column: take the longest non-empty text seen as self_buffs_text;
