@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from io import BytesIO
 import json
 import sqlite3
+import textwrap
 from typing import Any, Literal
 
 import discord
@@ -251,6 +252,41 @@ def _chunk_lines(lines: list[str], limit: int) -> list[str]:
     return chunks
 
 
+def _split_oversize_paragraph(line: str, limit: int = FIELD_VALUE_LIMIT) -> list[str]:
+    if len(line) <= limit:
+        return [line]
+    pieces = textwrap.wrap(
+        line,
+        width=limit,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    if not pieces:
+        return [_truncate(line, limit)]
+    return pieces
+
+
+def _split_paragraphs_into_field_values(
+    lines: list[str],
+    limit: int = FIELD_VALUE_LIMIT,
+) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+    for raw in lines:
+        for piece in _split_oversize_paragraph(raw, limit):
+            if not current:
+                current = piece
+                continue
+            if len(current) + 1 + len(piece) <= limit:
+                current = f"{current}\n{piece}"
+            else:
+                chunks.append(current)
+                current = piece
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def _row_values(row: Any, columns: list[str]) -> list[str]:
     if isinstance(row, dict):
         return [str(row.get(column, "")) for column in columns]
@@ -315,6 +351,58 @@ def _chunk_code_lines(lines: list[str], limit: int) -> list[str]:
     return chunks
 
 
+def _clean_section_text(value: str) -> str:
+    return " ".join(str(value).split())
+
+
+def _is_blank_section_value(value: str) -> bool:
+    return not value or value in {"-", "\u2014", "\u00e2\u20ac\u201d"}
+
+
+def _finish_sentence(value: str) -> str:
+    if not value:
+        return value
+    if value.endswith((".", "!", "?", ")", "]")):
+        return value
+    return f"{value}."
+
+
+def _lead_for_row(label: str, value: str) -> str:
+    normalized = label.strip().lower()
+    if normalized in {"t", "turn", "turns"}:
+        return f"Turn {value}"
+    if normalized == "trigger":
+        return f"Trigger: {value}"
+    return value
+
+
+def _section_row_lines(columns: list[str], rows: list[Any]) -> list[str]:
+    lines: list[str] = []
+    for row in rows:
+        values = [_clean_section_text(value) for value in _row_values(row, columns)]
+        if not any(not _is_blank_section_value(value) for value in values):
+            continue
+
+        lead = ""
+        body_parts: list[str] = []
+        for idx, (column, value) in enumerate(zip(columns, values)):
+            if _is_blank_section_value(value):
+                continue
+            column = _clean_section_text(column)
+            if idx == 0:
+                lead = _lead_for_row(column, value)
+                continue
+            body_parts.append(f"{column}: {_finish_sentence(value)}")
+
+        if lead and body_parts:
+            lines.append(f"**{lead}** - {' '.join(body_parts)}")
+        elif lead:
+            lines.append(f"**{lead}**")
+        elif body_parts:
+            lines.append(" ".join(body_parts))
+    return lines
+
+
 def _section_fields(section: dict[str, Any]) -> list[tuple[str, str]]:
     title = str(section.get("title") or "Actions").strip()
     kind = str(section.get("kind") or "").strip()
@@ -324,20 +412,26 @@ def _section_fields(section: dict[str, Any]) -> list[tuple[str, str]]:
     fields: list[tuple[str, str]] = []
 
     if columns and isinstance(rows, list):
-        chunks = _chunk_code_lines(_table_lines(columns, rows), FIELD_VALUE_LIMIT)
+        chunks = _split_paragraphs_into_field_values(
+            _section_row_lines(columns, rows),
+            FIELD_VALUE_LIMIT,
+        )
         for idx, chunk in enumerate(chunks, start=1):
             name = title if len(chunks) == 1 else f"{title} ({idx}/{len(chunks)})"
             fields.append((_truncate(name, FIELD_NAME_LIMIT), chunk))
     elif isinstance(rows, list):
         lines = [str(row).strip() for row in rows if str(row).strip()]
-        chunks = _chunk_lines(lines, FIELD_VALUE_LIMIT)
+        chunks = _split_paragraphs_into_field_values(lines, FIELD_VALUE_LIMIT)
         for idx, chunk in enumerate(chunks, start=1):
             name = title if len(chunks) == 1 else f"{title} ({idx}/{len(chunks)})"
             fields.append((_truncate(name, FIELD_NAME_LIMIT), chunk))
 
     if notes:
         note_lines = [f"- {note}" for note in notes]
-        for idx, chunk in enumerate(_chunk_lines(note_lines, FIELD_VALUE_LIMIT), start=1):
+        for idx, chunk in enumerate(
+            _split_paragraphs_into_field_values(note_lines, FIELD_VALUE_LIMIT),
+            start=1,
+        ):
             name = f"{title} Notes" if idx == 1 else f"{title} Notes ({idx})"
             fields.append((_truncate(name, FIELD_NAME_LIMIT), chunk))
 
