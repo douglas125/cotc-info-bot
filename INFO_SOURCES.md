@@ -117,6 +117,38 @@ Same v4 endpoint, same field mask. One enemy-specific gap:
   discussion API (`spreadsheets.comments.list`), not returned by
   `spreadsheets.get`. We intentionally don't fetch them in v1.
 
+## Supplemental source — Game8 Arena fight guides
+
+- **Arena index URL**: <https://game8.jp/octopathtraveler-sp/383516>
+- **Purpose**: source for the pre-parsed `/enemy` "Fight notes" dropdown
+  section for Arena champions. These notes are short English paraphrases
+  with source links, not copied article bodies.
+- **Storage policy**: seeded into the refresh-safe `arena_fight_notes`
+  table from `db/seed/arena_fight_notes.json` during DB bootstrap. This
+  table is app-owned reference data and must **not** be added to any
+  `/refresh` wipe loop.
+- **Join policy**: notes join to `enemies` by normalized aliases rather
+  than `enemy_id`, because enemy rows are rebuilt on each sheet sync.
+  User-facing aliases such as `Kagemune` and `Rayme` should be included
+  even when the current sheet spelling differs or the enemy row is not
+  present yet.
+
+Seeded guide pages:
+
+- Tikilen: <https://game8.jp/octopathtraveler-sp/371120>
+- Glossom: <https://game8.jp/octopathtraveler-sp/373532>
+- Varkyn: <https://game8.jp/octopathtraveler-sp/378306>
+- Ri'tu: <https://game8.jp/octopathtraveler-sp/386171>
+- Gertrude: <https://game8.jp/octopathtraveler-sp/391040>
+- Yunnie: <https://game8.jp/octopathtraveler-sp/396589>
+- Yan Long: <https://game8.jp/octopathtraveler-sp/409368>
+- Largo: <https://game8.jp/octopathtraveler-sp/420192>
+- Hammy: <https://game8.jp/octopathtraveler-sp/493451>
+- Mirgardi: <https://game8.jp/octopathtraveler-sp/583644>
+- Kagemune: <https://game8.jp/octopathtraveler-sp/659640>
+- Aoi: <https://game8.jp/octopathtraveler-sp/699639>
+- Rayme: <https://game8.jp/octopathtraveler-sp/750802>
+
 ## Tertiary source — Pet sheet (Seed Story Content)
 
 - **URL**: <https://docs.google.com/spreadsheets/d/1pApYNOrKWliMn_25Fs23Lhc8wlSDwutxCYJzyufSwUY/>
