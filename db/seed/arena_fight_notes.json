@@ -1,0 +1,233 @@
+[
+  {
+    "fight_key": "tikilen",
+    "display_name": "Tikilen",
+    "enemy_aliases": ["Tikilen", "Tiki", "ティキレン"],
+    "source_url": "https://game8.jp/octopathtraveler-sp/371120",
+    "source_updated_at": "2026-03-06 15:38",
+    "summary": "Wind/sword Arena fight with two mercenary adds. Tikilen becomes much harder below 40% HP when her shield drops and non-critical hits stop shaving shields.",
+    "mechanics": "Main weaknesses are bow, fan, and light. Both adds share bow/light coverage, use counters or party buffs, and can slow the fight if left alive. Tikilen follows scripted HP-band patterns and gains a critical-only shield phase at low HP.",
+    "strategy": "Bring bow/light multi-hit coverage, a tank or strong mitigation, and steady P.Atk/E.Atk debuffs. Avoid feeding physical counters, remove adds before committing to Tikilen, and prepare hunters or guaranteed-crit support for the low-HP phase.",
+    "actions": [
+      {"name": "Gale Blades", "effect": "Two wind hits to the front row."},
+      {"name": "Flash Strike", "effect": "Sword attack to the front row."},
+      {"name": "Wind Thrust", "effect": "Heavy single-target wind hit."},
+      {"name": "Flurry Slash", "effect": "Three random sword hits."},
+      {"name": "Swift Step", "effect": "Raises Tikilen's speed."},
+      {"name": "Windfang Flurry", "effect": "Three random wind hits."},
+      {"name": "Last Stand", "effect": "At low HP, enables critical-only shield damage and lowers max shields."},
+      {"name": "Shield Repair", "effect": "Mercenary restores Tikilen's shields when they are low."}
+    ]
+  },
+  {
+    "fight_key": "glossom",
+    "display_name": "Glossom",
+    "enemy_aliases": ["Glossom", "グロッサム"],
+    "source_url": "https://game8.jp/octopathtraveler-sp/373532",
+    "source_updated_at": "2026-03-06 15:36",
+    "summary": "Physical-heavy dancer fight with two dancer adds and a dangerous late phase that locks some of Glossom's weaknesses.",
+    "mechanics": "Glossom starts weak to spear, axe, and dark, while the adds give useful axe/dark overlap. At low HP, spear and axe are locked, forcing dark-focused breaks or off-weakness shield tools.",
+    "strategy": "Use physical defense gear, P.Atk debuffs, axe/dark coverage, and stable healing. Remove adds first so buffs and extra actions do not snowball, then plan the final break around dark damage.",
+    "actions": [
+      {"name": "Dance of Enthrallment", "effect": "Can inflict charm-style disruption."},
+      {"name": "Fan Strike", "effect": "Single-target fan physical damage."},
+      {"name": "Sweeping Fan", "effect": "Front-row fan physical damage."},
+      {"name": "Dark Dance", "effect": "Dark-element pressure."},
+      {"name": "Radiant Step", "effect": "Buffs Glossom or allies."},
+      {"name": "Weakness Lock", "effect": "Late phase locks spear and axe weaknesses."}
+    ]
+  },
+  {
+    "fight_key": "varkyn",
+    "display_name": "Varkyn",
+    "enemy_aliases": ["Varkyn", "Varkan", "ヴァルカン"],
+    "source_url": "https://game8.jp/octopathtraveler-sp/378306",
+    "source_updated_at": "2026-03-06 15:35",
+    "summary": "Element-heavy scholar fight with adds and a spiritstone that changes its weakness among Varkyn's main weaknesses.",
+    "mechanics": "Varkyn is weak to sword, staff, and ice. Adds cover sword/spear/bow/tome/ice/light, and the autonomous spiritstone has an infinite shield count with a changing weakness.",
+    "strategy": "Favor elemental defense, keep E.Atk debuffs active, and use sword/ice coverage to hit multiple targets. Handle adds before racing Varkyn, and do not waste turns trying to break the infinite-shield stone.",
+    "actions": [
+      {"name": "Elemental Magic", "effect": "Strong elemental pressure, often front-row focused."},
+      {"name": "Researcher's Tactics", "effect": "Support add can enable party pressure."},
+      {"name": "Autonomous Spiritstone", "effect": "Infinite shields; weakness changes between sword, staff, and ice."},
+      {"name": "Buff Removal", "effect": "Later turns can punish reliance on front-row buffs."},
+      {"name": "High-Power Spell", "effect": "Major single-target elemental damage."}
+    ]
+  },
+  {
+    "fight_key": "ritu",
+    "display_name": "Ri'tu",
+    "enemy_aliases": ["Ri'tu", "Ritu", "リトゥ"],
+    "source_url": "https://game8.jp/octopathtraveler-sp/386171",
+    "source_updated_at": "2026-03-06 15:36",
+    "summary": "Fast dagger/lightning boss with two adds. Her second half adds pursuit hits and her final quarter increases pursuit pressure.",
+    "mechanics": "Ri'tu is weak to fire, wind, and light. Adds offer wind/light overlap, but one has very narrow weaknesses. At 50% HP she starts pursuing her last target; at 25% HP pursuit becomes stronger and she speeds up.",
+    "strategy": "Control speed, maintain physical mitigation, and use wind/light coverage to keep adds under control. Avoid entering the 50% and 25% thresholds without healing and debuffs already established.",
+    "actions": [
+      {"name": "Twin Break", "effect": "Two dagger hits to one target."},
+      {"name": "Leg Snare", "effect": "Speed down to the front row."},
+      {"name": "Twin Instant Blades", "effect": "Random multi-hit dagger attack."},
+      {"name": "Absolute", "effect": "Very heavy single-target dagger hit."},
+      {"name": "Dual-Blade Stance", "effect": "At half HP, adds pursuit against the last attacked target."},
+      {"name": "Thunder Flash", "effect": "Front-row lightning attack with paralysis chance."}
+    ]
+  },
+  {
+    "fight_key": "gertrude",
+    "display_name": "Gertrude",
+    "enemy_aliases": ["Gertrude", "ガートルード"],
+    "source_url": "https://game8.jp/octopathtraveler-sp/391040",
+    "source_updated_at": "2026-03-06 15:38",
+    "summary": "Solo axe boss that limits multi-hit shield shaving and escalates from two actions to three actions late.",
+    "mechanics": "Gertrude is weak to dagger, bow, and fire. She repeatedly applies a shield-lock effect that prevents one character's multi-hit action from shaving more than one shield. HP thresholds increase shields, change patterns, and eventually grant three actions.",
+    "strategy": "Use physical-defense gear, strong P.Atk debuffs, and single-hit or follow-up shaving. Do setup on turn 1, avoid relying on multi-hit shield shaving, and prepare burst to skip the 75% shield increase if possible.",
+    "actions": [
+      {"name": "Strong Guard", "effect": "Applies multi-hit shield lock on start and break recovery."},
+      {"name": "Combat Drug", "effect": "Threshold action that buffs, changes action count, or increases max shields."},
+      {"name": "Heavy Cleave", "effect": "Strong single-target axe hit."},
+      {"name": "Dark Heavy Blow", "effect": "Single-target dark hit with speed down."},
+      {"name": "Triple Sever", "effect": "Three random axe hits."},
+      {"name": "Heal Slash", "effect": "Front-row axe hit that heals Gertrude."}
+    ]
+  },
+  {
+    "fight_key": "yunnie",
+    "display_name": "Yunnie",
+    "enemy_aliases": ["Yunnie", "ユーニィ"],
+    "source_url": "https://game8.jp/octopathtraveler-sp/396589",
+    "source_updated_at": "2026-03-06 15:37",
+    "summary": "Large multi-enemy fight against Yunnie and the Yuunagi group. Several adds have different weakness sets, so broad coverage matters.",
+    "mechanics": "Yunnie is weak to sword, axe, and fan. The adds cover sword/axe/fan plus lightning, fire, ice, dagger, and staff depending on position. The fight pressures the party through many concurrent actions.",
+    "strategy": "Bring wide AoE shield coverage, especially sword/axe/fan, and remove adds methodically before focusing Yunnie. Defensive stability matters more than a narrow burst plan because the encounter has many bodies.",
+    "actions": [
+      {"name": "Yunnie Shot", "effect": "Bow pressure from the leader."},
+      {"name": "Group Assault", "effect": "Multiple adds act in the same turn cycle."},
+      {"name": "Hunter Add Actions", "effect": "Ranged physical damage."},
+      {"name": "Thief Add Actions", "effect": "Fast physical pressure and disruption."},
+      {"name": "Merchant Add Actions", "effect": "Spear-style pressure."},
+      {"name": "Warrior/Add Support", "effect": "Additional physical attacks that punish slow add clears."}
+    ]
+  },
+  {
+    "fight_key": "yan_long",
+    "display_name": "Yan Long",
+    "enemy_aliases": ["Yan Long", "Yanlong", "Yen Long", "イェンロン"],
+    "source_url": "https://game8.jp/octopathtraveler-sp/409368",
+    "source_updated_at": "2026-03-06 15:38",
+    "summary": "Staff martial-arts fight with weakness locks, counter states, and crow adds that join after HP thresholds.",
+    "mechanics": "Yan Long is weak to sword, spear, and light, but locks and rotates countered weaknesses. Crows are weak to axe and tome. Hitting a countered locked weakness increases his next action count.",
+    "strategy": "Track which weakness is locked before attacking, use safe weakness coverage, and clear crows quickly. Keep physical mitigation high and avoid giving Yan Long extra actions through careless attacks.",
+    "actions": [
+      {"name": "Body-Sealing Art", "effect": "Starts two-action mode and locks spear/light with counters."},
+      {"name": "Evil-Repelling Turn", "effect": "Rotates locked weaknesses and counter state."},
+      {"name": "Double Staff Strike", "effect": "Two staff hits to one target."},
+      {"name": "Spinning Staff Dance", "effect": "Staff physical damage to the front row."},
+      {"name": "Ice Aura", "effect": "Random ice hits that lower staff resistance."},
+      {"name": "Call Crows", "effect": "Summons crow adds after HP thresholds."}
+    ]
+  },
+  {
+    "fight_key": "largo",
+    "display_name": "Largo",
+    "enemy_aliases": ["Largo", "ラルゴ"],
+    "source_url": "https://game8.jp/octopathtraveler-sp/420192",
+    "source_updated_at": "2026-03-06 15:39",
+    "summary": "Machine-heavy fight where Largo is supported by several magic machines with different weakness sets.",
+    "mechanics": "Largo is weak to dagger, bow, and ice. Machines add broad but changing coverage including sword, staff, bow, fan, ice, lightning, and wind. The fight becomes dangerous if machines stay up while Largo advances his pattern.",
+    "strategy": "Bring ice plus dagger/bow coverage and enough AoE to clear machines. Keep mitigation active during machine waves, then use breaks to burst Largo once the field is stable.",
+    "actions": [
+      {"name": "Largo Shot", "effect": "Physical pressure from Largo."},
+      {"name": "Magic Machine I", "effect": "Add with sword/staff/ice/lightning/wind style coverage."},
+      {"name": "Magic Machine II", "effect": "Add with sword/bow/fan/ice/lightning style coverage."},
+      {"name": "Machine Support", "effect": "Adds increase incoming turn pressure while alive."},
+      {"name": "Late Pattern", "effect": "Largo becomes harder to stabilize if add waves are not controlled."}
+    ]
+  },
+  {
+    "fight_key": "hammy",
+    "display_name": "Hammy",
+    "enemy_aliases": ["Hammy", "H'aanit?", "ハミィ"],
+    "source_url": "https://game8.jp/octopathtraveler-sp/493451",
+    "source_updated_at": "2025-11-21 00:05",
+    "summary": "Three-enemy fight with Hammy and two assistants. Cover, evasion, traps, counters, and BP-based finishers make target order important.",
+    "mechanics": "Hammy is weak to spear, fan, and wind. Her assistants can cover her, gain physical or elemental evasion, and punish the wrong damage type. HP thresholds change all enemy patterns.",
+    "strategy": "Use fan/wind overlap, watch which assistant is covering, and avoid triggering trap counters. Clear the support enemies cleanly, then handle Hammy's final self-buff and shield-lock phase with planned breaks.",
+    "actions": [
+      {"name": "Shift Blame (Physical)", "effect": "Gives an assistant cover and physical evasion."},
+      {"name": "Shift Blame (Elemental)", "effect": "Gives an assistant cover and elemental evasion."},
+      {"name": "Weakness Analysis", "effect": "Lowers party P.Def and E.Def."},
+      {"name": "Hammy Trap (Heal)", "effect": "Counter state that heals enemies when hit."},
+      {"name": "Hammy Trap (Attack)", "effect": "Counter state that retaliates with heavy book damage."},
+      {"name": "Hammy Finish", "effect": "Powerful single-target attack when BP is full."},
+      {"name": "Main Event", "effect": "After both assistants fall, Hammy gains offensive buffs and shield lock."}
+    ]
+  },
+  {
+    "fight_key": "mirgardi",
+    "display_name": "Mirgardi",
+    "enemy_aliases": ["Mirgardi", "Milgardi", "ミルガルディ"],
+    "source_url": "https://game8.jp/octopathtraveler-sp/583644",
+    "source_updated_at": "2026-03-06 15:41",
+    "summary": "Fan boss with normal and shadow versions. The fight revolves around Dragon Tail points, changing weaknesses, and punishing over-attacking outside break windows.",
+    "mechanics": "Mirgardi begins with sword, axe, tome, and ice-style coverage, then changes weaknesses as HP falls. Dragon Tail points build when she is hit outside break and raise her threat until spent.",
+    "strategy": "Do not overbuild Dragon Tail points with low-value attacks. Break decisively, burst during break, and use mitigation for fan and elemental pressure. Track the current weakness set before planning each break.",
+    "actions": [
+      {"name": "Dragon Tail - Swift", "effect": "Starts Dragon Tail point tracking; points increase when hit outside break."},
+      {"name": "Dragon Severing Fan", "effect": "Three fan hits to one target."},
+      {"name": "Offensive Fan Sweep", "effect": "Front-row fan damage and self P.Atk up."},
+      {"name": "Flexible Tempo", "effect": "Applies permanent speed down to self outside break flow."},
+      {"name": "Wild Sweep", "effect": "Three random fan hits."},
+      {"name": "Flame Talisman", "effect": "Front-row fire pressure."}
+    ]
+  },
+  {
+    "fight_key": "kagemune",
+    "display_name": "Kagemune",
+    "enemy_aliases": ["Kagemune", "Kagemume", "カゲムネ"],
+    "source_url": "https://game8.jp/octopathtraveler-sp/659640",
+    "source_updated_at": "2026-03-06 15:42",
+    "summary": "Spear/bow/fire/light fight with a stronger shadow version. The shadow version has very high shields and demands planned breaks.",
+    "mechanics": "Base Kagemune has spear, bow, fire, and light weaknesses; the shadow version keeps the same weakness theme with much higher shield pressure. Patterns lean into physical pressure and strict break timing.",
+    "strategy": "Bring redundant spear/bow/fire/light shaving, keep defensive debuffs active, and do not enter the shadow version without enough burst saved for break windows.",
+    "actions": [
+      {"name": "Spear Assault", "effect": "Physical spear pressure."},
+      {"name": "Bow Assault", "effect": "Ranged physical pressure."},
+      {"name": "Fire Technique", "effect": "Fire-element pressure."},
+      {"name": "Shadow Form", "effect": "Higher shield count and stronger pattern."},
+      {"name": "Burst Window", "effect": "Most damage should be concentrated during planned breaks."}
+    ]
+  },
+  {
+    "fight_key": "aoi",
+    "display_name": "Aoi",
+    "enemy_aliases": ["Aoi", "アオイ"],
+    "source_url": "https://game8.jp/octopathtraveler-sp/699639",
+    "source_updated_at": "2026-03-06 15:43",
+    "summary": "Modern Arena fight with a base version and a much tougher shadow version. The shadow version has huge HP and high shields.",
+    "mechanics": "Base Aoi has broad weaknesses; the shadow version focuses on dagger, bow, ice, and wind with very high shield count and about ten million HP. The fight rewards stable break cycles over quick racing.",
+    "strategy": "Use dagger/bow/ice/wind coverage, strong sustain, and long-fight SP planning. Save major burst for break turns and keep debuffs up through the long HP pool.",
+    "actions": [
+      {"name": "Base Pattern", "effect": "Broad weakness set with lower shields."},
+      {"name": "Shadow Pattern", "effect": "High-shield version focused on dagger, bow, ice, and wind."},
+      {"name": "High HP Pool", "effect": "Requires repeated break-and-burst cycles."},
+      {"name": "Sustain Check", "effect": "Long fight stresses healing, SP, and debuff uptime."}
+    ]
+  },
+  {
+    "fight_key": "rayme",
+    "display_name": "Rayme",
+    "enemy_aliases": ["Rayme", "Reime", "レイメ"],
+    "source_url": "https://game8.jp/octopathtraveler-sp/750802",
+    "source_updated_at": "2026-03-06 15:42",
+    "summary": "Shorter but gimmick-heavy fight built around Silence-like ability sealing and alternating physical/elemental interception.",
+    "mechanics": "Rayme is weak to spear, dagger, and wind and has about 950k HP. She opens by sealing battle abilities, intercepts all physical and elemental attacks for two turns, then alternates physical and elemental interception. Her BP max attack is dangerous.",
+    "strategy": "Equip silence/special-effect countermeasures on key units, use EX skills/ultimates/latent-style tools when sealed, and avoid attacking into the active interception type. Smaller teams can reduce forced basic attacks during the opening.",
+    "actions": [
+      {"name": "Silence Field", "effect": "At battle start, seals multiple battle abilities for several turns."},
+      {"name": "Full Interception", "effect": "Turns 1-2 negate and counter both physical and elemental attacks."},
+      {"name": "Physical Interception", "effect": "From turn 3, odd turns punish physical attacks."},
+      {"name": "Elemental Interception", "effect": "From turn 4, even turns punish elemental attacks."},
+      {"name": "BP Max Attack", "effect": "Strong full-party attack when BP reaches max."}
+    ]
+  }
+]

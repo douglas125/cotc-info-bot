@@ -19,6 +19,7 @@ def test_bootstrap_creates_all_tables(tmp_db_path: Path) -> None:
         "sync_runs", "raw_snapshots",
         "feedback_submissions",
         "command_usage_daily",
+        "arena_fight_notes",
     }
     missing = expected - names
     conn.close()
@@ -83,6 +84,36 @@ def test_clear_character_tables_keeps_sync_history(tmp_db_path: Path) -> None:
     assert conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0] == 0
     # sync_runs should NOT be wiped
     assert conn.execute("SELECT COUNT(*) FROM sync_runs").fetchone()[0] == 1
+    conn.close()
+
+
+def test_arena_fight_notes_seeded_and_refresh_safe(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    rows = repo.list_arena_fight_notes(conn)
+    assert len(rows) == 13
+    assert {row["display_name"] for row in rows} >= {"Tikilen", "Kagemune", "Rayme"}
+
+    repo.clear_enemy_tables(conn)
+    assert len(repo.list_arena_fight_notes(conn)) == 13
+    conn.close()
+
+
+def test_arena_fight_notes_match_enemy_alias(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    enemy_id = repo.upsert_enemy(
+        conn,
+        canonical_name="Kagemume",
+        category="Solistia Lvl 75",
+        region="Solistia",
+        sheet_gid=1,
+        source_row=1,
+        name_color_hex=None,
+        hyperlink_url=None,
+        is_npc=False,
+    )
+    note = repo.get_arena_fight_note_for_enemy(conn, enemy_id)
+    assert note is not None
+    assert note["display_name"] == "Kagemune"
     conn.close()
 
 

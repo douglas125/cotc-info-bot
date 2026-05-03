@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from io import BytesIO
+import json
 import sqlite3
 from typing import Literal
 
@@ -53,6 +54,7 @@ RANK_ORDER["Default"] = 0
 @dataclass(frozen=True)
 class EnemyMessage:
     embed: discord.Embed
+    embeds: tuple[discord.Embed, ...] = ()
     file: discord.File | None = None
 
 
@@ -167,6 +169,54 @@ def _new_enemy_header_embed(enemy: sqlite3.Row, rank_label: str) -> discord.Embe
     return embed
 
 
+def _new_fight_notes_embed(enemy: sqlite3.Row, note: sqlite3.Row) -> discord.Embed:
+    title_raw = f"{note['display_name']} - Fight notes"
+    embed = discord.Embed(
+        title=_truncate(title_raw, TITLE_LIMIT),
+        url=_safe_url(note["source_url"]),
+        color=_color_from_hex(enemy["name_color_hex"]),
+        description=_truncate(note["summary"], EMBED_DESCRIPTION_LIMIT),
+    )
+    updated = note["source_updated_at"]
+    footer = "Notes paraphrased from Game8"
+    if updated:
+        footer = f"{footer} - source updated {updated}"
+    embed.set_footer(text=footer)
+    return embed
+
+
+def _action_lines(actions: list[dict[str, str]]) -> list[str]:
+    lines: list[str] = []
+    for action in actions:
+        name = (action.get("name") or "").strip()
+        effect = (action.get("effect") or "").strip()
+        if not name and not effect:
+            continue
+        if name and effect:
+            lines.append(f"**{name}** - {effect}")
+        else:
+            lines.append(name or effect)
+    return lines
+
+
+def _chunk_lines(lines: list[str], limit: int) -> list[str]:
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for line in lines:
+        line_len = len(line) + (1 if current else 0)
+        if current and current_len + line_len > limit:
+            chunks.append("\n".join(current))
+            current = [line]
+            current_len = len(line)
+        else:
+            current.append(line)
+            current_len += line_len
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
+
+
 def _weakness_filename(enemy_id: int, rank: Rank) -> str:
     return f"enemy_weaknesses_{enemy_id}_{rank.lower()}.png"
 
@@ -229,6 +279,54 @@ def build_enemy_message(
         embed=embed,
         file=discord.File(BytesIO(rendered.data), filename=rendered.filename),
     )
+
+
+def has_fight_notes(conn: sqlite3.Connection, enemy_id: int) -> bool:
+    return repo.get_arena_fight_note_for_enemy(conn, enemy_id) is not None
+
+
+def build_enemy_fight_notes_message(
+    conn: sqlite3.Connection, enemy_id: int,
+) -> EnemyMessage | None:
+    enemy = repo.get_enemy(conn, enemy_id)
+    if enemy is None:
+        return None
+    note = repo.get_arena_fight_note_for_enemy(conn, enemy_id)
+    if note is None:
+        return None
+
+    first = _new_fight_notes_embed(enemy, note)
+    first.add_field(
+        name="Mechanics",
+        value=_truncate(note["mechanics"], FIELD_VALUE_LIMIT),
+        inline=False,
+    )
+    first.add_field(
+        name="Strategy",
+        value=_truncate(note["strategy"], FIELD_VALUE_LIMIT),
+        inline=False,
+    )
+
+    embeds = [first]
+    actions = json.loads(note["actions_json"] or "[]")
+    chunks = _chunk_lines(_action_lines(actions), FIELD_VALUE_LIMIT)
+    for idx, chunk in enumerate(chunks, start=1):
+        target = first if idx == 1 and len(first.fields) < 25 else discord.Embed(
+            title=_truncate(f"{note['display_name']} - Fight notes ({idx})", TITLE_LIMIT),
+            url=_safe_url(note["source_url"]),
+            color=_color_from_hex(enemy["name_color_hex"]),
+        )
+        target.add_field(
+            name="Action List" if len(chunks) == 1 else f"Action List ({idx}/{len(chunks)})",
+            value=chunk,
+            inline=False,
+        )
+        if target is not first:
+            target.set_footer(text=first.footer.text or "Notes paraphrased from Game8")
+            embeds.append(target)
+        if len(embeds) >= 10:
+            break
+    return EnemyMessage(embed=embeds[0], embeds=tuple(embeds))
 
 
 def search_results_to_embed(rows: list[sqlite3.Row], query_summary: str) -> discord.Embed:

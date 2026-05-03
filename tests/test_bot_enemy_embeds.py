@@ -230,3 +230,29 @@ def test_default_rank_picks_highest() -> None:
     assert enemy_embeds.default_rank(["EX2", "Rank2", "EX3"]) == "EX3"
     assert enemy_embeds.default_rank(["Default"]) == "Default"
     assert enemy_embeds.default_rank([]) is None
+
+
+def test_fight_notes_embed_renders_seeded_note(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    enemy_id = repo.upsert_enemy(
+        conn,
+        canonical_name="Kagemume",
+        category="Solistia Lvl 75",
+        region="Solistia",
+        sheet_gid=1,
+        source_row=1,
+        name_color_hex="#ffffff",
+        hyperlink_url=None,
+        is_npc=False,
+    )
+
+    assert enemy_embeds.has_fight_notes(conn, enemy_id) is True
+    message = enemy_embeds.build_enemy_fight_notes_message(conn, enemy_id)
+    assert message is not None
+    assert message.embeds
+    assert "Kagemune" in (message.embed.title or "")
+    assert message.embed.url == "https://game8.jp/octopathtraveler-sp/659640"
+    field_names = [field.name for field in message.embed.fields]
+    assert "Mechanics" in field_names
+    assert "Strategy" in field_names
+    assert any(field.name.startswith("Action List") for field in message.embed.fields)
