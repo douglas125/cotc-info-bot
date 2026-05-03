@@ -12,6 +12,8 @@ from typing import Any, Iterable, Iterator
 
 from config import DATA_DIR, DB_PATH, SCHEMA_PATH
 
+ARENA_FIGHT_NOTES_SEED = SCHEMA_PATH.parent / "seed" / "arena_fight_notes.json"
+
 
 def _search_key(name: str | None) -> str:
     """Fold a name to a typing-friendly form for autocomplete/resolver.
@@ -64,6 +66,7 @@ def bootstrap(conn: sqlite3.Connection) -> None:
     _migrate_skills_columns(conn)
     _migrate_sync_runs_enemy_counts(conn)
     _migrate_sync_runs_pets_count(conn)
+    seed_arena_fight_notes(conn)
 
 
 def _ensure_columns(
@@ -262,6 +265,78 @@ def clear_pet_tables(conn: sqlite3.Connection) -> None:
     """
     for tbl in ("pets_fts", "pets"):
         conn.execute(f"DELETE FROM {tbl}")
+
+
+# --- arena fight notes -------------------------------------------------------
+
+def seed_arena_fight_notes(conn: sqlite3.Connection) -> None:
+    """Load tracked Arena fight notes into the persistent notes table.
+
+    The rows are app-owned seed data, not sheet-derived data. They are
+    refreshed on bootstrap so deploys can update notes without depending on
+    /refresh, and clear_*_tables intentionally do not touch them.
+    """
+    if not ARENA_FIGHT_NOTES_SEED.exists():
+        return
+    rows = json.loads(ARENA_FIGHT_NOTES_SEED.read_text(encoding="utf-8"))
+    for row in rows:
+        conn.execute(
+            """
+            INSERT INTO arena_fight_notes(
+                fight_key, display_name, enemy_aliases_json, source_url,
+                source_updated_at, summary, mechanics, strategy, actions_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(fight_key) DO UPDATE SET
+                display_name = excluded.display_name,
+                enemy_aliases_json = excluded.enemy_aliases_json,
+                source_url = excluded.source_url,
+                source_updated_at = excluded.source_updated_at,
+                summary = excluded.summary,
+                mechanics = excluded.mechanics,
+                strategy = excluded.strategy,
+                actions_json = excluded.actions_json
+            """,
+            (
+                row["fight_key"],
+                row["display_name"],
+                json.dumps(row.get("enemy_aliases", []), ensure_ascii=False),
+                row["source_url"],
+                row.get("source_updated_at"),
+                row["summary"],
+                row["mechanics"],
+                row["strategy"],
+                json.dumps(row.get("actions", []), ensure_ascii=False),
+            ),
+        )
+
+
+def list_arena_fight_notes(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM arena_fight_notes ORDER BY display_name"
+    ).fetchall()
+
+
+def get_arena_fight_note_for_enemy(
+    conn: sqlite3.Connection, enemy_id: int,
+) -> sqlite3.Row | None:
+    enemy = get_enemy(conn, enemy_id)
+    if enemy is None:
+        return None
+    enemy_keys = {
+        _search_key(enemy["canonical_name"]),
+        enemy["search_key"] or "",
+    }
+    enemy_keys.discard("")
+    for note in list_arena_fight_notes(conn):
+        aliases = json.loads(note["enemy_aliases_json"] or "[]")
+        note_keys = {
+            _search_key(note["fight_key"]),
+            _search_key(note["display_name"]),
+            *(_search_key(alias) for alias in aliases),
+        }
+        if enemy_keys & note_keys:
+            return note
+    return None
 
 
 # --- writers ----------------------------------------------------------------

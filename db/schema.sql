@@ -144,6 +144,21 @@ CREATE TABLE IF NOT EXISTS command_usage_daily (
     PRIMARY KEY (command_name, usage_date)
 );
 
+-- Pre-parsed Arena fight notes used by /enemy. This is tracked app data,
+-- not sheet-derived data, so it survives /refresh. Seeded from
+-- db/seed/arena_fight_notes.json during bootstrap.
+CREATE TABLE IF NOT EXISTS arena_fight_notes (
+    fight_key          TEXT PRIMARY KEY,
+    display_name       TEXT NOT NULL,
+    enemy_aliases_json TEXT NOT NULL,
+    source_url         TEXT NOT NULL,
+    source_updated_at  TEXT,
+    summary            TEXT NOT NULL,
+    mechanics          TEXT NOT NULL,
+    strategy           TEXT NOT NULL,
+    actions_json       TEXT NOT NULL DEFAULT '[]'
+);
+
 
 -- ===========================================================================
 -- Enemies (Adversary Log CotC sheet — separate spreadsheet, parallel pipeline)

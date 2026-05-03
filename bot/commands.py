@@ -467,7 +467,12 @@ def register(tree: app_commands.CommandTree) -> None:
                 ephemeral=True,
             )
             return
-        view = EnemyView(enemy_id=enemy_id, available_ranks=ranks, current_rank=rank)
+        view = EnemyView(
+            enemy_id=enemy_id,
+            available_ranks=ranks,
+            current_rank=rank,
+            has_fight_notes=enemy_embeds.has_fight_notes(conn, enemy_id),
+        )
         if message.file is None:
             await interaction.response.send_message(embed=message.embed, view=view)
         else:
