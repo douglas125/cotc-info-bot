@@ -502,6 +502,138 @@ def test_parse_accessory_blank_spacer_row_before_first_stat() -> None:
     assert eq[0]["is_exclusive"] is False
 
 
+def test_parse_accessory_unique_effects_subbuff_overflow_layout() -> None:
+    """EX Partitio's "Unique Effects" layout: each sub-buff is a name row
+    (c20=icon formula like `=Legendary`, c21=name) followed by a separate
+    overflow row (c20=description text, c21 empty). The parser concatenates
+    them into the equipment description, prefixed with **name**."""
+    rows: list[list[dict]] = []
+    # Header row + primary accessory with stats — confirms the primary
+    # extraction path is unaffected by the new sub-buff fallback.
+    header = [_cell("EX Partitio"), _cell(), _cell(), _cell(), _cell(),
+              _cell(), _cell("SP"), _cell("Active")] + [_cell()] * 12 + [
+        _cell(formula="=A4Icon"),
+        _cell("Martial Artist's Koshiobi"),
+        _cell(), _cell(), _cell(),
+    ]
+    rows.append(header)
+    primary_first = [_cell()] * 26
+    primary_first[20] = _cell(formula="=ATK")
+    primary_first[21] = _cell(number=100)
+    primary_first[23] = _cell("primary description here")
+    rows.append(primary_first)
+    for sname, sval in [("MAG", -60), ("CRIT", 100)]:
+        r = [_cell()] * 26
+        r[20] = _cell(formula=f"={sname}")
+        r[21] = _cell(number=sval)
+        rows.append(r)
+    # Spacer rows between primary and Unique Effects marker.
+    rows.append([_cell()] * 26)
+    rows.append([_cell()] * 26)
+    # "Unique Effects" marker.
+    marker = [_cell()] * 26
+    marker[20] = _cell("Unique Effects")
+    rows.append(marker)
+    rows.append([_cell()] * 26)
+    # Sub-buff 1: name then immediate description.
+    sb1_name = [_cell()] * 26
+    sb1_name[20] = _cell(formula="=Legendary")
+    sb1_name[21] = _cell("Soul Sigil")
+    rows.append(sb1_name)
+    sb1_desc = [_cell()] * 26
+    sb1_desc[20] = _cell("5% Atk/Mag/Def/MDef granted to the frontrow.")
+    rows.append(sb1_desc)
+    rows.append([_cell()] * 26)
+    # Sub-buff 2: name, blank row, then description (gap of 1 blank row).
+    sb2_name = [_cell()] * 26
+    sb2_name[20] = _cell(formula="=Offensive")
+    sb2_name[21] = _cell("Sun Sigil")
+    rows.append(sb2_name)
+    rows.append([_cell()] * 26)
+    sb2_desc = [_cell()] * 26
+    sb2_desc[20] = _cell("30% Crit Up, +100,000 Damage Cap, +1 BP Regen.")
+    rows.append(sb2_desc)
+    # 4 blank rows before Sub-buff 3 — matches the real EX Partitio layout
+    # (Sun Sigil description at r1542, Fighting Spirit name at r1547).
+    for _ in range(4):
+        rows.append([_cell()] * 26)
+    # Sub-buff 3: name + immediate description.
+    sb3_name = [_cell()] * 26
+    sb3_name[20] = _cell(formula="=Preparation")
+    sb3_name[21] = _cell("Fighting Spirit")
+    rows.append(sb3_name)
+    sb3_desc = [_cell()] * 26
+    sb3_desc[20] = _cell("BP is not consumed when used.")
+    rows.append(sb3_desc)
+    # 'Notes' marker that should stop the scanner cleanly.
+    notes = [_cell()] * 26
+    notes[20] = _cell("Notes")
+    rows.append(notes)
+    # Trailing notes-section content the scanner must NOT consume.
+    notes_row = [_cell()] * 26
+    notes_row[20] = _cell("1")
+    notes_row[21] = _cell("Some unrelated note text")
+    rows.append(notes_row)
+
+    eq = parse_role_tab(_make_role_sheet(rows), gid=291065169)[0].equipment
+    primary = next(e for e in eq if e["name"] == "Martial Artist's Koshiobi")
+    excl = next(e for e in eq if e["name"] == "Unique Effects")
+    # Regression guard: primary accessory continues to parse normally.
+    assert primary["description"] == "primary description here"
+    assert primary["stats"] == [("ATK", 100), ("MAG", -60), ("CRIT", 100)]
+    assert primary["is_exclusive"] is False
+    # Unique Effects entry: no stats, sub-buffs concatenated as markdown.
+    assert excl["is_exclusive"] is False
+    assert excl["stats"] == []
+    desc = excl["description"]
+    assert desc is not None
+    assert "**Soul Sigil**: 5% Atk/Mag/Def/MDef granted to the frontrow." in desc
+    assert "**Sun Sigil**: 30% Crit Up, +100,000 Damage Cap, +1 BP Regen." in desc
+    # 4-blank-row gap is now tolerated; Fighting Spirit + its description
+    # captured.
+    assert "**Fighting Spirit**: BP is not consumed when used." in desc
+    # Notes-section content must not have leaked into the description.
+    assert "Some unrelated note text" not in desc
+    # Order is preserved.
+    assert desc.index("Soul Sigil") < desc.index("Sun Sigil") < desc.index("Fighting Spirit")
+
+
+def test_parse_accessory_unique_effects_with_c23_description_unaffected() -> None:
+    """Regression: the standard "Unique Effects" layout (description sits on
+    c23 of the row immediately after the marker) must still parse via the
+    existing path — the new sub-buff fallback must not run when c23 has
+    text."""
+    rows: list[list[dict]] = []
+    header = [_cell("Cardona"), _cell(), _cell(), _cell(), _cell(), _cell(),
+              _cell("SP"), _cell("Active")] + [_cell()] * 12 + [
+        _cell(formula="=A4Icon"),
+        _cell("Healer's Wreath"),
+        _cell(), _cell(), _cell(),
+    ]
+    rows.append(header)
+    p1 = [_cell()] * 26
+    p1[20] = _cell(formula="=HP")
+    p1[21] = _cell(number=400)
+    p1[23] = _cell("primary effect")
+    rows.append(p1)
+    rows.append([_cell()] * 26)
+    # Unique Effects marker, then description on the very next row's c23.
+    marker = [_cell()] * 26
+    marker[20] = _cell("Unique Effects")
+    rows.append(marker)
+    desc_row = [_cell()] * 26
+    desc_row[23] = _cell("Heals 5% of Max HP at the start of every turn.")
+    rows.append(desc_row)
+
+    eq = parse_role_tab(_make_role_sheet(rows), gid=999)[0].equipment
+    ue = next(e for e in eq if e["name"] == "Unique Effects")
+    assert ue["description"] == "Heals 5% of Max HP at the start of every turn."
+    assert ue["stats"] == []
+    assert ue["is_exclusive"] is False
+    # The new fallback's markdown formatting must NOT have been applied.
+    assert "**" not in (ue["description"] or "")
+
+
 def test_parse_role_tab_ignores_rows_without_sp_active_marker() -> None:
     """Stat rows or stray text must NOT be picked up as block starts."""
     rows = [

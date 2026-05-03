@@ -380,6 +380,14 @@ def _scan_accessory_stats(
 # giving up.
 _ACC_MAX_BLANK_SKIP = 3
 
+# Sub-buff overflow layouts (EX Partitio's "Unique Effects") have larger
+# gaps between sub-buffs than between header and stats — verified up to
+# 4 blank rows between consecutive sub-buffs in the live snapshot. Raised
+# to give a margin without consuming whole sections (the scanner still
+# stops on stat formulas, next-section markers, or any other non-pattern
+# text in c20).
+_SUBBUFF_MAX_BLANK_SKIP = 6
+
 
 def _find_first_stat_row(
     block_rows: list[list[dict[str, Any]]], after_idx: int,
@@ -401,6 +409,74 @@ def _find_first_stat_row(
         if skipped > _ACC_MAX_BLANK_SKIP:
             return None
     return None
+
+
+def _scan_subbuff_overflow(
+    block_rows: list[list[dict[str, Any]]], after_idx: int,
+) -> list[tuple[str, str]]:
+    """Walk forward from ``after_idx`` collecting (name, description) sub-buff
+    pairs from a non-stat overflow layout (EX Partitio's "Unique Effects").
+
+    Each sub-buff is a *name row* whose c20 holds an icon formula (e.g.
+    ``=Legendary``, ``=Offensive``, ``=Preparation`` — anything that
+    isn't a known stat) and whose c21 holds the buff's name as
+    non-numeric text. The description sits on a *separate* overflow row,
+    typically 1-2 rows below: c20 carries plain text (no formula), c21
+    is empty. Tolerates up to ``_SUBBUFF_MAX_BLANK_SKIP`` blank rows
+    between name and description, and between sub-buffs.
+
+    Stops at the first known stat formula (so it cannot consume normal
+    stat-bearing accessories), at the next 'Exclusive Accessory N' /
+    'Unique Effects' marker, or after a long blank run.
+    """
+    out: list[tuple[str, str]] = []
+    pending_name: str | None = None
+    blank_run = 0
+    for ridx in range(after_idx, len(block_rows)):
+        r = block_rows[ridx]
+        if _COL_EQUIP >= len(r):
+            break
+        if _formula_stat_name(r[_COL_STAT_ICON]):
+            break
+        c20_formula = _formula(r[_COL_STAT_ICON]).strip()
+        c20_text    = _cell_text(r[_COL_STAT_ICON]).strip()
+        c21_text    = _cell_text(r[_COL_EQUIP]).strip()
+        section_label = c20_text.lower()
+        if (section_label.startswith(_TAG_EXCLUSIVE_PREFIX)
+                or section_label == _TAG_UNIQUE_EFFECTS):
+            break
+        # Name row: icon formula in c20 + non-numeric label in c21.
+        if c20_formula and c21_text and not c21_text.lstrip("-").isdigit():
+            if pending_name is not None:
+                out.append((pending_name, ""))
+            pending_name = c21_text
+            blank_run = 0
+            continue
+        # Overflow description row: plain text in c20 (no formula),
+        # c21 empty, and we have a pending sub-buff name.
+        if pending_name and c20_text and not c20_formula and not c21_text:
+            out.append((pending_name, c20_text))
+            pending_name = None
+            blank_run = 0
+            continue
+        # Blank row: tolerate within limit.
+        if not c20_text and not c21_text and not c20_formula:
+            blank_run += 1
+            if blank_run > _SUBBUFF_MAX_BLANK_SKIP:
+                break
+            continue
+        break
+    if pending_name is not None:
+        out.append((pending_name, ""))
+    return out
+
+
+def _format_subbuffs(subbuffs: list[tuple[str, str]]) -> str:
+    """Render sub-buffs as multi-line markdown for the description column."""
+    return "\n".join(
+        f"**{name}**: {desc}" if desc else f"**{name}**"
+        for name, desc in subbuffs
+    )
 
 # The sheet calls the unit's ultimate "Special"; both labels collapse to
 # kind="ultimate". TP rows are the unit's divine skill (still consumes SP).
@@ -570,6 +646,14 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
                     v = _cell_text(nr[_COL_EQUIP])
                     if v and not v.lstrip("-").isdigit():
                         eff = v
+            # Sub-buff overflow fallback (EX Partitio's "Unique Effects").
+            # Gated on `not eff and stat_start is None` so it cannot
+            # regress any accessory that already parsed via the c23/c21
+            # path or that has stats.
+            if not eff and stat_start is None:
+                subbuffs = _scan_subbuff_overflow(block_rows, ridx + 1)
+                if subbuffs:
+                    eff = _format_subbuffs(subbuffs)
             block.equipment.append({
                 "slot": None,
                 "name": label,
