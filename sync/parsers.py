@@ -531,6 +531,12 @@ def _classify_skill_kind(
         return "active", None, None
     raw = col5_label.strip()
     s = raw.lower()
+    if s == "basic":
+        # Some units (e.g. Pardis, Ceraphina, Rondo EX) have an
+        # unconditional passive shown in the sheet's Passive section as a
+        # row labelled "Basic" — no prestige board, no TP gating. Use
+        # learn_board=0 as a sentinel so the renderer can badge it.
+        return "passive", 0, None
     bm = _BOARD_RE.match(raw)
     if bm:
         return None, int(bm.group(1)), None
@@ -733,6 +739,7 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
             kind_label.lower() in _KIND_LABEL_MAP
             or _BOARD_RE.match(kind_label) is not None
             or kind_label.lower().startswith("lv")
+            or kind_label.lower() == "basic"
         )
         if not is_numeric_sp and not is_known_label:
             continue
