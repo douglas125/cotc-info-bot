@@ -110,7 +110,9 @@ def _format_skill_line(s: sqlite3.Row) -> str:
     bits: list[str] = []
     if s["sp_cost"] is not None:
         bits.append(f"`{s['sp_cost']} SP`")
-    if s["learn_board"]:
+    if s["learn_board"] == 0:
+        bits.append("`Basic`")
+    elif s["learn_board"]:
         bits.append(f"`{s['learn_board']}⭐`")
     elif s["kind"] == "tp_passive":
         bits.append("`TP`")

@@ -111,6 +111,10 @@ def test_classify_skill_kind_known_labels() -> None:
     # Sheet's "Special" === the unit's ultimate skill.
     assert _classify_skill_kind("Special") == ("ultimate", None, None)
     assert _classify_skill_kind("Ult") == ("ultimate", None, None)
+    # "Basic" is the unconditional passive tier (e.g. Pardis, Ceraphina,
+    # Rondo EX). learn_board=0 is a sentinel so the renderer can badge it.
+    assert _classify_skill_kind("Basic") == ("passive", 0, None)
+    assert _classify_skill_kind("basic") == ("passive", 0, None)
 
 
 def test_classify_skill_kind_special_levels() -> None:
@@ -914,6 +918,45 @@ def test_parse_role_tab_tp_inside_passive_section_becomes_tp_passive() -> None:
     # Rarity passives are unaffected.
     passive = [s for s in skills if s["kind"] == "passive"]
     assert sorted(s["learn_board"] for s in passive) == [1, 3]
+
+
+def test_parse_role_tab_basic_passive_tier_keeps_row_with_zero_board() -> None:
+    """A "Basic" row inside the Passive section is the unit's unconditional
+    passive (Pardis, Ceraphina, Rondo EX). Older parsers silently dropped
+    it because "Basic" matches none of the known col-5 labels (1*..6*,
+    TP, Lv\\d+). It must now survive parsing as kind='passive' with the
+    sentinel learn_board=0 so the renderer can badge it as `Basic`."""
+    rows = []
+    header = [_cell()] * 26
+    header[0] = _cell("Pardis")
+    header[6] = _cell("SP")
+    header[7] = _cell("Active")
+    rows.append(header)
+    rows.append(_row(sp="20", desc="basic active"))
+    rows.append(_section_divider("Passive"))
+    rows.append(_row(
+        kind="Basic",
+        passive_desc='"Attack" command becomes a Sword attack that also hits Fire/Lightning/Dark weakness',
+    ))
+    rows.append(_row(kind="1*", passive_desc="3 BP attack: 200% Potency Up but acts last"))
+    rows.append(_row(kind="3*", passive_desc="Full HP: 30% Atk Up + 30% Sword Damage Up"))
+
+    sheet = _make_role_sheet(rows)
+    blocks = parse_role_tab(sheet, gid=999)
+    assert len(blocks) == 1
+    skills = blocks[0].skills
+
+    passive = [s for s in skills if s["kind"] == "passive"]
+    assert len(passive) == 3, f"expected 3 passives, got {[s['kind'] for s in skills]}"
+    boards = sorted(s["learn_board"] for s in passive)
+    assert boards == [0, 1, 3]
+    basic = next(s for s in passive if s["learn_board"] == 0)
+    assert basic["sp_cost"] is None
+    assert basic["tier_level"] is None
+    assert "Sword attack" in basic["description"]
+    # Source-row order is preserved via slot_order: Basic appears first.
+    passive_sorted = sorted(passive, key=lambda s: s["slot_order"])
+    assert [s["learn_board"] for s in passive_sorted] == [0, 1, 3]
 
 
 def test_parse_role_tab_partial_ultimate_release() -> None:

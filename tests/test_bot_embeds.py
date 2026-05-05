@@ -194,6 +194,57 @@ def test_build_section_passives_renders_tp_passive_with_badge(tmp_db_path: Path)
     assert "Deep Wound" in passive_field.value
 
 
+def test_build_section_passives_renders_basic_passive_with_badge(tmp_db_path: Path) -> None:
+    """A "Basic"-tier passive (learn_board=0 sentinel) must render inside
+    the Passive field with a `Basic` badge alongside the rarity-unlocked
+    `1⭐` / `3⭐` and `TP` badges. Skipping this row, or rendering it
+    with a `0⭐` badge, both used to happen — guard against either."""
+    conn = repo.connect(tmp_db_path)
+    ch_id = repo.upsert_character(
+        conn, canonical_name="Pardis", base_role="warmaster", base_weapon="sword",
+    )
+    form_id = repo.insert_form(
+        conn, character_id=ch_id, display_name="Pardis", rarity="5*",
+        sheet_gid=999, source_row=5, name_color_hex="#CC0000",
+        hyperlink_url="https://docs.google.com/spreadsheets/d/abc#gid=999&range=A5",
+    )
+    repo.insert_skills(conn, form_id, [
+        {"slot_order": 1, "name": None, "sp_cost": 41, "kind": "active",
+         "learn_board": None, "tier_level": None,
+         "initial_use": None, "cooldown": None,
+         "description": "1x ST Sword (1x 230 Power)",
+         "power_min": 230, "power_max": 230, "hits": 1},
+        {"slot_order": 2, "name": None, "sp_cost": None, "kind": "passive",
+         "learn_board": 0, "tier_level": None,
+         "initial_use": None, "cooldown": None,
+         "description": '"Attack" command becomes a Sword attack that also hits Fire/Lightning/Dark weakness',
+         "power_min": None, "power_max": None, "hits": None},
+        {"slot_order": 3, "name": None, "sp_cost": None, "kind": "passive",
+         "learn_board": 1, "tier_level": None,
+         "initial_use": None, "cooldown": None,
+         "description": "3 BP attack: 200% Potency Up but acts last",
+         "power_min": None, "power_max": None, "hits": None},
+        {"slot_order": 4, "name": None, "sp_cost": None, "kind": "passive",
+         "learn_board": 3, "tier_level": None,
+         "initial_use": None, "cooldown": None,
+         "description": "Full HP: 30% Atk Up + 30% Sword Damage Up",
+         "power_min": None, "power_max": None, "hits": None},
+    ])
+    embed = embeds.build_section_embed(conn, form_id, "passives")
+    conn.close()
+
+    passive_field = next(f for f in embed.fields if f.name == "Passive")
+    assert "`Basic`" in passive_field.value
+    # Sentinel must not leak as a star badge.
+    assert "`0⭐`" not in passive_field.value
+    # Ordering: Basic appears before the rarity-unlocked passives.
+    basic_idx = passive_field.value.index("`Basic`")
+    star_idx = passive_field.value.index("`1⭐`")
+    assert basic_idx < star_idx
+    # Description from the Basic row is present.
+    assert "Sword attack" in passive_field.value
+
+
 def test_build_section_actives_tp_field_has_no_redundant_tp_badge(tmp_db_path: Path) -> None:
     """The actives view shows the SP-costing TP/divine skill under a "TP"
     field. The bullet should lead with the SP cost, not with a redundant
