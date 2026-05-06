@@ -282,6 +282,22 @@ NAME_ALIASES: dict[str, str] = {
     "Pardis III":  "Pardis",
     "Lucetta":     "Lucette",
     "Signa":       "Cygna",
+    # --- Wiki-side spellings (Champions page on octopathtraveler.fandom.com)
+    # that disagree with the Index. Reconciled while seeding character_sprites
+    # via scripts/refresh_sprite_urls.py — keep this group together so future
+    # wiki-driven mappings live in one place.
+    "Hayes":       "Haze",
+    "Promme":      "Prome",
+    "S. Odio":     "Odio S",      # wiki uses initial-prefix; Index uses suffix
+    "O. Odio":     "Odio O",
+    "Gloria Musa": "Gloria",      # wiki adds a descriptive surname
+    "Jose":        "José",        # diacritic stripped on the wiki
+    "Avar":        "Aval",
+    "Nina-Lanna":  "Ninalana",    # wiki hyphenates; Index runs together
+    "Dorrie":      "Dolly",
+    "Eltrix":      "Elletrix",    # also handles "Eltrix EX" → "EX Elletrix"
+    "Ri'tu":       "L'eeto",      # JP↔EN transliteration drift
+    "No. 7":       "Emil",        # in-game alias for the cleric Emil
 }
 
 

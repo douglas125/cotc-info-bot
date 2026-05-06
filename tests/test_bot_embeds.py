@@ -148,7 +148,9 @@ def test_build_section_actives_basic_shape(tmp_db_path: Path) -> None:
     assert "⭐⭐⭐⭐⭐" in embed.title
     assert embed.color is not None and embed.color.value == 0xCC0000
     assert embed.url is not None and embed.url.startswith("https://")
-    # No artwork: the image-source code path was removed.
+    # No sprite mapping was upserted, so the embed stays text-only — no
+    # thumbnail, no inline image. This is the unmapped-character path
+    # /character must take to "behave exactly like today".
     assert embed.thumbnail.url is None
     assert embed.image.url is None
 
@@ -393,6 +395,57 @@ def test_build_section_info_basic_shape(tmp_db_path: Path) -> None:
     assert "Character Art" in field_names
     art_field = next(f for f in embed.fields if f.name == "Character Art")
     assert "spreadsheet" in art_field.value.lower()
+
+
+def test_header_embed_sets_thumbnail_when_sprite_url_mapped(tmp_db_path: Path) -> None:
+    """When ``character_sprites`` carries a row for the canonical character,
+    every section's embed renders the sprite as a top-right thumbnail
+    (URL passed through the wikia width-66 scale rewrite)."""
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed(conn)
+    repo.upsert_sprite(
+        conn, "Cyrus",
+        "https://static.wikia.nocookie.net/octopath-traveler/images/4/4e/Cyrus_Sprite.png/revision/latest",
+        source="wikia",
+    )
+    for section in embeds.SECTIONS:
+        embed = embeds.build_section_embed(conn, form_id, section)
+        assert embed is not None
+        assert embed.thumbnail.url is not None, f"{section}: thumbnail not set"
+        assert "Cyrus_Sprite.png" in embed.thumbnail.url
+        # The render-time scale hint is what enforces the 66×102-ish target.
+        assert "/scale-to-width-down/66" in embed.thumbnail.url
+        # No full-width image — height must not grow.
+        assert embed.image.url is None
+    conn.close()
+
+
+def test_thumbnail_url_appends_scale_hint_for_wikia() -> None:
+    """The wikia CDN honors a ``/scale-to-width-down/N`` segment to serve
+    a width-N resize. We append it at render time so the DB stores the
+    canonical full-res URL (clean for re-runs)."""
+    raw = (
+        "https://static.wikia.nocookie.net/octopath-traveler/images/"
+        "4/4e/Cyrus_Sprite.png/revision/latest"
+    )
+    out = embeds._thumbnail_url(raw)
+    assert out.endswith("/revision/latest/scale-to-width-down/66")
+
+
+def test_thumbnail_url_idempotent_when_scale_already_present() -> None:
+    """Re-applying the rewrite must NOT double-stamp the scale segment."""
+    already = (
+        "https://static.wikia.nocookie.net/octopath-traveler/images/"
+        "4/4e/Cyrus_Sprite.png/revision/latest/scale-to-width-down/100"
+    )
+    assert embeds._thumbnail_url(already) == already
+
+
+def test_thumbnail_url_passes_non_wikia_through() -> None:
+    """URLs hosted elsewhere (e.g. a manual ``source='manual'`` upload)
+    must not be rewritten — only wikia knows the scale endpoint."""
+    other = "https://example.com/sprites/Cyrus.png"
+    assert embeds._thumbnail_url(other) == other
 
 
 def test_build_section_returns_none_for_missing_form(tmp_db_path: Path) -> None:

@@ -249,6 +249,13 @@ in another pipeline's.
   `/pet` invocations. Wiping it would erase usage history that no other
   source can reconstruct. No admin-clear command yet — drop manually if
   needed.
+- `character_sprites` — wiki-curated sprite URL per canonical character,
+  rendered as the embed thumbnail by `/character`. Populated by
+  `python -m scripts.refresh_sprite_urls` (one-off, not part of `/refresh`).
+  Wiping it would silently strip thumbnails from every embed and require
+  re-scraping the wiki to recover. The table is keyed by
+  `canonical_name`; `repo.get_form` LEFT JOINs it so the embed code is
+  a single guarded `set_thumbnail` call.
 
 ### Reading usage stats
 

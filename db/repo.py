@@ -550,10 +550,34 @@ def _fts_query(s: str) -> str:
 
 def get_form(conn: sqlite3.Connection, form_id: int) -> sqlite3.Row | None:
     return conn.execute(
-        "SELECT f.*, c.canonical_name, c.base_role, c.base_weapon "
+        "SELECT f.*, c.canonical_name, c.base_role, c.base_weapon, "
+        "       cs.sprite_url AS sprite_url "
         "FROM character_forms f JOIN characters c ON c.id = f.character_id "
+        "LEFT JOIN character_sprites cs ON cs.canonical_name = c.canonical_name "
         "WHERE f.id = ?", (form_id,),
     ).fetchone()
+
+
+def upsert_sprite(
+    conn: sqlite3.Connection,
+    canonical_name: str,
+    sprite_url: str,
+    source: str | None = None,
+) -> None:
+    """Insert or replace a wiki sprite URL for a canonical character.
+
+    Survives /refresh by design (the table is not listed in any
+    clear_*_tables loop). Used by scripts/refresh_sprite_urls.py.
+    """
+    conn.execute(
+        "INSERT INTO character_sprites(canonical_name, sprite_url, source, updated_at) "
+        "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+        "ON CONFLICT(canonical_name) DO UPDATE SET "
+        "    sprite_url = excluded.sprite_url, "
+        "    source = excluded.source, "
+        "    updated_at = CURRENT_TIMESTAMP",
+        (canonical_name, sprite_url, source),
+    )
 
 
 def get_skills(conn: sqlite3.Connection, form_id: int) -> list[sqlite3.Row]:
