@@ -21,6 +21,7 @@ def test_bootstrap_creates_all_tables(tmp_db_path: Path) -> None:
         "feedback_submissions",
         "command_usage_daily",
         "arena_fight_notes",
+        "character_sprites",
     }
     missing = expected - names
     conn.close()
@@ -85,6 +86,53 @@ def test_clear_character_tables_keeps_sync_history(tmp_db_path: Path) -> None:
     assert conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0] == 0
     # sync_runs should NOT be wiped
     assert conn.execute("SELECT COUNT(*) FROM sync_runs").fetchone()[0] == 1
+    conn.close()
+
+
+def test_get_form_carries_sprite_url_when_mapped(tmp_db_path: Path) -> None:
+    """``repo.upsert_sprite`` round-trips through ``get_form``'s LEFT JOIN."""
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed(conn)
+    # Unmapped row → NULL sprite_url, embed stays text-only.
+    form = repo.get_form(conn, form_id)
+    assert form is not None
+    assert "sprite_url" in form.keys()
+    assert form["sprite_url"] is None
+    # After upsert, the same row carries the URL.
+    repo.upsert_sprite(conn, "Cyrus",
+                       "https://static.wikia.nocookie.net/.../Cyrus_Sprite.png/revision/latest",
+                       source="wikia")
+    form2 = repo.get_form(conn, form_id)
+    assert form2 is not None
+    assert form2["sprite_url"].endswith("/Cyrus_Sprite.png/revision/latest")
+    conn.close()
+
+
+def test_upsert_sprite_replaces_on_conflict(tmp_db_path: Path) -> None:
+    """Re-running the scraper must overwrite stale URLs in place."""
+    conn = repo.connect(tmp_db_path)
+    repo.upsert_sprite(conn, "Cyrus", "https://example.com/old.png", source="wikia")
+    repo.upsert_sprite(conn, "Cyrus", "https://example.com/new.png", source="wikia")
+    rows = list(conn.execute(
+        "SELECT canonical_name, sprite_url FROM character_sprites"
+    ))
+    conn.close()
+    assert len(rows) == 1
+    assert rows[0]["sprite_url"] == "https://example.com/new.png"
+
+
+def test_clear_character_tables_preserves_character_sprites(tmp_db_path: Path) -> None:
+    """``character_sprites`` is community-curated state and MUST survive
+    /refresh. Wiping it would silently strip every embed thumbnail and
+    require re-scraping the wiki to recover."""
+    conn = repo.connect(tmp_db_path)
+    _seed(conn)
+    repo.upsert_sprite(conn, "Cyrus",
+                       "https://static.wikia.nocookie.net/.../Cyrus_Sprite.png/revision/latest",
+                       source="wikia")
+    assert conn.execute("SELECT COUNT(*) FROM character_sprites").fetchone()[0] == 1
+    repo.clear_character_tables(conn)
+    assert conn.execute("SELECT COUNT(*) FROM character_sprites").fetchone()[0] == 1
     conn.close()
 
 

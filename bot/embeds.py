@@ -267,6 +267,41 @@ def _ultimate_field_values(rows: list[sqlite3.Row]) -> list[str]:
     return _split_bullets_into_field_values(parts)
 
 
+def _form_sprite_url(form: sqlite3.Row) -> str | None:
+    """Read ``sprite_url`` from a form row without erroring on legacy rows
+    that pre-date the LEFT JOIN (e.g. test-only synthetic rows)."""
+    try:
+        keys = form.keys()
+    except AttributeError:
+        return None
+    if "sprite_url" not in keys:
+        return None
+    return form["sprite_url"]
+
+
+# Target width hinted to the wikia CDN. The DB stores full-res canonical
+# URLs (version-stable); we scale at render time so display sizing is a
+# presentation concern. Source sprites are mostly tall (vertical pixel
+# art), so a width-66 scale typically lands near 66×102 — Discord then
+# displays the result inside its embed-thumbnail slot. `if possible` from
+# the request: width is enforced via `/scale-to-width-down/N`; height
+# follows the source aspect ratio (CDN doesn't expose a width+height
+# crop endpoint we can rely on across all wikia images).
+_SPRITE_THUMBNAIL_WIDTH = 66
+
+
+def _thumbnail_url(url: str) -> str:
+    """Rewrite a wikia full-res sprite URL to request a width-66 resize.
+
+    No-op for non-wikia URLs and for URLs already carrying a scale hint.
+    """
+    if "static.wikia.nocookie.net" not in url:
+        return url
+    if "/scale-to-width-down/" in url:
+        return url
+    return url.rstrip("/") + f"/scale-to-width-down/{_SPRITE_THUMBNAIL_WIDTH}"
+
+
 def _new_header_embed(form: sqlite3.Row) -> discord.Embed:
     rarity = form["rarity"]
     title_raw = f"{_rarity_prefix(rarity)} {form['display_name']}".strip()
@@ -275,6 +310,11 @@ def _new_header_embed(form: sqlite3.Row) -> discord.Embed:
         url=_safe_url(form["hyperlink_url"]),
         color=_color_from_hex(form["name_color_hex"]),
     )
+    # Thumbnail sits top-right; description wraps to its left so the
+    # row height is unchanged.
+    sprite_url = _form_sprite_url(form)
+    if sprite_url:
+        embed.set_thumbnail(url=_thumbnail_url(sprite_url))
     role = (form["base_role"] or "?").title()
     weapon = (form["base_weapon"] or "?").title()
     primary = f"**{role}** · **{weapon}** · {_rarity_label(rarity)}"

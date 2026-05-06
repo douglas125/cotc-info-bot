@@ -6,6 +6,23 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+def force_utf8_console() -> None:
+    """Best-effort UTF-8 stdout/stderr for Windows consoles.
+
+    Without this, prints of names with diacritics (``Kainé?``, ``José``)
+    crash the cp1252 default encoding. ``reconfigure`` is missing on
+    streams that don't support it (e.g. when piped) — that's expected
+    and we silently move on.
+    """
+    import sys
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
 DATA_DIR = PROJECT_ROOT / "data"
 # DB path is overridable so a Railway deploy can point at a mounted volume
 # (e.g. COTC_DB_PATH=/data/cotc.sqlite) while local dev keeps data/cotc.sqlite.
@@ -282,6 +299,22 @@ NAME_ALIASES: dict[str, str] = {
     "Pardis III":  "Pardis",
     "Lucetta":     "Lucette",
     "Signa":       "Cygna",
+    # --- Wiki-side spellings (Champions page on octopathtraveler.fandom.com)
+    # that disagree with the Index. Reconciled while seeding character_sprites
+    # via scripts/refresh_sprite_urls.py — keep this group together so future
+    # wiki-driven mappings live in one place.
+    "Hayes":       "Haze",
+    "Promme":      "Prome",
+    "S. Odio":     "Odio S",      # wiki uses initial-prefix; Index uses suffix
+    "O. Odio":     "Odio O",
+    "Gloria Musa": "Gloria",      # wiki adds a descriptive surname
+    "Jose":        "José",        # diacritic stripped on the wiki
+    "Avar":        "Aval",
+    "Nina-Lanna":  "Ninalana",    # wiki hyphenates; Index runs together
+    "Dorrie":      "Dolly",
+    "Eltrix":      "Elletrix",    # also handles "Eltrix EX" → "EX Elletrix"
+    "Ri'tu":       "L'eeto",      # JP↔EN transliteration drift
+    "No. 7":       "Emil",        # in-game alias for the cleric Emil
 }
 
 

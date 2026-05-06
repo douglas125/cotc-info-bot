@@ -316,6 +316,21 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             progress("Rebuilding pet FTS index...")
             repo.rebuild_pet_fts(conn)
 
+        # Non-fatal post-step OUTSIDE the main transaction so the HTTP
+        # call doesn't hold a SQLite write lock — a wiki outage can't
+        # abort an otherwise-good sync.
+        try:
+            from scripts.refresh_sprite_urls import refresh_sprite_urls
+            sprite_summary = refresh_sprite_urls(conn)
+            unmatched = len(sprite_summary["unmatched"])
+            note = f", {unmatched} unmatched" if unmatched else ""
+            progress(
+                f"Refreshed sprites: {sprite_summary['matched']}/"
+                f"{sprite_summary['parsed']} matched{note}"
+            )
+        except Exception as exc:
+            progress(f"WARN: sprite refresh skipped: {exc}")
+
         c = repo.counts(conn)
         repo.finish_sync_run(
             conn, run_id, status="ok",

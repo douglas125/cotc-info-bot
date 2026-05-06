@@ -550,10 +550,51 @@ def _fts_query(s: str) -> str:
 
 def get_form(conn: sqlite3.Connection, form_id: int) -> sqlite3.Row | None:
     return conn.execute(
-        "SELECT f.*, c.canonical_name, c.base_role, c.base_weapon "
+        "SELECT f.*, c.canonical_name, c.base_role, c.base_weapon, "
+        "       cs.sprite_url AS sprite_url "
         "FROM character_forms f JOIN characters c ON c.id = f.character_id "
+        "LEFT JOIN character_sprites cs ON cs.canonical_name = c.canonical_name "
         "WHERE f.id = ?", (form_id,),
     ).fetchone()
+
+
+_UPSERT_SPRITE_SQL = (
+    "INSERT INTO character_sprites(canonical_name, sprite_url, source, updated_at) "
+    "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+    "ON CONFLICT(canonical_name) DO UPDATE SET "
+    "    sprite_url = excluded.sprite_url, "
+    "    source = excluded.source, "
+    "    updated_at = CURRENT_TIMESTAMP"
+)
+
+
+def upsert_sprite(
+    conn: sqlite3.Connection,
+    canonical_name: str,
+    sprite_url: str,
+    source: str | None = None,
+) -> None:
+    """Insert or replace a wiki sprite URL for a canonical character.
+
+    ``source`` is informational: ``'wikia'`` (auto-grabbed) or
+    ``'manual'`` (hand-edited via SQL). Survives /refresh by design —
+    the table is not listed in any ``clear_*_tables`` loop. Use
+    :func:`upsert_sprites_batch` to upsert many rows in one statement.
+    """
+    conn.execute(_UPSERT_SPRITE_SQL, (canonical_name, sprite_url, source))
+
+
+def upsert_sprites_batch(
+    conn: sqlite3.Connection,
+    rows: Iterable[tuple[str, str, str | None]],
+) -> None:
+    """Bulk variant of :func:`upsert_sprite`.
+
+    ``rows`` is ``(canonical_name, sprite_url, source)``. One
+    ``executemany`` instead of N round-trips so the scraper's 263-row
+    refresh stays a single statement under the hood.
+    """
+    conn.executemany(_UPSERT_SPRITE_SQL, rows)
 
 
 def get_skills(conn: sqlite3.Connection, form_id: int) -> list[sqlite3.Row]:

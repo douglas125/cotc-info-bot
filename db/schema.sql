@@ -144,6 +144,20 @@ CREATE TABLE IF NOT EXISTS command_usage_daily (
     PRIMARY KEY (command_name, usage_date)
 );
 
+-- Wiki-curated sprite URL per canonical character. Hot-linked from
+-- static.wikia.nocookie.net via embed.set_thumbnail; no local files.
+-- Survives /refresh (intentionally NOT in repo.clear_*_tables) — this is
+-- community-curated state, not sheet-derived. Populated by
+-- `python -m scripts.refresh_sprite_urls`. `canonical_name` is a soft
+-- FK to characters.canonical_name (no enforced FK so the table survives
+-- a refresh that temporarily empties characters during the wipe step).
+CREATE TABLE IF NOT EXISTS character_sprites (
+    canonical_name TEXT PRIMARY KEY,
+    sprite_url     TEXT NOT NULL,
+    source         TEXT,                     -- 'wikia' | 'manual'
+    updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Pre-parsed Arena fight notes used by /enemy. This is tracked app data,
 -- not sheet-derived data, so it survives /refresh. Seeded from
 -- db/seed/arena_fight_notes.json during bootstrap.
