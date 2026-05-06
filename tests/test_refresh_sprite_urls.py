@@ -9,10 +9,6 @@ from db import repo
 from scripts import refresh_sprite_urls as scraper
 
 
-# Synthetic HTML that mirrors the relevant shape of the live wiki page:
-# rows with a first-cell <img data-src="..."> and a second-cell <a>name</a>.
-# JP text and stray tags are sprinkled in to confirm the parser only picks
-# the first <a>'s text and the first wikia <img>'s data-src per row.
 _FAKE_HTML = """
 <table>
   <tr><th>Image</th><th>Name</th></tr>
@@ -131,12 +127,7 @@ def test_run_sync_continues_when_sprite_refresh_fails(
 ) -> None:
     """The /refresh wrapper in sync.runner must isolate sprite-refresh
     failures so a wiki outage logs ``WARN: sprite refresh skipped: ...``
-    without aborting the (already committed) sheet sync.
-
-    We don't run the full sheet pipeline here — too many mocks. Instead
-    we exercise the same try/except pattern the runner uses by mocking
-    ``fetch_wiki_html`` to raise and confirming the wrapper swallows it.
-    """
+    without aborting the (already committed) sheet sync."""
     def boom() -> str:
         raise OSError("network unreachable")
 

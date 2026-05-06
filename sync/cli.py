@@ -10,12 +10,9 @@ import argparse
 import os
 import sys
 
-# Force UTF-8 on Windows consoles so tab names with ⭐ don't crash prints.
-try:
-    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-except Exception:
-    pass
+from config import force_utf8_console
+
+force_utf8_console()
 
 from sync.runner import run_sync
 

@@ -558,6 +558,16 @@ def get_form(conn: sqlite3.Connection, form_id: int) -> sqlite3.Row | None:
     ).fetchone()
 
 
+_UPSERT_SPRITE_SQL = (
+    "INSERT INTO character_sprites(canonical_name, sprite_url, source, updated_at) "
+    "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+    "ON CONFLICT(canonical_name) DO UPDATE SET "
+    "    sprite_url = excluded.sprite_url, "
+    "    source = excluded.source, "
+    "    updated_at = CURRENT_TIMESTAMP"
+)
+
+
 def upsert_sprite(
     conn: sqlite3.Connection,
     canonical_name: str,
@@ -566,18 +576,25 @@ def upsert_sprite(
 ) -> None:
     """Insert or replace a wiki sprite URL for a canonical character.
 
-    Survives /refresh by design (the table is not listed in any
-    clear_*_tables loop). Used by scripts/refresh_sprite_urls.py.
+    ``source`` is informational: ``'wikia'`` (auto-grabbed) or
+    ``'manual'`` (hand-edited via SQL). Survives /refresh by design —
+    the table is not listed in any ``clear_*_tables`` loop. Use
+    :func:`upsert_sprites_batch` to upsert many rows in one statement.
     """
-    conn.execute(
-        "INSERT INTO character_sprites(canonical_name, sprite_url, source, updated_at) "
-        "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
-        "ON CONFLICT(canonical_name) DO UPDATE SET "
-        "    sprite_url = excluded.sprite_url, "
-        "    source = excluded.source, "
-        "    updated_at = CURRENT_TIMESTAMP",
-        (canonical_name, sprite_url, source),
-    )
+    conn.execute(_UPSERT_SPRITE_SQL, (canonical_name, sprite_url, source))
+
+
+def upsert_sprites_batch(
+    conn: sqlite3.Connection,
+    rows: Iterable[tuple[str, str, str | None]],
+) -> None:
+    """Bulk variant of :func:`upsert_sprite`.
+
+    ``rows`` is ``(canonical_name, sprite_url, source)``. One
+    ``executemany`` instead of N round-trips so the scraper's 263-row
+    refresh stays a single statement under the hood.
+    """
+    conn.executemany(_UPSERT_SPRITE_SQL, rows)
 
 
 def get_skills(conn: sqlite3.Connection, form_id: int) -> list[sqlite3.Row]:

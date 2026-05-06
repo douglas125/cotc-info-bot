@@ -6,6 +6,23 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+def force_utf8_console() -> None:
+    """Best-effort UTF-8 stdout/stderr for Windows consoles.
+
+    Without this, prints of names with diacritics (``Kainé?``, ``José``)
+    crash the cp1252 default encoding. ``reconfigure`` is missing on
+    streams that don't support it (e.g. when piped) — that's expected
+    and we silently move on.
+    """
+    import sys
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
 DATA_DIR = PROJECT_ROOT / "data"
 # DB path is overridable so a Railway deploy can point at a mounted volume
 # (e.g. COTC_DB_PATH=/data/cotc.sqlite) while local dev keeps data/cotc.sqlite.

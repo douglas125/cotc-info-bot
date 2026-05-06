@@ -30,20 +30,22 @@ from __future__ import annotations
 import json
 import re
 import sys
+import urllib.error
 import urllib.request
 from html.parser import HTMLParser
 from typing import Iterable
 
-# Force UTF-8 on Windows consoles so character names with diacritics
-# (e.g. "Kainé?") don't crash prints.
-try:
-    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-except Exception:
-    pass
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
-from config import canonical_name_keys
+from config import canonical_name_keys, force_utf8_console
 from db import repo
+
+force_utf8_console()
 
 WIKI_API_URL = (
     "https://octopathtraveler.fandom.com/api.php"
@@ -57,11 +59,20 @@ _WIKIA_HOST = "static.wikia.nocookie.net"
 _RE_SCALE = re.compile(r"/scale-to-width-down/\d+")
 
 
+@retry(
+    retry=retry_if_exception_type((urllib.error.URLError, OSError, TimeoutError)),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=15),
+    reraise=True,
+)
 def fetch_wiki_html() -> str:
     """Return the parsed page HTML from the MediaWiki API.
 
     The public HTML route (``/wiki/Champions``) returns 403 from a script
     user-agent, but the API JSON route (``/api.php?action=parse``) is open.
+    Mirrors the retry shape used by ``sync.fetch.fetch_spreadsheet`` so a
+    transient wiki outage during ``/refresh`` doesn't immediately skip the
+    sprite post-step.
     """
     req = urllib.request.Request(WIKI_API_URL, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=30) as resp:
@@ -235,8 +246,9 @@ def refresh_sprite_urls(conn) -> dict:
 
     if upserts:
         with repo.transaction(conn):
-            for canonical, url in upserts:
-                repo.upsert_sprite(conn, canonical, url, source="wikia")
+            repo.upsert_sprites_batch(
+                conn, ((canonical, url, "wikia") for canonical, url in upserts),
+            )
 
     return {"parsed": len(pairs), "matched": len(upserts), "unmatched": unmatched}
 

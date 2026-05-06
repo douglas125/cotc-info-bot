@@ -310,10 +310,8 @@ def _new_header_embed(form: sqlite3.Row) -> discord.Embed:
         url=_safe_url(form["hyperlink_url"]),
         color=_color_from_hex(form["name_color_hex"]),
     )
-    # Thumbnail sits in the top-right; the description wraps to the left
-    # of it, so the row height is unchanged when a sprite is present.
-    # NULL when no wiki mapping exists — embed degrades silently to the
-    # text-only layout. Populated by scripts/refresh_sprite_urls.py.
+    # Thumbnail sits top-right; description wraps to its left so the
+    # row height is unchanged.
     sprite_url = _form_sprite_url(form)
     if sprite_url:
         embed.set_thumbnail(url=_thumbnail_url(sprite_url))

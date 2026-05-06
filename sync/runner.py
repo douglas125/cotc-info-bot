@@ -316,11 +316,9 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             progress("Rebuilding pet FTS index...")
             repo.rebuild_pet_fts(conn)
 
-        # Refresh wiki sprite mappings as a non-fatal post-step. Runs
-        # OUTSIDE the main transaction (the HTTP call shouldn't hold a
-        # SQLite write lock) so a wiki outage can't abort an otherwise-
-        # good sync. character_sprites is preserved across /refresh by
-        # design, so existing rows survive even when this step is skipped.
+        # Non-fatal post-step OUTSIDE the main transaction so the HTTP
+        # call doesn't hold a SQLite write lock — a wiki outage can't
+        # abort an otherwise-good sync.
         try:
             from scripts.refresh_sprite_urls import refresh_sprite_urls
             sprite_summary = refresh_sprite_urls(conn)
