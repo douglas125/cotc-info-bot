@@ -1,28 +1,29 @@
-"""One-off scraper: populate `character_sprites` from the CotC fan wiki.
+"""Scrape the CotC fan wiki and populate ``character_sprites``.
 
 Source page: https://octopathtraveler.fandom.com/wiki/Champions
 
-The page lists ~80–90 characters in 8 job-tab tables (NOT all 700+).
-Each row carries a wikia-CDN-hosted PNG sprite. We grab the canonical
-full-res URL, reconcile the wiki name against ``characters.canonical_name``
-(applying ``config.NAME_ALIASES`` and the EX prefix↔suffix swap), and
-upsert into ``character_sprites``.
+The page lists ~263 characters in 8 job-tab tables. Each row carries a
+wikia-CDN-hosted PNG sprite. We grab the canonical full-res URL,
+reconcile the wiki name against ``characters.canonical_name`` (applying
+``config.NAME_ALIASES`` and the EX prefix↔suffix swap), and upsert into
+``character_sprites``.
 
-Run:
+Two entry points share the same ``refresh_sprite_urls(conn)`` function:
 
-    conda activate cotc-search
-    python -m scripts.refresh_sprite_urls
+* This module's ``main()`` — standalone CLI for an isolated re-scrape::
 
-Override the SQLite path via ``COTC_DB_PATH`` (same env var the bot
-uses), so the same script works locally and on Railway::
+      conda activate cotc-search
+      python -m scripts.refresh_sprite_urls
 
-    railway run python -m scripts.refresh_sprite_urls
+* ``sync.runner.run_sync`` — calls it as a non-fatal post-step on every
+  ``/refresh``, AFTER the main sheet-sync transaction commits, so a wiki
+  outage doesn't abort an otherwise-good refresh. ``character_sprites``
+  is preserved across ``/refresh`` (intentionally absent from every
+  ``clear_*`` loop), so existing rows survive even if the post-step is
+  skipped.
 
-Idempotent — re-runs upsert in place. Output is a stdout summary plus
-per-row "no match" lines you can promote into ``config.NAME_ALIASES``.
-
-This script is the only writer for ``character_sprites``. ``/refresh``
-does NOT touch the table — it survives the wipe by design.
+Override the SQLite path via ``COTC_DB_PATH`` so the CLI works locally
+and on Railway. Idempotent — re-runs upsert in place.
 """
 from __future__ import annotations
 
@@ -196,48 +197,79 @@ def reconcile(wiki_name: str, db_index: dict[str, str]) -> str | None:
     return None
 
 
-# --- main -------------------------------------------------------------------
+# --- callable + CLI ---------------------------------------------------------
+
+
+def refresh_sprite_urls(conn) -> dict:
+    """Fetch the wiki page, reconcile names, upsert into ``character_sprites``.
+
+    Returns a summary dict::
+
+        {"parsed": int, "matched": int, "unmatched": list[str]}
+
+    Raises on network/HTML/parse errors — callers (the ``/refresh``
+    runner, the CLI ``main``) decide whether to swallow or surface.
+
+    HTTP + parsing happen first (no SQLite write lock held during
+    network I/O). The matched upserts are then batched into a single
+    ``BEGIN IMMEDIATE`` so the per-row autocommit overhead doesn't
+    compound 263× on every refresh.
+    """
+    html = fetch_wiki_html()
+    if not html:
+        raise RuntimeError("empty response from wiki API")
+    pairs = parse_pairs(html)
+    db_canonicals = [
+        r[0] for r in conn.execute("SELECT canonical_name FROM characters")
+    ]
+    db_index = build_db_index(db_canonicals)
+
+    upserts: list[tuple[str, str]] = []
+    unmatched: list[str] = []
+    for wiki_name, raw_url in pairs:
+        canonical = reconcile(wiki_name, db_index)
+        if canonical is None:
+            unmatched.append(wiki_name)
+            continue
+        upserts.append((canonical, normalize_url(raw_url)))
+
+    if upserts:
+        with repo.transaction(conn):
+            for canonical, url in upserts:
+                repo.upsert_sprite(conn, canonical, url, source="wikia")
+
+    return {"parsed": len(pairs), "matched": len(upserts), "unmatched": unmatched}
 
 
 def main() -> int:
     print(f"Fetching {WIKI_API_URL}", flush=True)
-    html = fetch_wiki_html()
-    if not html:
-        print("ERROR: empty response from wiki API", file=sys.stderr)
-        return 1
-    pairs = parse_pairs(html)
-    print(f"Parsed {len(pairs)} (name, url) pairs from the page.", flush=True)
-
     conn = repo.connect()
     repo.bootstrap(conn)
     try:
-        db_canonicals = [
-            r[0] for r in conn.execute("SELECT canonical_name FROM characters")
-        ]
-        if not db_canonicals:
+        if not conn.execute("SELECT 1 FROM characters LIMIT 1").fetchone():
             print(
                 "ERROR: characters table is empty — run a sync first "
                 "(`python -m sync.cli --api-key ...`).",
                 file=sys.stderr,
             )
             return 2
-        db_index = build_db_index(db_canonicals)
+        try:
+            summary = refresh_sprite_urls(conn)
+        except Exception as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
 
-        matched = 0
-        unmatched: list[str] = []
-        for wiki_name, raw_url in pairs:
-            canonical = reconcile(wiki_name, db_index)
-            if canonical is None:
-                unmatched.append(wiki_name)
-                continue
-            url = normalize_url(raw_url)
-            repo.upsert_sprite(conn, canonical, url, source="wikia")
-            matched += 1
-
-        print(f"\nMatched: {matched} / {len(pairs)}", flush=True)
-        if unmatched:
-            print(f"Unmatched ({len(unmatched)}) — extend config.NAME_ALIASES if needed:")
-            for name in unmatched:
+        print(
+            f"Parsed {summary['parsed']} (name, url) pairs from the page.",
+            flush=True,
+        )
+        print(f"\nMatched: {summary['matched']} / {summary['parsed']}", flush=True)
+        if summary["unmatched"]:
+            print(
+                f"Unmatched ({len(summary['unmatched'])}) — "
+                "extend config.NAME_ALIASES if needed:"
+            )
+            for name in summary["unmatched"]:
                 print(f"  - {name!r}")
 
         total = conn.execute(
