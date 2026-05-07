@@ -244,8 +244,10 @@ class FormBlock:
     sheet_gid: int
     source_row: int
     level_cap: int | None = None
+    alignment: str | None = None
     skills: list[dict] = field(default_factory=list)
     equipment: list[dict] = field(default_factory=list)
+    stats: list[dict] = field(default_factory=list)
     splash_art_url: str | None = None
     self_buffs_text: str | None = None
     affinities: list[tuple[str, str | None, str | None]] = field(default_factory=list)
@@ -326,16 +328,29 @@ _KNOWN_STAT_NAMES = frozenset({
 })
 
 
-def _formula_stat_name(cell: dict[str, Any]) -> str | None:
+# Base-stats grid (next to the portrait) accepts the same eight A4 stats plus
+# Accuracy / Evasion. Kept as a separate allowlist so the A4 status-icon
+# filter (`_KNOWN_STAT_NAMES`) stays narrow — status-effect icons share the
+# A4 stat column, but the Lv100/Lv120 grid is a clean stats-only region.
+_BASE_STAT_NAMES = frozenset({
+    "HP", "SP", "ATK", "DEF", "MAG", "MDEF", "ACC", "SPD", "CRIT", "EVA",
+})
+
+
+def _formula_stat_name(
+    cell: dict[str, Any], allowed: frozenset[str] = _KNOWN_STAT_NAMES,
+) -> str | None:
     """Return e.g. 'ATK' for a cell whose formulaValue is '=ATK', else None.
 
-    Restricted to ``_KNOWN_STAT_NAMES`` so non-stat formulas don't match.
+    Restricted to ``allowed`` so non-stat formulas don't match. Defaults
+    to the A4 ``_KNOWN_STAT_NAMES`` set; pass ``_BASE_STAT_NAMES`` for
+    the Lv100/Lv120 grid where Acc / Eva also appear.
     """
     formula = _formula(cell).strip()
     if len(formula) < 2 or not formula.startswith("="):
         return None
     name = formula[1:].strip().upper()
-    return name if name in _KNOWN_STAT_NAMES else None
+    return name if name in allowed else None
 
 
 def _cell_int(cell: dict[str, Any]) -> int | None:
@@ -667,6 +682,71 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
                 "is_exclusive": is_excl,
                 "stats": _scan_accessory_stats(block_rows, stat_start) if stat_start is not None else [],
             })
+
+    # Lv100 / Lv120 base stats grid. Anchored on the literal "Lv100"
+    # (and optionally "Lv120") cell text in the leftmost columns rather
+    # than hardcoding indices, since the icon-column position varies
+    # slightly across role tabs. The alignment label (e.g. "Glory") sits
+    # in the row immediately above the level header. The stat icons are
+    # `=HP`/`=SP`/`=ATK`/... formulas in the column directly to the left
+    # of the Lv100 column; values for each level sit in the level-header
+    # columns.
+    lv100_row: int | None = None
+    lv100_col: int | None = None
+    lv120_col: int | None = None
+    for ridx, r in enumerate(block_rows):
+        for c in range(min(5, len(r))):
+            t = _cell_text(r[c]).strip().lower().replace(" ", "")
+            if t == "lv100" and lv100_row is None:
+                lv100_row, lv100_col = ridx, c
+            elif t == "lv120" and lv120_col is None:
+                lv120_col = c
+
+    if lv100_row is not None:
+        # Alignment lives on the row directly above the Lv100 header.
+        # Try the column above lv100_col first; fall back to the leftmost
+        # non-empty cell on that row up to and including lv100_col.
+        if lv100_row - 1 >= 0:
+            prev = block_rows[lv100_row - 1]
+            cand = (_cell_text(prev[lv100_col]) if lv100_col < len(prev) else "").strip()
+            if not cand:
+                for c in range(min(lv100_col + 1, len(prev))):
+                    txt = _cell_text(prev[c]).strip()
+                    if txt:
+                        cand = txt
+                        break
+            block.alignment = cand or None
+
+        icon_col = max(0, lv100_col - 1)
+        order = 0
+        for ridx in range(lv100_row + 1, min(lv100_row + 1 + 12, len(block_rows))):
+            r = block_rows[ridx]
+            if icon_col >= len(r):
+                break
+            name = _formula_stat_name(r[icon_col], _BASE_STAT_NAMES)
+            if not name:
+                # Tolerate one blank spacer; any non-blank non-stat ends the block.
+                if _cell_text(r[icon_col]).strip():
+                    break
+                continue
+            v100 = _cell_int(r[lv100_col]) if lv100_col < len(r) else None
+            if v100 is not None:
+                block.stats.append({
+                    "level": 100,
+                    "stat_name": name,
+                    "stat_value": v100,
+                    "stat_order": order,
+                })
+            if lv120_col is not None and lv120_col < len(r):
+                v120 = _cell_int(r[lv120_col])
+                if v120 is not None:
+                    block.stats.append({
+                        "level": 120,
+                        "stat_name": name,
+                        "stat_value": v120,
+                        "stat_order": order,
+                    })
+            order += 1
 
     # Profile column: take the longest non-empty text seen as self_buffs_text;
     # if a cell looks like a URL or `=IMAGE("url")` formula, treat it as

@@ -43,3 +43,12 @@ def test_section_select_options_match_labels() -> None:
 def test_view_timeout_is_set() -> None:
     view = CharacterView(form_id=1)
     assert view.timeout == 180
+
+
+def test_dropdown_lists_level_120_stats_between_a4_and_info() -> None:
+    """The new section sits between A4 Accessory and Info in the dropdown."""
+    view = CharacterView(form_id=1)
+    sel = next(c for c in view.children if isinstance(c, discord.ui.Select))
+    labels = [o.label for o in sel.options]
+    assert "Level 120 Stats" in labels
+    assert labels.index("A4 Accessory") < labels.index("Level 120 Stats") < labels.index("Info")

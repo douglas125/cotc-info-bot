@@ -66,6 +66,7 @@ def bootstrap(conn: sqlite3.Connection) -> None:
     _migrate_skills_columns(conn)
     _migrate_sync_runs_enemy_counts(conn)
     _migrate_sync_runs_pets_count(conn)
+    _migrate_character_forms_alignment(conn)
     seed_arena_fight_notes(conn)
 
 
@@ -112,6 +113,13 @@ def _migrate_sync_runs_enemy_counts(conn: sqlite3.Connection) -> None:
 def _migrate_sync_runs_pets_count(conn: sqlite3.Connection) -> None:
     _ensure_columns(conn, "sync_runs", (
         ("pets_count", "INTEGER"),
+    ))
+
+
+def _migrate_character_forms_alignment(conn: sqlite3.Connection) -> None:
+    """Add `character_forms.alignment` so older DBs gain the column without a wipe."""
+    _ensure_columns(conn, "character_forms", (
+        ("alignment", "TEXT"),
     ))
 
 
@@ -234,6 +242,7 @@ def clear_character_tables(conn: sqlite3.Connection) -> None:
     for tbl in (
         "characters_fts",
         "character_profile",
+        "character_stats",
         "equipment_stats",
         "equipment",
         "skills",
@@ -426,6 +435,29 @@ def insert_equipment(conn: sqlite3.Connection, form_id: int, items: list[dict]) 
                 [(cur.lastrowid, name, value, order)
                  for order, (name, value) in enumerate(stats)],
             )
+
+
+def insert_stats(conn: sqlite3.Connection, form_id: int, stats: list[dict]) -> None:
+    """Bulk insert a form's Lv100/Lv120 base stats.
+
+    Each row dict carries ``level`` (100 or 120), ``stat_name``,
+    ``stat_value``, and ``stat_order``. Rows missing any of those are
+    skipped. The UNIQUE(form_id, level, stat_name) constraint is
+    enforced by the schema.
+    """
+    if not stats:
+        return
+    rows = [
+        (form_id, s["level"], s["stat_name"], s["stat_value"], s.get("stat_order", 0))
+        for s in stats
+        if s.get("stat_name") and s.get("level") is not None and s.get("stat_value") is not None
+    ]
+    if rows:
+        conn.executemany(
+            "INSERT INTO character_stats(form_id, level, stat_name, stat_value, stat_order) "
+            "VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
 
 
 def upsert_profile(conn: sqlite3.Connection, form_id: int,
@@ -660,6 +692,15 @@ def affinities_for_forms(
 def get_equipment(conn: sqlite3.Connection, form_id: int) -> list[sqlite3.Row]:
     return list(conn.execute(
         "SELECT * FROM equipment WHERE form_id = ? ORDER BY id", (form_id,)
+    ))
+
+
+def get_stats(conn: sqlite3.Connection, form_id: int) -> list[sqlite3.Row]:
+    """Lv100/Lv120 base stats for one form, ordered by (level, stat_order)."""
+    return list(conn.execute(
+        "SELECT * FROM character_stats WHERE form_id = ? "
+        "ORDER BY level, stat_order, stat_name",
+        (form_id,),
     ))
 
 

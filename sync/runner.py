@@ -157,19 +157,7 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                     candidates = blocks_by_name.get(entry.canonical_name, [])
                     block = _select_block_for(entry, candidates, blocks_by_tab)
                 if block is not None:
-                    if block.level_cap is not None:
-                        conn.execute(
-                            "UPDATE character_forms SET level_cap = ? WHERE id = ?",
-                            (block.level_cap, form_id),
-                        )
-                    repo.insert_skills(conn, form_id, block.skills)
-                    repo.insert_equipment(conn, form_id, block.equipment)
-                    if block.splash_art_url or block.self_buffs_text:
-                        repo.upsert_profile(
-                            conn, form_id,
-                            splash_art_url=block.splash_art_url,
-                            self_buffs_text=block.self_buffs_text,
-                        )
+                    _persist_block(conn, form_id, block)
                     if block.sheet_gid != SEA_GID:
                         used_role_blocks.add(
                             (block.sheet_gid, block.source_row, block.display_name)
@@ -201,19 +189,7 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                     sheet_gid=SEA_GID,
                     source_row=block.source_row,
                 )
-                if block.level_cap is not None:
-                    conn.execute(
-                        "UPDATE character_forms SET level_cap = ? WHERE id = ?",
-                        (block.level_cap, form_id),
-                    )
-                repo.insert_skills(conn, form_id, block.skills)
-                repo.insert_equipment(conn, form_id, block.equipment)
-                if block.splash_art_url or block.self_buffs_text:
-                    repo.upsert_profile(
-                        conn, form_id,
-                        splash_art_url=block.splash_art_url,
-                        self_buffs_text=block.self_buffs_text,
-                    )
+                _persist_block(conn, form_id, block)
                 index_name_keys.add(key)
 
             # Third pass: EX/EX2 forms that exist as complete role-tab blocks
@@ -248,19 +224,7 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                         sheet_gid=block.sheet_gid,
                         source_row=block.source_row,
                     )
-                    if block.level_cap is not None:
-                        conn.execute(
-                            "UPDATE character_forms SET level_cap = ? WHERE id = ?",
-                            (block.level_cap, form_id),
-                        )
-                    repo.insert_skills(conn, form_id, block.skills)
-                    repo.insert_equipment(conn, form_id, block.equipment)
-                    if block.splash_art_url or block.self_buffs_text:
-                        repo.upsert_profile(
-                            conn, form_id,
-                            splash_art_url=block.splash_art_url,
-                            self_buffs_text=block.self_buffs_text,
-                        )
+                    _persist_block(conn, form_id, block)
                     index_name_keys.add(key)
 
             progress("Rebuilding character FTS index...")
@@ -354,6 +318,43 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
         raise
     finally:
         conn.close()
+
+
+def _persist_block(conn: sqlite3.Connection, form_id: int, block: Any) -> None:
+    """Write a parsed FormBlock's data onto an already-inserted form row.
+
+    Called from each of the three persistence passes (Index attach,
+    SEA-only, role-tab-only EX). The form row itself is created by the
+    caller via ``repo.insert_form``; this helper attaches everything
+    that hangs off ``form_id``.
+
+    ``level_cap`` and ``alignment`` are stamped via a single UPDATE
+    rather than two — they live on the same row and can never both be
+    needed conditionally without one statement.
+    """
+    sets: list[str] = []
+    params: list[Any] = []
+    if block.level_cap is not None:
+        sets.append("level_cap = ?")
+        params.append(block.level_cap)
+    if block.alignment:
+        sets.append("alignment = ?")
+        params.append(block.alignment)
+    if sets:
+        params.append(form_id)
+        conn.execute(
+            f"UPDATE character_forms SET {', '.join(sets)} WHERE id = ?",
+            params,
+        )
+    repo.insert_skills(conn, form_id, block.skills)
+    repo.insert_equipment(conn, form_id, block.equipment)
+    repo.insert_stats(conn, form_id, block.stats)
+    if block.splash_art_url or block.self_buffs_text:
+        repo.upsert_profile(
+            conn, form_id,
+            splash_art_url=block.splash_art_url,
+            self_buffs_text=block.self_buffs_text,
+        )
 
 
 def _select_block_for(entry, candidates, blocks_by_tab):

@@ -289,6 +289,61 @@ def test_equipment_stats_negative_value_round_trip(tmp_db_path: Path) -> None:
     conn.close()
 
 
+def test_insert_stats_round_trip(tmp_db_path: Path) -> None:
+    """Lv100/Lv120 base stats round-trip via insert_stats + get_stats."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="Aviete",
+                                base_role="cleric", base_weapon="staff")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="Aviete",
+                               rarity="5*")
+    repo.insert_stats(conn, form_id, [
+        {"level": 100, "stat_name": "HP",  "stat_value": 2762, "stat_order": 0},
+        {"level": 120, "stat_name": "HP",  "stat_value": 3502, "stat_order": 0},
+        {"level": 100, "stat_name": "SP",  "stat_value": 450,  "stat_order": 1},
+        {"level": 120, "stat_name": "SP",  "stat_value": 530,  "stat_order": 1},
+        {"level": 100, "stat_name": "ATK", "stat_value": 216,  "stat_order": 2},
+        {"level": 120, "stat_name": "ATK", "stat_value": 266,  "stat_order": 2},
+    ])
+    rows = repo.get_stats(conn, form_id)
+    # ORDER BY level, stat_order, stat_name → all Lv100 first then Lv120.
+    assert [(r["level"], r["stat_name"], r["stat_value"]) for r in rows] == [
+        (100, "HP", 2762), (100, "SP", 450), (100, "ATK", 216),
+        (120, "HP", 3502), (120, "SP", 530), (120, "ATK", 266),
+    ]
+    conn.close()
+
+
+def test_clear_character_tables_wipes_character_stats(tmp_db_path: Path) -> None:
+    """character_stats must be in the wipe loop so /refresh re-seeds it."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="X", base_role="r",
+                                base_weapon="w")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="X",
+                               rarity="3*")
+    repo.insert_stats(conn, form_id, [
+        {"level": 100, "stat_name": "HP", "stat_value": 1000, "stat_order": 0},
+    ])
+    assert conn.execute("SELECT COUNT(*) FROM character_stats").fetchone()[0] == 1
+    repo.clear_character_tables(conn)
+    assert conn.execute("SELECT COUNT(*) FROM character_stats").fetchone()[0] == 0
+    conn.close()
+
+
+def test_alignment_round_trips_via_insert_form_and_get_form(tmp_db_path: Path) -> None:
+    """character_forms.alignment is set by an UPDATE in the runner; verify it
+    comes back through repo.get_form (which already does SELECT f.*)."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="Aviete",
+                                base_role="cleric", base_weapon="staff")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="Aviete",
+                               rarity="5*")
+    conn.execute("UPDATE character_forms SET alignment = ? WHERE id = ?",
+                 ("Glory", form_id))
+    form = repo.get_form(conn, form_id)
+    assert form["alignment"] == "Glory"
+    conn.close()
+
+
 def test_equipment_stats_cascade_on_form_delete(tmp_db_path: Path) -> None:
     """Wiping character_forms must cascade through equipment to equipment_stats."""
     conn = repo.connect(tmp_db_path)
