@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS character_forms (
     variant_kind    TEXT NOT NULL DEFAULT 'base',
     server          TEXT NOT NULL DEFAULT 'global',
     level_cap       INTEGER,
+    alignment       TEXT,                  -- e.g. 'Glory', 'Sovereign'; printed below the portrait
     sheet_gid       INTEGER,
     source_row      INTEGER,
     name_color_hex  TEXT,
@@ -87,6 +88,23 @@ CREATE TABLE IF NOT EXISTS character_profile (
     splash_art_url  TEXT,
     self_buffs_text TEXT
 );
+
+-- Lv100 / Lv120 base stats per character form. The role tab shows two
+-- columns "Lv100" / "Lv120"; older 3*/4*/5* characters can be promoted to
+-- 6* and gain a Lv120 column too, so both levels are populated for almost
+-- every form. Stat names come from `=HP`/`=SP`/`=ATK`/... formulas in the
+-- icon column; missing levels are simply skipped (no NULL rows).
+CREATE TABLE IF NOT EXISTS character_stats (
+    id              INTEGER PRIMARY KEY,
+    form_id         INTEGER NOT NULL REFERENCES character_forms(id) ON DELETE CASCADE,
+    level           INTEGER NOT NULL,            -- 100 | 120
+    stat_name       TEXT NOT NULL,               -- 'HP'|'SP'|'ATK'|'DEF'|'MAG'|'MDEF'|'ACC'|'SPD'|'CRIT'|'EVA'
+    stat_value      INTEGER NOT NULL,
+    stat_order      INTEGER NOT NULL DEFAULT 0,  -- preserves icon row order
+    UNIQUE(form_id, level, stat_name)
+);
+CREATE INDEX IF NOT EXISTS ix_character_stats_form
+    ON character_stats(form_id, level, stat_order);
 
 CREATE TABLE IF NOT EXISTS sync_runs (
     id                INTEGER PRIMARY KEY,

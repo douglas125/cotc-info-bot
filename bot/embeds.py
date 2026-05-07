@@ -4,9 +4,10 @@ These take a sqlite3 connection plus a form_id (or a list of search rows)
 and return a `discord.Embed`. They have no Discord runtime dependency
 beyond the `Embed` data class — fully unit-testable.
 
-The `/character` command surfaces five sections through a dropdown:
-"actives" (default), "passives", "ultimate", "a4", and "info". Each
-section is a self-contained embed; the dropdown swaps which one is shown.
+The `/character` command surfaces six sections through a dropdown:
+"actives" (default), "passives", "ultimate", "a4", "stats", and "info".
+Each section is a self-contained embed; the dropdown swaps which one is
+shown.
 """
 from __future__ import annotations
 
@@ -27,13 +28,16 @@ FIELD_NAME_LIMIT = 256
 TITLE_LIMIT = 256
 MAX_FIELDS = 25
 
-Section = Literal["actives", "passives", "ultimate", "a4", "info"]
-SECTIONS: tuple[Section, ...] = ("actives", "passives", "ultimate", "a4", "info")
+Section = Literal["actives", "passives", "ultimate", "a4", "stats", "info"]
+SECTIONS: tuple[Section, ...] = (
+    "actives", "passives", "ultimate", "a4", "stats", "info",
+)
 SECTION_LABELS: dict[Section, str] = {
     "actives": "Active Skills",
     "passives": "Passive Skills",
     "ultimate": "Ultimate",
     "a4": "A4 Accessory",
+    "stats": "Level 120 Stats",
     "info": "Info",
 }
 SECTION_DESCRIPTIONS: dict[Section, str] = {
@@ -41,9 +45,18 @@ SECTION_DESCRIPTIONS: dict[Section, str] = {
     "passives": "Passive skills and Latent Power",
     "ultimate": "Ultimate (Special) tiers",
     "a4": "A4 accessory and effect",
+    "stats": "Alignment and Lv100 / Lv120 base stats",
     "info": "Affinities, release info, source link",
 }
 DEFAULT_SECTION: Section = "actives"
+
+# Display order for the Lv100/Lv120 grid. Mirrors the role-tab icon row
+# (HP, SP, then physical/magical attack/defense, accuracy, speed, crit,
+# evasion). Stat names not in this tuple are appended at the end so an
+# unexpected formula doesn't silently drop the row.
+_STATS_DISPLAY_ORDER: tuple[str, ...] = (
+    "HP", "SP", "ATK", "DEF", "MAG", "MDEF", "ACC", "SPD", "CRIT", "EVA",
+)
 
 
 def _safe_url(url: str | None, base_edit_url: str = _SHEET_BASE_URL) -> str | None:
@@ -457,6 +470,71 @@ def _build_a4_section(
     return embed
 
 
+def _build_stats_section(
+    form: sqlite3.Row,
+    stats: list[sqlite3.Row],
+) -> discord.Embed:
+    """Render alignment + Lv100/Lv120 base stats as a code-block table."""
+    embed = _new_header_embed(form)
+    alignment = None
+    try:
+        alignment = form["alignment"]
+    except (IndexError, KeyError):
+        alignment = None
+    if alignment:
+        embed.add_field(name="Alignment", value=alignment, inline=False)
+
+    by_level: dict[int, dict[str, int]] = {}
+    for r in stats:
+        by_level.setdefault(r["level"], {})[r["stat_name"]] = r["stat_value"]
+    has_100 = bool(by_level.get(100))
+    has_120 = bool(by_level.get(120))
+
+    if not (has_100 or has_120):
+        embed.add_field(
+            name="Base Stats",
+            value="_No base stats recorded for this form._",
+            inline=False,
+        )
+        return embed
+
+    present: list[str] = []
+    seen: set[str] = set()
+    for n in _STATS_DISPLAY_ORDER:
+        if n in by_level.get(100, {}) or n in by_level.get(120, {}):
+            present.append(n)
+            seen.add(n)
+    # Append any unexpected stat names so they remain visible.
+    extras = sorted({
+        n for level in by_level.values() for n in level if n not in seen
+    })
+    present.extend(extras)
+
+    if has_100 and has_120:
+        header = f"{'Stat':<5} {'Lv100':>7} {'Lv120':>7}"
+        rows = [
+            f"{n:<5} "
+            f"{str(by_level.get(100, {}).get(n, '-')):>7} "
+            f"{str(by_level.get(120, {}).get(n, '-')):>7}"
+            for n in present
+        ]
+    else:
+        only = 120 if has_120 else 100
+        col = f"Lv{only}"
+        header = f"{'Stat':<5} {col:>7}"
+        rows = [
+            f"{n:<5} {str(by_level.get(only, {}).get(n, '-')):>7}"
+            for n in present
+        ]
+    body = "```\n" + "\n".join([header, *rows]) + "\n```"
+    embed.add_field(
+        name="Base Stats",
+        value=_truncate(body, FIELD_VALUE_LIMIT),
+        inline=False,
+    )
+    return embed
+
+
 def _build_info_section(
     form: sqlite3.Row,
     profile: sqlite3.Row | None,
@@ -525,6 +603,8 @@ def build_section_embed(
             repo.get_equipment(conn, form_id),
             repo.get_equipment_stats_by_form(conn, form_id),
         )
+    elif section == "stats":
+        embed = _build_stats_section(form, repo.get_stats(conn, form_id))
     elif section == "info":
         embed = _build_info_section(
             form,

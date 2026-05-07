@@ -1132,3 +1132,155 @@ def test_parse_role_tab_picks_up_image_formula_in_block() -> None:
     blocks = parse_role_tab(sheet, gid=999)
     assert len(blocks) == 1
     assert blocks[0].splash_art_url == "https://example.com/cyrus.png"
+
+
+# --- Lv100/Lv120 base stats and alignment -----------------------------------
+
+def _stats_block_rows(
+    name: str,
+    *,
+    alignment: str | None,
+    lv100: dict[str, int] | None,
+    lv120: dict[str, int] | None,
+    icon_col: int = 0,
+    lv100_col: int = 1,
+    lv120_col: int = 2,
+) -> list[list[dict]]:
+    """Build a synthetic block that mimics the live role-tab layout.
+
+    Row 0: SP/Active block header.
+    Row 1: alignment label in col `icon_col`.
+    Row 2: 'Lv100' / 'Lv120' header in cols `lv100_col` / `lv120_col`.
+    Rows 3..: stat rows — `=STAT` formula in `icon_col`, integer values in
+              `lv100_col` / `lv120_col`.
+    """
+    width = max(icon_col, lv100_col, lv120_col, 22) + 4
+
+    def empty_row() -> list[dict]:
+        return [_cell() for _ in range(width)]
+
+    rows: list[list[dict]] = []
+    header = empty_row()
+    header[0] = _cell(name)
+    header[6] = _cell("SP")
+    header[7] = _cell("Active")
+    rows.append(header)
+
+    align_row = empty_row()
+    if alignment:
+        align_row[icon_col] = _cell(alignment)
+    rows.append(align_row)
+
+    level_row = empty_row()
+    level_row[lv100_col] = _cell("Lv100")
+    if lv120 is not None:
+        level_row[lv120_col] = _cell("Lv120")
+    rows.append(level_row)
+
+    stat_names: list[str] = []
+    for name_ in (lv100 or {}):
+        if name_ not in stat_names:
+            stat_names.append(name_)
+    for name_ in (lv120 or {}):
+        if name_ not in stat_names:
+            stat_names.append(name_)
+    for stat_name in stat_names:
+        r = empty_row()
+        r[icon_col] = _cell(formula=f"={stat_name}")
+        if lv100 and stat_name in lv100:
+            r[lv100_col] = _cell(number=lv100[stat_name])
+        if lv120 and stat_name in lv120:
+            r[lv120_col] = _cell(number=lv120[stat_name])
+        rows.append(r)
+    return rows
+
+
+def test_parse_role_tab_extracts_alignment_and_two_level_stats() -> None:
+    rows = _stats_block_rows(
+        "Aviete",
+        alignment="Glory",
+        lv100={"HP": 2762, "SP": 450, "ATK": 216, "DEF": 302},
+        lv120={"HP": 3502, "SP": 530, "ATK": 266, "DEF": 352},
+    )
+    sheet = _make_role_sheet(rows)
+    blocks = parse_role_tab(sheet, gid=999)
+    assert len(blocks) == 1
+    block = blocks[0]
+    assert block.alignment == "Glory"
+    by_level: dict[int, dict[str, int]] = {}
+    for s in block.stats:
+        by_level.setdefault(s["level"], {})[s["stat_name"]] = s["stat_value"]
+    assert by_level[100] == {"HP": 2762, "SP": 450, "ATK": 216, "DEF": 302}
+    assert by_level[120] == {"HP": 3502, "SP": 530, "ATK": 266, "DEF": 352}
+    # Stat order is preserved across levels.
+    orders = [(s["level"], s["stat_name"], s["stat_order"]) for s in block.stats]
+    hp_orders = [o for lvl, n, o in orders if n == "HP"]
+    sp_orders = [o for lvl, n, o in orders if n == "SP"]
+    assert hp_orders == [0, 0]
+    assert sp_orders == [1, 1]
+
+
+def test_parse_role_tab_stats_block_lv100_only() -> None:
+    """A block missing Lv120 still yields Lv100 rows; no Lv120 entries are produced."""
+    rows = _stats_block_rows(
+        "OldHero",
+        alignment="Justice",
+        lv100={"HP": 4200, "SP": 420, "ATK": 790},
+        lv120=None,
+    )
+    sheet = _make_role_sheet(rows)
+    blocks = parse_role_tab(sheet, gid=999)
+    assert len(blocks) == 1
+    block = blocks[0]
+    assert block.alignment == "Justice"
+    assert {s["level"] for s in block.stats} == {100}
+    assert {s["stat_name"] for s in block.stats} == {"HP", "SP", "ATK"}
+
+
+def test_parse_role_tab_stats_block_unknown_formula_terminates_scan() -> None:
+    """A non-stat formula in the icon column ends the stats region."""
+    rows = _stats_block_rows(
+        "Hero",
+        alignment="Glory",
+        lv100={"HP": 1000, "SP": 200},
+        lv120={"HP": 1500, "SP": 250},
+    )
+    # Inject an extra row after the stats with an unknown formula in col 0;
+    # the scanner should stop and not produce a row for it.
+    bad_row = [_cell() for _ in range(26)]
+    bad_row[0] = _cell(formula="=Notes")
+    bad_row[1] = _cell(number=999)
+    rows.append(bad_row)
+    sheet = _make_role_sheet(rows)
+    blocks = parse_role_tab(sheet, gid=999)
+    assert len(blocks) == 1
+    block = blocks[0]
+    names = {s["stat_name"] for s in block.stats}
+    assert names == {"HP", "SP"}
+
+
+def test_parse_role_tab_stats_missing_alignment_is_none() -> None:
+    rows = _stats_block_rows(
+        "Hero",
+        alignment=None,
+        lv100={"HP": 1000},
+        lv120={"HP": 1500},
+    )
+    sheet = _make_role_sheet(rows)
+    blocks = parse_role_tab(sheet, gid=999)
+    assert len(blocks) == 1
+    assert blocks[0].alignment is None
+    assert len(blocks[0].stats) == 2  # HP at Lv100 + HP at Lv120
+
+
+def test_parse_role_tab_no_stats_region_leaves_block_empty() -> None:
+    """A block without a Lv100 anchor still parses; stats and alignment stay empty."""
+    rows: list[list[dict]] = [
+        [_cell("Cyrus")] + [_cell()] * 5 + [_cell("SP"), _cell("Active")] + [_cell()] * 18,
+        [_cell()] * 26,
+    ]
+    sheet = _make_role_sheet(rows)
+    blocks = parse_role_tab(sheet, gid=999)
+    assert len(blocks) == 1
+    assert blocks[0].stats == []
+    assert blocks[0].alignment is None

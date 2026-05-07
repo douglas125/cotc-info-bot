@@ -131,10 +131,13 @@ def _seed_full_kit(conn) -> int:
 
 
 def test_section_keys_and_labels_are_consistent() -> None:
-    assert embeds.SECTIONS == ("actives", "passives", "ultimate", "a4", "info")
+    assert embeds.SECTIONS == (
+        "actives", "passives", "ultimate", "a4", "stats", "info",
+    )
     assert set(embeds.SECTION_LABELS.keys()) == set(embeds.SECTIONS)
     assert set(embeds.SECTION_DESCRIPTIONS.keys()) == set(embeds.SECTIONS)
     assert embeds.DEFAULT_SECTION == "actives"
+    assert embeds.SECTION_LABELS["stats"] == "Level 120 Stats"
 
 
 def test_build_section_actives_basic_shape(tmp_db_path: Path) -> None:
@@ -377,6 +380,77 @@ def test_build_section_a4_handles_no_equipment(tmp_db_path: Path) -> None:
     conn.close()
     a4_field = next(f for f in embed.fields if f.name == "A4 Accessory")
     assert "no a4 accessory" in a4_field.value.lower()
+
+
+def test_build_section_stats_two_columns(tmp_db_path: Path) -> None:
+    """Both Lv100 and Lv120 present → side-by-side code-block table with
+    alignment field on top."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="Aviete",
+                                base_role="cleric", base_weapon="staff")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="Aviete",
+                               rarity="5*")
+    conn.execute("UPDATE character_forms SET alignment = ? WHERE id = ?",
+                 ("Glory", form_id))
+    repo.insert_stats(conn, form_id, [
+        {"level": 100, "stat_name": "HP",  "stat_value": 2762, "stat_order": 0},
+        {"level": 120, "stat_name": "HP",  "stat_value": 3502, "stat_order": 0},
+        {"level": 100, "stat_name": "SP",  "stat_value": 450,  "stat_order": 1},
+        {"level": 120, "stat_name": "SP",  "stat_value": 530,  "stat_order": 1},
+        {"level": 100, "stat_name": "ATK", "stat_value": 216,  "stat_order": 2},
+        {"level": 120, "stat_name": "ATK", "stat_value": 266,  "stat_order": 2},
+    ])
+    embed = embeds.build_section_embed(conn, form_id, "stats")
+    conn.close()
+
+    assert embed is not None
+    field_names = [f.name for f in embed.fields]
+    assert "Alignment" in field_names
+    assert "Base Stats" in field_names
+    align_field = next(f for f in embed.fields if f.name == "Alignment")
+    assert align_field.value == "Glory"
+    stats_field = next(f for f in embed.fields if f.name == "Base Stats")
+    assert "Lv100" in stats_field.value
+    assert "Lv120" in stats_field.value
+    assert "2762" in stats_field.value and "3502" in stats_field.value
+    assert "HP" in stats_field.value and "SP" in stats_field.value
+
+
+def test_build_section_stats_lv100_only(tmp_db_path: Path) -> None:
+    """A form with only Lv100 stats renders one column and no Lv120 header."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="OldHero",
+                                base_role="warrior", base_weapon="sword")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="OldHero",
+                               rarity="3*")
+    conn.execute("UPDATE character_forms SET alignment = ? WHERE id = ?",
+                 ("Justice", form_id))
+    repo.insert_stats(conn, form_id, [
+        {"level": 100, "stat_name": "HP",  "stat_value": 4200, "stat_order": 0},
+        {"level": 100, "stat_name": "SP",  "stat_value": 420,  "stat_order": 1},
+        {"level": 100, "stat_name": "ATK", "stat_value": 790,  "stat_order": 2},
+    ])
+    embed = embeds.build_section_embed(conn, form_id, "stats")
+    conn.close()
+
+    stats_field = next(f for f in embed.fields if f.name == "Base Stats")
+    assert "Lv100" in stats_field.value
+    assert "Lv120" not in stats_field.value
+    assert "4200" in stats_field.value
+
+
+def test_build_section_stats_no_data(tmp_db_path: Path) -> None:
+    """A form with no stats rendered shows the placeholder text."""
+    conn = repo.connect(tmp_db_path)
+    ch = repo.upsert_character(conn, canonical_name="NoStats",
+                                base_role="r", base_weapon="w")
+    form_id = repo.insert_form(conn, character_id=ch, display_name="NoStats",
+                               rarity="3*")
+    embed = embeds.build_section_embed(conn, form_id, "stats")
+    conn.close()
+
+    stats_field = next(f for f in embed.fields if f.name == "Base Stats")
+    assert "no base stats" in stats_field.value.lower()
 
 
 def test_build_section_info_basic_shape(tmp_db_path: Path) -> None:

@@ -515,6 +515,78 @@ def check_a4_accessory_stats(conn) -> list[tuple[bool, str]]:
     return out
 
 
+# Hand-verified expectations for the new Lv100/Lv120 base-stats grid plus
+# alignment label. ``alignment`` is None when unverified — only Aviete's
+# alignment was visible in the screenshot used to design the feature, so
+# other entries assert "non-empty string" instead of an exact match.
+# Add concrete values here once verified against the live sheet.
+_EXPECTED_BASE_STATS: dict[str, dict[str, Any]] = {
+    "Aviete": {"alignment": "Glory", "lv120_required": True},
+    "Cyrus":  {"alignment": None,    "lv120_required": True},
+    "Therion": {"alignment": None,   "lv120_required": True},
+    "Tressa":  {"alignment": None,   "lv120_required": True},
+}
+
+
+def check_character_base_stats(conn) -> list[tuple[bool, str]]:
+    """Spot-check the Lv100/Lv120 stats grid + alignment label.
+
+    Per character: alignment matches when expected, ≥1 row at level 100,
+    and (for forms expected to have post-6★ Lv120 unlocks) ≥1 row at
+    level 120. Also reports % of forms carrying any Lv120 row — that is
+    the dominant case in the live sheet, so a sudden drop is a parser
+    regression smell.
+    """
+    out: list[tuple[bool, str]] = []
+    for name, spec in _EXPECTED_BASE_STATS.items():
+        form = conn.execute(
+            "SELECT cf.id, cf.alignment FROM character_forms cf "
+            "JOIN characters c ON c.id = cf.character_id "
+            "WHERE c.canonical_name = ? "
+            "ORDER BY cf.id LIMIT 1",
+            (name,),
+        ).fetchone()
+        if not form:
+            out.append((False, f"base-stats '{name}': character not in DB"))
+            continue
+        if spec["alignment"] is not None:
+            alignment_ok = (form["alignment"] == spec["alignment"])
+            msg = (f"base-stats '{name}': alignment expected "
+                   f"{spec['alignment']!r}, got {form['alignment']!r}")
+        else:
+            alignment_ok = bool(form["alignment"])
+            msg = (f"base-stats '{name}': alignment present "
+                   f"({form['alignment']!r})")
+        out.append((alignment_ok, msg))
+
+        rows = conn.execute(
+            "SELECT level, COUNT(*) AS n FROM character_stats "
+            "WHERE form_id = ? GROUP BY level",
+            (form["id"],),
+        ).fetchall()
+        by_level = {r["level"]: r["n"] for r in rows}
+        out.append((by_level.get(100, 0) >= 1,
+                    f"base-stats '{name}': Lv100 rows={by_level.get(100, 0)}"))
+        if spec.get("lv120_required"):
+            out.append((by_level.get(120, 0) >= 1,
+                        f"base-stats '{name}': Lv120 rows={by_level.get(120, 0)}"))
+
+    total = conn.execute("SELECT COUNT(*) FROM character_forms").fetchone()[0]
+    with_lv120 = conn.execute(
+        "SELECT COUNT(DISTINCT form_id) FROM character_stats WHERE level = 120"
+    ).fetchone()[0]
+    pct = (100.0 * with_lv120 / total) if total else 0.0
+    # Threshold is intentionally below the live ~73% baseline. SEA/GL Unique
+    # Kits takes precedence over role-tab data for ~60 characters, and that
+    # SEA path doesn't carry the stats grid yet (documented follow-up).
+    # 70% gates against parser regression on the role-tab path, which is the
+    # only place stats are read today.
+    out.append((pct >= 70.0,
+                f"Lv120 stats coverage: {with_lv120}/{total} ({pct:.0f}%) "
+                f"forms have at least one Lv120 stat row"))
+    return out
+
+
 # --- runner -----------------------------------------------------------------
 
 def run_all() -> int:
@@ -534,6 +606,7 @@ def run_all() -> int:
         ("Splash-art coverage",      check_splash_art_coverage(conn)),
         ("Spot-check characters",    check_spot_characters(payload, conn)),
         ("A4 accessory stats",       check_a4_accessory_stats(conn)),
+        ("Character base stats",     check_character_base_stats(conn)),
     ]
 
     total = 0

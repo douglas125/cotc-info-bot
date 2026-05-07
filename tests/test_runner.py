@@ -412,6 +412,105 @@ def test_run_sync_aliases_ex_role_tab_to_index_entry(
         conn.close()
 
 
+def _block_rows_with_stats(
+    name: str,
+    skill_desc: str,
+    *,
+    alignment: str,
+    lv100: dict[str, int],
+    lv120: dict[str, int],
+) -> list[list[dict]]:
+    """Like ``_block_rows`` but appends an alignment label, a Lv100/Lv120
+    header, and one icon-formula row per stat. Mirrors the live role-tab
+    layout that the parser scans for inside each character block."""
+    width = 8
+    rows: list[list[dict]] = [
+        [_idx_cell()] * width,
+        [_idx_cell(name)] + [_idx_cell()] * 5
+            + [_idx_cell("SP"), _idx_cell("Active")],
+        [_idx_cell()] * 6 + [_idx_cell("18"), _idx_cell(skill_desc)],
+        # Alignment cell sits in col 0 of the row above the Lv100 header.
+        [_idx_cell(alignment)] + [_idx_cell()] * (width - 1),
+        # Lv100 / Lv120 header in cols 1 / 2.
+        [_idx_cell(), _idx_cell("Lv100"), _idx_cell("Lv120")] + [_idx_cell()] * (width - 3),
+    ]
+    stat_names: list[str] = []
+    for n in lv100:
+        if n not in stat_names:
+            stat_names.append(n)
+    for n in lv120:
+        if n not in stat_names:
+            stat_names.append(n)
+    for stat_name in stat_names:
+        r = [_idx_cell() for _ in range(width)]
+        r[0] = {"userEnteredValue": {"formulaValue": f"={stat_name}"}}
+        if stat_name in lv100:
+            r[1] = {
+                "effectiveValue": {"numberValue": lv100[stat_name]},
+                "formattedValue": str(lv100[stat_name]),
+            }
+        if stat_name in lv120:
+            r[2] = {
+                "effectiveValue": {"numberValue": lv120[stat_name]},
+                "formattedValue": str(lv120[stat_name]),
+            }
+        rows.append(r)
+    return rows
+
+
+def _build_payload_with_aviete_stats() -> dict:
+    """Aviete on the apothecary tab with Glory alignment and Lv100/Lv120 base stats."""
+    sheets = [
+        _index_sheet_with(("Aviete", "apothecary")),
+        _sheet(APOTH_5_GID, "Apothecaries 5",
+               _block_rows_with_stats(
+                   "Aviete", "1x AoE heal",
+                   alignment="Glory",
+                   lv100={"HP": 2762, "SP": 450, "ATK": 216, "DEF": 302},
+                   lv120={"HP": 3502, "SP": 530, "ATK": 266, "DEF": 352},
+               )),
+    ]
+    used = {s["properties"]["sheetId"] for s in sheets}
+    for tab in TABS:
+        if tab.gid not in used:
+            sheets.append(_sheet(tab.gid, tab.name, [[_idx_cell()]]))
+    return {"sheets": sheets}
+
+
+def test_run_sync_persists_alignment_and_lv100_lv120_stats(
+    tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end: a role-tab block carrying Glory + Lv100/Lv120 stats lands
+    in character_forms.alignment and character_stats."""
+    payload = _build_payload_with_aviete_stats()
+    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key, *_: payload)
+    monkeypatch.setattr("db.repo.DB_PATH", tmp_db_path)
+
+    summary = runner_mod.run_sync("dummy-key")
+    assert summary["status"] == "ok"
+
+    conn = sqlite3.connect(tmp_db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        form = conn.execute(
+            "SELECT id, alignment FROM character_forms "
+            "WHERE display_name = 'Aviete'"
+        ).fetchone()
+        assert form is not None
+        assert form["alignment"] == "Glory"
+        rows = conn.execute(
+            "SELECT level, stat_name, stat_value FROM character_stats "
+            "WHERE form_id = ? ORDER BY level, stat_order, stat_name",
+            (form["id"],),
+        ).fetchall()
+        levels = {r["level"] for r in rows}
+        assert levels == {100, 120}, f"expected both levels, got {levels}"
+        lv120_hp = next(r for r in rows if r["level"] == 120 and r["stat_name"] == "HP")
+        assert lv120_hp["stat_value"] == 3502
+    finally:
+        conn.close()
+
+
 def _build_payload_with_role_tab_only_ex() -> dict:
     """EX Temenos is present as a complete role-tab block but not in Index."""
     sheets = [

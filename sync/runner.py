@@ -162,8 +162,14 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                             "UPDATE character_forms SET level_cap = ? WHERE id = ?",
                             (block.level_cap, form_id),
                         )
+                    if block.alignment:
+                        conn.execute(
+                            "UPDATE character_forms SET alignment = ? WHERE id = ?",
+                            (block.alignment, form_id),
+                        )
                     repo.insert_skills(conn, form_id, block.skills)
                     repo.insert_equipment(conn, form_id, block.equipment)
+                    repo.insert_stats(conn, form_id, block.stats)
                     if block.splash_art_url or block.self_buffs_text:
                         repo.upsert_profile(
                             conn, form_id,
@@ -206,8 +212,14 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                         "UPDATE character_forms SET level_cap = ? WHERE id = ?",
                         (block.level_cap, form_id),
                     )
+                if block.alignment:
+                    conn.execute(
+                        "UPDATE character_forms SET alignment = ? WHERE id = ?",
+                        (block.alignment, form_id),
+                    )
                 repo.insert_skills(conn, form_id, block.skills)
                 repo.insert_equipment(conn, form_id, block.equipment)
+                repo.insert_stats(conn, form_id, block.stats)
                 if block.splash_art_url or block.self_buffs_text:
                     repo.upsert_profile(
                         conn, form_id,
@@ -253,8 +265,14 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                             "UPDATE character_forms SET level_cap = ? WHERE id = ?",
                             (block.level_cap, form_id),
                         )
+                    if block.alignment:
+                        conn.execute(
+                            "UPDATE character_forms SET alignment = ? WHERE id = ?",
+                            (block.alignment, form_id),
+                        )
                     repo.insert_skills(conn, form_id, block.skills)
                     repo.insert_equipment(conn, form_id, block.equipment)
+                    repo.insert_stats(conn, form_id, block.stats)
                     if block.splash_art_url or block.self_buffs_text:
                         repo.upsert_profile(
                             conn, form_id,
