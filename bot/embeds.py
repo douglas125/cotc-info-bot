@@ -476,21 +476,17 @@ def _build_stats_section(
 ) -> discord.Embed:
     """Render alignment + Lv100/Lv120 base stats as a code-block table."""
     embed = _new_header_embed(form)
-    alignment = None
-    try:
-        alignment = form["alignment"]
-    except (IndexError, KeyError):
-        alignment = None
-    if alignment:
-        embed.add_field(name="Alignment", value=alignment, inline=False)
+    if form["alignment"]:
+        embed.add_field(name="Alignment", value=form["alignment"], inline=False)
 
-    by_level: dict[int, dict[str, int]] = {}
+    lv100: dict[str, int] = {}
+    lv120: dict[str, int] = {}
     for r in stats:
-        by_level.setdefault(r["level"], {})[r["stat_name"]] = r["stat_value"]
-    has_100 = bool(by_level.get(100))
-    has_120 = bool(by_level.get(120))
+        (lv100 if r["level"] == 100 else lv120 if r["level"] == 120 else {})[
+            r["stat_name"]
+        ] = r["stat_value"]
 
-    if not (has_100 or has_120):
+    if not (lv100 or lv120):
         embed.add_field(
             name="Base Stats",
             value="_No base stats recorded for this form._",
@@ -501,31 +497,23 @@ def _build_stats_section(
     present: list[str] = []
     seen: set[str] = set()
     for n in _STATS_DISPLAY_ORDER:
-        if n in by_level.get(100, {}) or n in by_level.get(120, {}):
+        if n in lv100 or n in lv120:
             present.append(n)
             seen.add(n)
-    # Append any unexpected stat names so they remain visible.
-    extras = sorted({
-        n for level in by_level.values() for n in level if n not in seen
-    })
-    present.extend(extras)
+    # Append any unexpected stat names so a sheet change doesn't silently drop a row.
+    present.extend(sorted((lv100.keys() | lv120.keys()) - seen))
 
-    if has_100 and has_120:
+    if lv100 and lv120:
         header = f"{'Stat':<5} {'Lv100':>7} {'Lv120':>7}"
         rows = [
-            f"{n:<5} "
-            f"{str(by_level.get(100, {}).get(n, '-')):>7} "
-            f"{str(by_level.get(120, {}).get(n, '-')):>7}"
+            f"{n:<5} {str(lv100.get(n, '-')):>7} {str(lv120.get(n, '-')):>7}"
             for n in present
         ]
     else:
-        only = 120 if has_120 else 100
-        col = f"Lv{only}"
-        header = f"{'Stat':<5} {col:>7}"
-        rows = [
-            f"{n:<5} {str(by_level.get(only, {}).get(n, '-')):>7}"
-            for n in present
-        ]
+        only_label = "Lv120" if lv120 else "Lv100"
+        only = lv120 or lv100
+        header = f"{'Stat':<5} {only_label:>7}"
+        rows = [f"{n:<5} {str(only.get(n, '-')):>7}" for n in present]
     body = "```\n" + "\n".join([header, *rows]) + "\n```"
     embed.add_field(
         name="Base Stats",

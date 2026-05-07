@@ -168,13 +168,59 @@ def _sheet(gid: int, title: str, rows: list[list[dict]]) -> dict:
     }
 
 
-def _block_rows(name: str, skill_desc: str) -> list[list[dict]]:
-    return [
-        [_idx_cell()] * 8,
+def _block_rows(
+    name: str,
+    skill_desc: str,
+    *,
+    alignment: str | None = None,
+    lv100: dict[str, int] | None = None,
+    lv120: dict[str, int] | None = None,
+) -> list[list[dict]]:
+    """Synthetic role-tab block.
+
+    With no extra kwargs: 3 rows (name+SP/Active marker + one skill row).
+    With ``alignment`` / ``lv100`` / ``lv120`` kwargs: appends an
+    alignment row, a Lv100/Lv120 header row (cols 1/2), and one
+    icon-formula stat row per stat — mirrors the live layout that the
+    parser scans for inside each character block.
+    """
+    width = 8
+    rows: list[list[dict]] = [
+        [_idx_cell()] * width,
         [_idx_cell(name)] + [_idx_cell()] * 5
             + [_idx_cell("SP"), _idx_cell("Active")],
         [_idx_cell()] * 6 + [_idx_cell("18"), _idx_cell(skill_desc)],
     ]
+    if alignment is None and not lv100 and not lv120:
+        return rows
+
+    rows.append([_idx_cell(alignment or "")] + [_idx_cell()] * (width - 1))
+    rows.append(
+        [_idx_cell(), _idx_cell("Lv100"), _idx_cell("Lv120")]
+        + [_idx_cell()] * (width - 3)
+    )
+    stat_names: list[str] = []
+    for n in (lv100 or {}):
+        if n not in stat_names:
+            stat_names.append(n)
+    for n in (lv120 or {}):
+        if n not in stat_names:
+            stat_names.append(n)
+    for stat_name in stat_names:
+        r = [_idx_cell() for _ in range(width)]
+        r[0] = {"userEnteredValue": {"formulaValue": f"={stat_name}"}}
+        if lv100 and stat_name in lv100:
+            r[1] = {
+                "effectiveValue": {"numberValue": lv100[stat_name]},
+                "formattedValue": str(lv100[stat_name]),
+            }
+        if lv120 and stat_name in lv120:
+            r[2] = {
+                "effectiveValue": {"numberValue": lv120[stat_name]},
+                "formattedValue": str(lv120[stat_name]),
+            }
+        rows.append(r)
+    return rows
 
 
 def _index_sheet_with(*characters: tuple[str, str]) -> dict:
@@ -412,58 +458,12 @@ def test_run_sync_aliases_ex_role_tab_to_index_entry(
         conn.close()
 
 
-def _block_rows_with_stats(
-    name: str,
-    skill_desc: str,
-    *,
-    alignment: str,
-    lv100: dict[str, int],
-    lv120: dict[str, int],
-) -> list[list[dict]]:
-    """Like ``_block_rows`` but appends an alignment label, a Lv100/Lv120
-    header, and one icon-formula row per stat. Mirrors the live role-tab
-    layout that the parser scans for inside each character block."""
-    width = 8
-    rows: list[list[dict]] = [
-        [_idx_cell()] * width,
-        [_idx_cell(name)] + [_idx_cell()] * 5
-            + [_idx_cell("SP"), _idx_cell("Active")],
-        [_idx_cell()] * 6 + [_idx_cell("18"), _idx_cell(skill_desc)],
-        # Alignment cell sits in col 0 of the row above the Lv100 header.
-        [_idx_cell(alignment)] + [_idx_cell()] * (width - 1),
-        # Lv100 / Lv120 header in cols 1 / 2.
-        [_idx_cell(), _idx_cell("Lv100"), _idx_cell("Lv120")] + [_idx_cell()] * (width - 3),
-    ]
-    stat_names: list[str] = []
-    for n in lv100:
-        if n not in stat_names:
-            stat_names.append(n)
-    for n in lv120:
-        if n not in stat_names:
-            stat_names.append(n)
-    for stat_name in stat_names:
-        r = [_idx_cell() for _ in range(width)]
-        r[0] = {"userEnteredValue": {"formulaValue": f"={stat_name}"}}
-        if stat_name in lv100:
-            r[1] = {
-                "effectiveValue": {"numberValue": lv100[stat_name]},
-                "formattedValue": str(lv100[stat_name]),
-            }
-        if stat_name in lv120:
-            r[2] = {
-                "effectiveValue": {"numberValue": lv120[stat_name]},
-                "formattedValue": str(lv120[stat_name]),
-            }
-        rows.append(r)
-    return rows
-
-
 def _build_payload_with_aviete_stats() -> dict:
     """Aviete on the apothecary tab with Glory alignment and Lv100/Lv120 base stats."""
     sheets = [
         _index_sheet_with(("Aviete", "apothecary")),
         _sheet(APOTH_5_GID, "Apothecaries 5",
-               _block_rows_with_stats(
+               _block_rows(
                    "Aviete", "1x AoE heal",
                    alignment="Glory",
                    lv100={"HP": 2762, "SP": 450, "ATK": 216, "DEF": 302},

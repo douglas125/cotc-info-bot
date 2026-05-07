@@ -328,33 +328,29 @@ _KNOWN_STAT_NAMES = frozenset({
 })
 
 
-def _formula_stat_name(cell: dict[str, Any]) -> str | None:
-    """Return e.g. 'ATK' for a cell whose formulaValue is '=ATK', else None.
-
-    Restricted to ``_KNOWN_STAT_NAMES`` so non-stat formulas don't match.
-    """
-    formula = _formula(cell).strip()
-    if len(formula) < 2 or not formula.startswith("="):
-        return None
-    name = formula[1:].strip().upper()
-    return name if name in _KNOWN_STAT_NAMES else None
-
-
 # Base-stats grid (next to the portrait) accepts the same eight A4 stats plus
 # Accuracy / Evasion. Kept as a separate allowlist so the A4 status-icon
-# filter (`_KNOWN_STAT_NAMES`) stays narrow.
+# filter (`_KNOWN_STAT_NAMES`) stays narrow — status-effect icons share the
+# A4 stat column, but the Lv100/Lv120 grid is a clean stats-only region.
 _BASE_STAT_NAMES = frozenset({
     "HP", "SP", "ATK", "DEF", "MAG", "MDEF", "ACC", "SPD", "CRIT", "EVA",
 })
 
 
-def _base_formula_stat_name(cell: dict[str, Any]) -> str | None:
-    """Like ``_formula_stat_name`` but for the Lv100/Lv120 stat block."""
+def _formula_stat_name(
+    cell: dict[str, Any], allowed: frozenset[str] = _KNOWN_STAT_NAMES,
+) -> str | None:
+    """Return e.g. 'ATK' for a cell whose formulaValue is '=ATK', else None.
+
+    Restricted to ``allowed`` so non-stat formulas don't match. Defaults
+    to the A4 ``_KNOWN_STAT_NAMES`` set; pass ``_BASE_STAT_NAMES`` for
+    the Lv100/Lv120 grid where Acc / Eva also appear.
+    """
     formula = _formula(cell).strip()
     if len(formula) < 2 or not formula.startswith("="):
         return None
     name = formula[1:].strip().upper()
-    return name if name in _BASE_STAT_NAMES else None
+    return name if name in allowed else None
 
 
 def _cell_int(cell: dict[str, Any]) -> int | None:
@@ -695,24 +691,24 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
     # `=HP`/`=SP`/`=ATK`/... formulas in the column directly to the left
     # of the Lv100 column; values for each level sit in the level-header
     # columns.
-    lv100_row = lv120_row = None
-    lv100_col = lv120_col = None
+    lv100_row: int | None = None
+    lv100_col: int | None = None
+    lv120_col: int | None = None
     for ridx, r in enumerate(block_rows):
         for c in range(min(5, len(r))):
             t = _cell_text(r[c]).strip().lower().replace(" ", "")
             if t == "lv100" and lv100_row is None:
                 lv100_row, lv100_col = ridx, c
-            elif t == "lv120" and lv120_row is None:
-                lv120_row, lv120_col = ridx, c
+            elif t == "lv120" and lv120_col is None:
+                lv120_col = c
 
-    if lv100_row is not None and lv100_col is not None:
+    if lv100_row is not None:
         # Alignment lives on the row directly above the Lv100 header.
         # Try the column above lv100_col first; fall back to the leftmost
         # non-empty cell on that row up to and including lv100_col.
         if lv100_row - 1 >= 0:
             prev = block_rows[lv100_row - 1]
-            cand = _cell_text(prev[lv100_col]) if lv100_col < len(prev) else ""
-            cand = cand.strip()
+            cand = (_cell_text(prev[lv100_col]) if lv100_col < len(prev) else "").strip()
             if not cand:
                 for c in range(min(lv100_col + 1, len(prev))):
                     txt = _cell_text(prev[c]).strip()
@@ -727,7 +723,7 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
             r = block_rows[ridx]
             if icon_col >= len(r):
                 break
-            name = _base_formula_stat_name(r[icon_col])
+            name = _formula_stat_name(r[icon_col], _BASE_STAT_NAMES)
             if not name:
                 # Tolerate one blank spacer; any non-blank non-stat ends the block.
                 if _cell_text(r[icon_col]).strip():
