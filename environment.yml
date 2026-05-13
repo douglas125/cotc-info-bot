@@ -10,4 +10,5 @@ dependencies:
       - tenacity>=8.2
       - pillow>=10.0
       - discord.py>=2.7
+      - anthropic>=0.40
       - pytest>=8.0

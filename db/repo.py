@@ -1013,6 +1013,57 @@ def recent_feedback_timestamps(
     )]
 
 
+# --- /ask_ai invocation log + rate-limit counters ---------------------------
+
+def insert_ai_query(
+    conn: sqlite3.Connection,
+    *,
+    user_id: int,
+    question: str,
+    answer: str | None,
+    queries_json: str | None,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    cache_read: int | None,
+    cache_write: int | None,
+    error: str | None,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO ai_queries("
+        "user_id, asked_at, question, answer, queries_json, "
+        "input_tokens, output_tokens, cache_read, cache_write, error"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            user_id, _now_iso(), question, answer, queries_json,
+            input_tokens, output_tokens, cache_read, cache_write, error,
+        ),
+    )
+    return cur.lastrowid
+
+
+def recent_ai_query_count(
+    conn: sqlite3.Connection, user_id: int, since_iso: str,
+) -> int:
+    """How many /ask_ai rows this user logged after `since_iso`. Used for
+    the per-user 3/hour rate limit. Counts ALL rows, including failures —
+    a failed call still cost an Anthropic request."""
+    return conn.execute(
+        "SELECT COUNT(*) FROM ai_queries "
+        "WHERE user_id = ? AND asked_at > ?",
+        (user_id, since_iso),
+    ).fetchone()[0]
+
+
+def ai_queries_today_count(
+    conn: sqlite3.Connection, today_utc_date: str,
+) -> int:
+    """How many /ask_ai rows logged today (UTC). Drives the 100/day global cap."""
+    return conn.execute(
+        "SELECT COUNT(*) FROM ai_queries WHERE substr(asked_at, 1, 10) = ?",
+        (today_utc_date,),
+    ).fetchone()[0]
+
+
 # --- command usage telemetry ------------------------------------------------
 
 def increment_command_usage(

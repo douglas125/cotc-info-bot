@@ -21,6 +21,7 @@ def test_core_commands_still_registered() -> None:
     expected = {
         "character", "enemy", "pet", "search",
         "refresh", "feedback", "feedback_list", "feedback_clear",
+        "ask_ai",
     }
     assert expected.issubset(_registered_names())
 
