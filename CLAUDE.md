@@ -145,10 +145,20 @@ in `bot/`; entry point is `python -m bot`.
   enforced by counting recent rows in the same table — survives bot
   restarts. Reply is ephemeral.
 - `/feedback_list [limit:1-25]` — admin-gated; ephemeral embed of the
-  newest submissions, with a per-day `/character` and `/enemy` usage
-  breakdown for the last 10 days (UTC) prepended.
+  newest submissions, with a per-day usage breakdown of every tracked
+  slash command (`/character`, `/enemy`, `/pet`, `/ask_ai`, …) for the
+  last 10 days (UTC) prepended.
 - `/feedback_clear confirm:bool` — admin-gated; deletes all rows from
   `feedback_submissions`. Refuses unless `confirm:true`.
+- `/ask_ai question:<≤2000 chars>` — anyone; runs a Sonnet-4.6 SQL agent
+  (`bot/ask_ai/`) that has read-only `query_sqlite` against the SQLite
+  mirror plus the canonical `buff_debuff/*.md` mechanics docs in its
+  cached system prompt. Public reply (chunked-fields embed). Strictly
+  refuses any off-topic question. Per-user 3/hour limit + global 100/day
+  cap, both logged in `ai_queries`; admins (in `BOT_ADMIN_USER_IDS`)
+  bypass both. Requires `ANTHROPIC_API_KEY` env var (or
+  `anthropic_api_key` in `~/.cotc-search/config.toml`); without it the
+  command registers but returns a configuration-missing message.
 
 **One-time Discord setup:**
 1. Create an app at https://discord.com/developers/applications.
@@ -173,8 +183,8 @@ python -m bot
   `railway.json`).
 - Add a Volume mounted at `/data`.
 - Env vars: `DISCORD_BOT_TOKEN`, `GOOGLE_API_KEY`, `BOT_ADMIN_USER_IDS`,
-  `COTC_DB_PATH=/data/cotc.sqlite`. Optional:
-  `DISCORD_TEST_GUILD_ID`.
+  `COTC_DB_PATH=/data/cotc.sqlite`, `ANTHROPIC_API_KEY` (powers
+  `/ask_ai`). Optional: `DISCORD_TEST_GUILD_ID`.
 - First boot runs a cold-start sync if `character_forms` is empty;
   thereafter only `/refresh` mutates the DB.
 - Logs: stdout via `logging` (already configured in `bot/__main__.py`).
@@ -260,6 +270,12 @@ in another pipeline's.
   while leaving existing rows intact. The table is keyed by
   `canonical_name`; `repo.get_form` LEFT JOINs it so the embed code is
   a single guarded `set_thumbnail` call.
+- `ai_queries` — `/ask_ai` invocation log. Drives the per-user 3/hour
+  rate limit and the global 100/day circuit breaker (counted from this
+  table — survives bot restarts). Also captures token usage
+  (`input_tokens` / `output_tokens` / `cache_read` / `cache_write`) for
+  cost accounting. Wiping it would reset every user's quota AND lose
+  the audit trail. No admin-clear command — drop manually if needed.
 
 ### Reading usage stats
 

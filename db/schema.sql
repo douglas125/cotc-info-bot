@@ -176,6 +176,30 @@ CREATE TABLE IF NOT EXISTS character_sprites (
     updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- /ask_ai invocation log. Survives /refresh (intentionally NOT in any
+-- repo.clear_*_tables); also drives the per-user 3/hour rate limit and
+-- the global 100/day circuit breaker. Admin user IDs bypass both caps
+-- but their calls are still logged here for auditability and cost
+-- accounting (input_tokens / output_tokens / cache_read / cache_write
+-- come from the Anthropic API response usage block).
+CREATE TABLE IF NOT EXISTS ai_queries (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL,
+    asked_at      TEXT NOT NULL,        -- ISO 8601 UTC
+    question      TEXT NOT NULL,
+    answer        TEXT,                 -- final text returned (may be NULL on error)
+    queries_json  TEXT,                 -- JSON array of SQL strings the agent ran
+    input_tokens  INTEGER,
+    output_tokens INTEGER,
+    cache_read    INTEGER,
+    cache_write   INTEGER,
+    error         TEXT                  -- non-NULL when the run failed
+);
+CREATE INDEX IF NOT EXISTS ix_ai_queries_user_time
+    ON ai_queries(user_id, asked_at DESC);
+CREATE INDEX IF NOT EXISTS ix_ai_queries_time
+    ON ai_queries(asked_at DESC);
+
 -- Pre-parsed Arena fight notes used by /enemy. This is tracked app data,
 -- not sheet-derived data, so it survives /refresh. Seeded from
 -- db/seed/arena_fight_notes.json during bootstrap.
