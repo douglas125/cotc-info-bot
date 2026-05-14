@@ -208,6 +208,13 @@ def test_loop_returns_text_on_end_turn() -> None:
     # max_tokens cap is enforced on every call.
     kwargs = client.messages.create.call_args.kwargs
     assert kwargs["max_tokens"] == constants.ASK_AI_MAX_OUTPUT_TOKENS
+    # Auto-caching is on so the growing message history hits cache.
+    assert kwargs["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    # System prompt should NOT carry a per-block cache_control — top-level
+    # cache_control supersedes it and a duplicate breakpoint wastes one of
+    # the four allowed per request.
+    for block in kwargs["system"]:
+        assert "cache_control" not in block
 
 
 def test_loop_runs_tool_then_finishes(tmp_db_path: Path, monkeypatch) -> None:
@@ -336,6 +343,33 @@ def test_loop_passes_off_topic_refusal_through(monkeypatch) -> None:
     result = _run_loop_sync(client, "Tell me a joke")
     assert result.text == refusal
     assert result.queries == []
+
+
+def test_loop_flags_max_tokens_as_truncated() -> None:
+    """When the model emits stop_reason='max_tokens', the partial text
+    is preserved and result.truncated is set so the embed footer can say
+    'truncated (max output tokens)'."""
+    client = SimpleNamespace()
+    client.messages = SimpleNamespace()
+    client.messages.create = mock.Mock(return_value=_fake_response(
+        stop_reason="max_tokens",
+        content=[{"type": "text", "text": "Partial answer cut off mid-"}],
+    ))
+    result = _run_loop_sync(client, "long question")
+    assert result.text == "Partial answer cut off mid-"
+    assert result.truncated is True
+    assert result.error == "max-tokens"
+
+
+def test_embed_footer_max_tokens_truncated_label() -> None:
+    result = AskResult(
+        text="Partial",
+        truncated=True,
+        error="max-tokens",
+        input_tokens=10, output_tokens=5,
+    )
+    embed = build_ask_ai_embed("?", result)
+    assert "max output tokens" in embed.footer.text
 
 
 def test_loop_handles_anthropic_exception(monkeypatch) -> None:

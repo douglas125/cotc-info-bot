@@ -100,6 +100,7 @@ def build_ask_ai_embed(question: str, result: AskResult) -> discord.Embed:
         tokens=total_tokens, cost=cost, q=len(result.queries), plural=plural,
     )
     if result.truncated:
-        footer = f"{footer} · iteration cap hit"
+        reason = "max output tokens" if result.error == "max-tokens" else "iteration cap"
+        footer = f"{footer} · truncated ({reason})"
     embed.set_footer(text=footer)
     return embed
