@@ -28,7 +28,6 @@ from bot.ask_ai.agent import is_configured as ask_ai_configured, queries_to_json
 from bot.ask_ai.constants import (
     AGENT_UNCONFIGURED_MESSAGE,
     GLOBAL_CAP_MESSAGE,
-    QUESTION_TOO_LONG_MESSAGE,
     RATE_LIMIT_MESSAGE_TMPL,
 )
 from bot.ask_ai.embeds import build_ask_ai_embed
@@ -722,11 +721,6 @@ def register(tree: app_commands.CommandTree) -> None:
         if not body:
             await interaction.response.send_message(
                 "Question can't be empty.", ephemeral=True,
-            )
-            return
-        if len(body) > ASK_AI_MAX_QUESTION_CHARS:
-            await interaction.response.send_message(
-                QUESTION_TOO_LONG_MESSAGE, ephemeral=True,
             )
             return
         if not ask_ai_configured():

@@ -138,14 +138,10 @@ def _run_loop_sync(client: Any, question: str) -> AskResult:
                 result.text = _extract_text(response) or INTERNAL_ERROR_MESSAGE
                 return result
 
-            # Append the assistant message verbatim. The SDK objects need
-            # their .model_dump() shape; dict-shaped test mocks already
-            # carry the right shape under .content.
-            assistant_content = getattr(response, "content", None)
-            if hasattr(response, "model_dump"):
-                dumped = response.model_dump()
-                assistant_content = dumped["content"]
-            messages.append({"role": "assistant", "content": assistant_content})
+            messages.append({
+                "role": "assistant",
+                "content": response.model_dump()["content"],
+            })
 
             tool_results: list[dict[str, Any]] = []
             for tu in tool_uses:

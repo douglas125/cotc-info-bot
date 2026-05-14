@@ -40,9 +40,6 @@ GLOBAL_CAP_MESSAGE = (
     "The shared /ask_ai daily quota ({cap} questions) is exhausted. "
     "Try again tomorrow (UTC reset)."
 )
-QUESTION_TOO_LONG_MESSAGE = (
-    f"Question is too long. Keep it under {ASK_AI_MAX_QUESTION_CHARS} characters."
-)
 INTERNAL_ERROR_MESSAGE = (
     "Something went wrong while answering. The error has been logged."
 )
