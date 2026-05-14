@@ -12,12 +12,14 @@ ASK_AI_GLOBAL_DAILY_CAP = 100
 # Tool-use loop
 ASK_AI_MAX_ITERATIONS = 200
 
-# HARD cap on output tokens; passed as `max_tokens=` on EVERY messages.create
-# call. 1000 tokens ≈ 4000 chars — well under Discord's 6000-char total
-# embed budget so long answers don't get cut mid-sentence by the model
-# stop_reason='max_tokens', and the prompt also tells the agent to aim
-# for under ~250 words.
-ASK_AI_MAX_OUTPUT_TOKENS = 1000
+# HARD cap on output tokens; passed as `max_tokens=` on EVERY
+# messages.create call. 2000 tokens leaves headroom for the rare long
+# answer (e.g. team analyses) without forcing the model to stop
+# mid-sentence; the prompt also tells the agent to aim for under
+# ~250 words so most answers come back well below this. The Discord
+# embed has a 6000-char total ceiling that's enforced separately by
+# the embed builder (see bot/ask_ai/embeds.py).
+ASK_AI_MAX_OUTPUT_TOKENS = 2000
 
 # Tool-result limits — protect both the model context and the Discord
 # response from runaway query results.

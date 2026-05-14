@@ -361,6 +361,28 @@ def test_loop_flags_max_tokens_as_truncated() -> None:
     assert result.error == "max-tokens"
 
 
+def test_embed_trims_to_discord_6kb_budget() -> None:
+    """If the model produces ~8KB of output, the chunker would normally
+    emit 8+ fields totalling >6000 chars and Discord would 400 the
+    embed. The Discord-budget trim keeps the cumulative size under 6000
+    chars and flags the truncation in the footer."""
+    line = "x" * 120
+    huge_text = "\n".join(f"{i}: {line}" for i in range(70))  # ~8.5 KB
+    result = AskResult(text=huge_text, input_tokens=10, output_tokens=2000)
+    embed = build_ask_ai_embed("?", result)
+
+    # Discord's actual API rejects > 6000; verify we're well under it.
+    total = (
+        len(embed.title or "")
+        + len(embed.description or "")
+        + sum(len(f.name) + len(f.value) for f in embed.fields)
+        + len(embed.footer.text or "")
+    )
+    assert total <= 6000, f"embed total {total} exceeds Discord's 6000-char limit"
+    assert "truncated" in embed.footer.text
+    assert "Discord 6KB embed" in embed.footer.text
+
+
 def test_embed_footer_max_tokens_truncated_label() -> None:
     result = AskResult(
         text="Partial",

@@ -2,8 +2,8 @@
 
 Reuses bot.embeds._split_bullets_into_field_values + _add_chunked_fields
 so the answer body chunks into ≤1024-char fields named "Answer (n/N)".
-The agent's max_tokens cap (1500) is sized to fit Discord's ~6000-char
-total embed budget after chunking.
+A separate Discord-side trim guards the embed against the 6000-char
+total ceiling so the API never rejects a too-large embed.
 """
 from __future__ import annotations
 
@@ -25,6 +25,33 @@ from .constants import ASK_AI_MAX_ITERATIONS, estimate_cost_usd
 
 _QUESTION_TITLE_LIMIT = TITLE_LIMIT
 _FOOTER_TMPL = "Sonnet 4.6 · {tokens} tokens · ${cost:.4f} · {q} quer{plural}"
+
+# Discord rejects an embed whose total payload (title + description +
+# every field name + every field value + footer) exceeds 6000 chars.
+# Leave headroom for fixed parts so chunked answer fields can sum to
+# ~5500 chars without the API throwing HTTPException.
+_EMBED_TOTAL_LIMIT = 6000
+_EMBED_FIXED_OVERHEAD = 500
+
+
+def _trim_chunks_to_embed_budget(
+    chunks: list[str], fixed_overhead_chars: int,
+) -> tuple[list[str], bool]:
+    """Drop trailing chunks until the cumulative size fits Discord's budget.
+
+    Returns the kept chunks and a flag indicating whether anything was
+    dropped. Each kept chunk also accounts for ~16 chars of "Answer (n/N)"
+    field-name overhead."""
+    budget = _EMBED_TOTAL_LIMIT - fixed_overhead_chars
+    kept: list[str] = []
+    used = 0
+    for c in chunks:
+        cost = len(c) + 16  # field name "Answer (n/N)"
+        if used + cost > budget:
+            return kept, True
+        kept.append(c)
+        used += cost
+    return kept, False
 
 
 def build_progress_embed(question: str, step: int) -> discord.Embed:
@@ -63,6 +90,7 @@ def build_ask_ai_embed(question: str, result: AskResult) -> discord.Embed:
 
     bullets = _split_answer(result.text or "")
     chunks = _split_bullets_into_field_values(bullets)
+    discord_trimmed = False
 
     if not chunks:
         embed.description = _truncate(
@@ -72,12 +100,17 @@ def build_ask_ai_embed(question: str, result: AskResult) -> discord.Embed:
         # One small block is cleaner as a description than a single field.
         embed.description = chunks[0]
     else:
-        _add_chunked_fields(embed, "Answer", chunks[: MAX_FIELDS])
-        if len(chunks) > MAX_FIELDS:
+        budget_chunks = chunks[: MAX_FIELDS]
+        kept, trimmed_by_budget = _trim_chunks_to_embed_budget(
+            budget_chunks, _EMBED_FIXED_OVERHEAD,
+        )
+        discord_trimmed = trimmed_by_budget or len(chunks) > MAX_FIELDS
+        _add_chunked_fields(embed, "Answer", kept)
+        if discord_trimmed:
             embed.add_field(
                 name="…",
                 value=_truncate(
-                    "Answer truncated to fit Discord's embed limit.",
+                    "Answer truncated to fit Discord's 6000-char embed limit.",
                     FIELD_VALUE_LIMIT,
                 ),
                 inline=False,
@@ -99,8 +132,13 @@ def build_ask_ai_embed(question: str, result: AskResult) -> discord.Embed:
     footer = _FOOTER_TMPL.format(
         tokens=total_tokens, cost=cost, q=len(result.queries), plural=plural,
     )
-    if result.truncated:
-        reason = "max output tokens" if result.error == "max-tokens" else "iteration cap"
+    if result.truncated or discord_trimmed:
+        if result.error == "max-tokens":
+            reason = "max output tokens"
+        elif result.truncated:
+            reason = "iteration cap"
+        else:
+            reason = "Discord 6KB embed"
         footer = f"{footer} · truncated ({reason})"
     embed.set_footer(text=footer)
     return embed
