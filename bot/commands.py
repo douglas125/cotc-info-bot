@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
-import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -17,21 +16,8 @@ import discord
 from discord import app_commands
 
 import config
-from bot import ask_ai, db as bot_db
+from bot import db as bot_db
 from bot import embeds, enemy_embeds, pet_embeds
-from bot.ask_ai import (
-    ASK_AI_GLOBAL_DAILY_CAP,
-    ASK_AI_MAX_QUESTION_CHARS,
-    ASK_AI_RATE_LIMIT_PER_HOUR,
-    ASK_AI_RATE_WINDOW_SEC,
-)
-from bot.ask_ai.agent import is_configured as ask_ai_configured, queries_to_json
-from bot.ask_ai.constants import (
-    AGENT_UNCONFIGURED_MESSAGE,
-    GLOBAL_CAP_MESSAGE,
-    RATE_LIMIT_MESSAGE_TMPL,
-)
-from bot.ask_ai.embeds import build_ask_ai_embed, build_progress_embed
 from bot.enemy_views import EnemyView
 from bot.views import CharacterView
 from db import repo
@@ -707,135 +693,9 @@ def register(tree: app_commands.CommandTree) -> None:
             ephemeral=True,
         )
 
-    @tree.command(
-        name="ask_ai",
-        description="Ask the AI agent a CotC question (mechanics, builds, lookups).",
-    )
-    @app_commands.describe(
-        question=f"Your question (≤ {ASK_AI_MAX_QUESTION_CHARS} chars).",
-    )
-    async def ask_ai_cmd(
-        interaction: discord.Interaction,
-        question: app_commands.Range[str, 1, ASK_AI_MAX_QUESTION_CHARS],
-    ) -> None:
-        body = question.strip()
-        if not body:
-            await interaction.response.send_message(
-                "Question can't be empty.", ephemeral=True,
-            )
-            return
-        if not ask_ai_configured():
-            await interaction.response.send_message(
-                AGENT_UNCONFIGURED_MESSAGE, ephemeral=True,
-            )
-            return
-
-        conn = bot_db.conn()
-        is_admin = _is_admin(interaction.user.id)
-
-        # Per-user rate limit (3/hour) — admins bypass.
-        if not is_admin:
-            now = datetime.now(timezone.utc)
-            cutoff_iso = (now - timedelta(seconds=ASK_AI_RATE_WINDOW_SEC)).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-            recent = repo.recent_ai_query_count(
-                conn, interaction.user.id, cutoff_iso,
-            )
-            if recent >= ASK_AI_RATE_LIMIT_PER_HOUR:
-                # Rough "minutes until quota refreshes" — at least 1.
-                minutes = max(1, ASK_AI_RATE_WINDOW_SEC // 60)
-                await interaction.response.send_message(
-                    RATE_LIMIT_MESSAGE_TMPL.format(
-                        limit=ASK_AI_RATE_LIMIT_PER_HOUR, minutes=minutes,
-                    ),
-                    ephemeral=True,
-                )
-                return
-
-            # Global daily cap (100/day) — also admin-bypassed.
-            today_utc = now.strftime("%Y-%m-%d")
-            today_count = repo.ai_queries_today_count(conn, today_utc)
-            if today_count >= ASK_AI_GLOBAL_DAILY_CAP:
-                await interaction.response.send_message(
-                    GLOBAL_CAP_MESSAGE.format(cap=ASK_AI_GLOBAL_DAILY_CAP),
-                    ephemeral=True,
-                )
-                return
-
-        _record_command_usage(conn, "ask_ai")
-        await interaction.response.defer(thinking=True)
-
-        # Send a placeholder we can edit as the agent iterates. Using
-        # followup.send (vs. edit_original_response) returns the message
-        # object directly, which is the cleanest handle for streaming.
-        progress_msg = await interaction.followup.send(
-            embed=build_progress_embed(body, step=1),
-            wait=True,
-        )
-
-        loop = asyncio.get_running_loop()
-        edit_state = {"last_edit": 0.0, "last_step": 1}
-
-        def _progress_cb(step: int) -> None:
-            # Runs in the worker thread. Throttle to ~1 edit/s and skip
-            # duplicates so a fast-iterating run doesn't blow Discord's
-            # ~5-edits-per-5s rate limit.
-            now = time.monotonic()
-            if step == edit_state["last_step"]:
-                return
-            if now - edit_state["last_edit"] < 1.0:
-                return
-            edit_state["last_edit"] = now
-            edit_state["last_step"] = step
-            asyncio.run_coroutine_threadsafe(
-                progress_msg.edit(embed=build_progress_embed(body, step=step)),
-                loop,
-            )
-
-        try:
-            result = await ask_ai.answer_question(body, progress_cb=_progress_cb)
-        except Exception as exc:
-            logger.exception("/ask_ai unexpected failure")
-            try:
-                await progress_msg.edit(
-                    content="Something went wrong. The error has been logged.",
-                    embed=None,
-                )
-            except discord.HTTPException:
-                logger.exception("failed to surface /ask_ai error to Discord")
-            try:
-                repo.insert_ai_query(
-                    conn,
-                    user_id=interaction.user.id,
-                    question=body,
-                    answer=None,
-                    queries_json=None,
-                    input_tokens=None, output_tokens=None,
-                    cache_read=None, cache_write=None,
-                    error=f"unhandled: {exc!r}",
-                )
-            except sqlite3.Error:
-                logger.exception("ai_queries log insert failed")
-            return
-
-        try:
-            repo.insert_ai_query(
-                conn,
-                user_id=interaction.user.id,
-                question=body,
-                answer=result.text[:4000] if result.text else None,
-                queries_json=queries_to_json(result.queries) if result.queries else None,
-                input_tokens=result.input_tokens or None,
-                output_tokens=result.output_tokens or None,
-                cache_read=result.cache_read or None,
-                cache_write=result.cache_write or None,
-                error=result.error,
-            )
-        except sqlite3.Error:
-            logger.exception("ai_queries log insert failed")
-
-        await progress_msg.edit(embed=build_ask_ai_embed(body, result))
+    # /ask_ai is intentionally NOT registered. The implementation
+    # (bot/ask_ai/, db.ai_queries, tests/test_bot_ask_ai.py) is
+    # preserved; see README.md "Dormant features" for re-enable steps.
 
     @tree.command(
         name="feedback_clear",

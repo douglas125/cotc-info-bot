@@ -67,15 +67,6 @@ def main() -> int:
 
     _cold_start_sync_if_empty()
 
-    if config.get_setting("ANTHROPIC_API_KEY", "anthropic_api_key"):
-        logging.info("/ask_ai enabled (ANTHROPIC_API_KEY configured).")
-    else:
-        logging.warning(
-            "/ask_ai disabled — ANTHROPIC_API_KEY not set. The slash "
-            "command is still registered but will respond with a "
-            "configuration-missing message until the key is added.",
-        )
-
     bot = CotCBot(test_guild_id=test_guild_id)
     bot.run(token, log_handler=None)  # we already configured logging above
     return 0

@@ -60,9 +60,30 @@ team-related tests under `tests/` (`test_team_analyze_integration.py`,
 `test_team_views.py`, `test_matrix_image.py`) keep running as a
 regression net so the dormant code does not bit-rot.
 
-To re-enable: add `team_commands.register(tree)` (and re-import
-`team_commands`) to `bot/commands.py`, redeploy. Discord picks up the
-new command on the next CommandTree sync.
+To re-enable `/analyze_team`: add `team_commands.register(tree)` (and
+re-import `team_commands`) to `bot/commands.py`, redeploy. Discord
+picks up the new command on the next CommandTree sync.
+
+`/ask_ai` is also un-hooked — it was a Sonnet-4.6 SQL-tool agent that
+queried the SQLite mirror via a `query_sqlite` tool and embedded the
+canonical `buff_debuff/*.md` mechanics docs in its cached system
+prompt. Preserved across the repo so the next iteration can pick up
+where this one left off:
+
+- `bot/ask_ai/` — agent loop, prompt assembly, SQL tool with safety
+  guards (read-only URI, SELECT-only parser, row + byte caps),
+  Discord-budget-aware embed renderer, constants (model, caps,
+  pricing).
+- `db.ai_queries` table + `repo.insert_ai_query` /
+  `recent_ai_query_count` / `ai_queries_today_count` helpers.
+- `tests/test_bot_ask_ai.py` — 43 tests covering SQL guard, tool-use
+  loop, prompt embedding, embed chunking, rate-limit counters.
+- `anthropic` in `requirements.txt` and `environment.yml`.
+
+To re-enable `/ask_ai`: re-add the `@tree.command(name="ask_ai", …)`
+block (and the matching imports) to `bot/commands.py` — the easiest
+reference is the PR #63 merge commit. Set `ANTHROPIC_API_KEY` on
+Railway, redeploy.
 
 ## Quickstart (local)
 

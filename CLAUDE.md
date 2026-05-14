@@ -150,15 +150,11 @@ in `bot/`; entry point is `python -m bot`.
   last 10 days (UTC) prepended.
 - `/feedback_clear confirm:bool` — admin-gated; deletes all rows from
   `feedback_submissions`. Refuses unless `confirm:true`.
-- `/ask_ai question:<≤2000 chars>` — anyone; runs a Sonnet-4.6 SQL agent
-  (`bot/ask_ai/`) that has read-only `query_sqlite` against the SQLite
-  mirror plus the canonical `buff_debuff/*.md` mechanics docs in its
-  cached system prompt. Public reply (chunked-fields embed). Strictly
-  refuses any off-topic question. Per-user 3/hour limit + global 100/day
-  cap, both logged in `ai_queries`; admins (in `BOT_ADMIN_USER_IDS`)
-  bypass both. Requires `ANTHROPIC_API_KEY` env var (or
-  `anthropic_api_key` in `~/.cotc-search/config.toml`); without it the
-  command registers but returns a configuration-missing message.
+- `/ask_ai` — **currently un-hooked from Discord** (the registration
+  block is removed from `bot/commands.py`). Implementation preserved in
+  `bot/ask_ai/`, schema in `db.ai_queries`, tests in
+  `tests/test_bot_ask_ai.py`. See `README.md` "Dormant features" for
+  re-enable steps.
 
 **One-time Discord setup:**
 1. Create an app at https://discord.com/developers/applications.
@@ -183,8 +179,9 @@ python -m bot
   `railway.json`).
 - Add a Volume mounted at `/data`.
 - Env vars: `DISCORD_BOT_TOKEN`, `GOOGLE_API_KEY`, `BOT_ADMIN_USER_IDS`,
-  `COTC_DB_PATH=/data/cotc.sqlite`, `ANTHROPIC_API_KEY` (powers
-  `/ask_ai`). Optional: `DISCORD_TEST_GUILD_ID`.
+  `COTC_DB_PATH=/data/cotc.sqlite`. Optional:
+  `DISCORD_TEST_GUILD_ID`, `ANTHROPIC_API_KEY` (only used if `/ask_ai`
+  is re-hooked — see "Dormant features" in `README.md`).
 - First boot runs a cold-start sync if `character_forms` is empty;
   thereafter only `/refresh` mutates the DB.
 - Logs: stdout via `logging` (already configured in `bot/__main__.py`).
