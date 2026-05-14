@@ -90,18 +90,23 @@ def _accumulate_usage(result: AskResult, usage: Any) -> None:
 
 
 def _build_system_blocks() -> list[dict[str, Any]]:
-    """System prompt as a single cached text block (1 h TTL, ephemeral)."""
-    return [
-        {
-            "type": "text",
-            "text": SYSTEM_PROMPT,
-            "cache_control": {"type": "ephemeral", "ttl": ASK_AI_CACHE_TTL},
-        },
-    ]
+    """System prompt as a single text block. No explicit cache_control —
+    the top-level `cache_control` on messages.create handles auto-caching
+    of the entire prefix (system + tools + prior turns)."""
+    return [{"type": "text", "text": SYSTEM_PROMPT}]
 
 
 def _build_tools() -> list[dict[str, Any]]:
     return [QUERY_SQLITE_TOOL]
+
+
+# Top-level cache_control enables AUTO caching: the SDK places the cache
+# breakpoint at the last cacheable block on every request and moves it
+# forward as the message history grows. Within a tool-use loop, this
+# means iteration N+1 reads the entire iteration-N prefix from cache and
+# only writes the latest tool_result + assistant turn as fresh tokens.
+# 1 h TTL keeps the prefix warm across the typical 100/day call pattern.
+_AUTO_CACHE = {"type": "ephemeral", "ttl": ASK_AI_CACHE_TTL}
 
 
 ProgressCallback = Callable[[int], None]
@@ -136,6 +141,7 @@ def _run_loop_sync(
                 system=_build_system_blocks(),
                 tools=_build_tools(),
                 messages=messages,
+                cache_control=_AUTO_CACHE,
                 extra_headers={"anthropic-beta": "extended-cache-ttl-2025-04-11"},
             )
         except Exception as e:
@@ -178,10 +184,16 @@ def _run_loop_sync(
             result.text = _extract_text(response) or INTERNAL_ERROR_MESSAGE
             return result
 
-        # max_tokens / refusal / model_context_window_exceeded / pause_turn / …
+        # max_tokens hit mid-answer is the common case; surface it as a
+        # truncation rather than a hard error so the user sees the partial
+        # answer + a footer note.
         text = _extract_text(response)
         result.text = text or INTERNAL_ERROR_MESSAGE
-        result.error = f"unexpected-stop-reason: {stop_reason!r}"
+        if stop_reason == "max_tokens":
+            result.truncated = True
+            result.error = "max-tokens"
+        else:
+            result.error = f"unexpected-stop-reason: {stop_reason!r}"
         return result
 
     # Iteration cap hit before end_turn. Return whatever text the last
