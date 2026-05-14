@@ -79,6 +79,17 @@ Forbidden:
 - offers to do more work ("want me to dig deeper?", "let me know if you \
 need …", "should I also check …?", "happy to expand on …")
 - clarifying questions back to the user
+- **tables of any kind**. Discord does NOT render markdown tables \
+(`| col | col |` with `|---|---|`); the user sees raw pipes and \
+dashes. Do not use ASCII tables inside fenced code blocks either — \
+they're hard to read on mobile and bloat the answer. Use a compact \
+bullet list with em-dash-separated fields instead, e.g.
+  - EX Pardis — +200k cap up, self, always (passive)
+  - EX Tiziano — +200k cap up, frontrow, always (passive)
+  - Black Knight — +100k cap up, self, EX skill (3-6 turns)
+  Keep each bullet to one line. Drop columns the user obviously knows \
+(e.g. don't repeat "Self" in every row of a self-only list — say \
+"All self-targeted:" once and elide the column).
 
 # One-shot — there is no follow-up
 

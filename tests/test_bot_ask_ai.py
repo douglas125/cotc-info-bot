@@ -371,7 +371,7 @@ def test_embed_long_answer_chunks_into_fields() -> None:
         assert f.name.startswith("Answer")
 
 
-def test_embed_footer_reports_query_count_and_tokens() -> None:
+def test_embed_footer_reports_query_count_tokens_and_cost() -> None:
     result = AskResult(
         text="Hi",
         queries=["SELECT 1", "SELECT 2"],
@@ -381,6 +381,19 @@ def test_embed_footer_reports_query_count_and_tokens() -> None:
     embed = build_ask_ai_embed("?", result)
     assert "1050" in embed.footer.text  # total tokens
     assert "2 queries" in embed.footer.text
+    # 100 * 3/M + 50 * 15/M + 900 * 0.30/M + 0 * 6/M
+    # = 0.0003 + 0.00075 + 0.00027 = 0.00132 → "$0.0013"
+    assert "$0.0013" in embed.footer.text
+
+
+def test_estimate_cost_usd_arithmetic() -> None:
+    from bot.ask_ai.constants import estimate_cost_usd
+    # 1M of each → $3 + $15 + $0.30 + $6 = $24.30
+    cost = estimate_cost_usd(
+        input_tokens=1_000_000, output_tokens=1_000_000,
+        cache_read=1_000_000, cache_write=1_000_000,
+    )
+    assert abs(cost - 24.30) < 1e-6
 
 
 # ---------------------------------------------------------------------------

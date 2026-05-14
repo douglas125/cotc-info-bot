@@ -20,11 +20,11 @@ from bot.embeds import (
 )
 
 from .agent import AskResult
-from .constants import ASK_AI_MAX_ITERATIONS
+from .constants import ASK_AI_MAX_ITERATIONS, estimate_cost_usd
 
 
 _QUESTION_TITLE_LIMIT = TITLE_LIMIT
-_FOOTER_TMPL = "Sonnet 4.6 · {tokens} tokens · {q} quer{plural}"
+_FOOTER_TMPL = "Sonnet 4.6 · {tokens} tokens · ${cost:.4f} · {q} quer{plural}"
 
 
 def build_progress_embed(question: str, step: int) -> discord.Embed:
@@ -90,8 +90,14 @@ def build_ask_ai_embed(question: str, result: AskResult) -> discord.Embed:
         + result.cache_write
     )
     plural = "y" if len(result.queries) == 1 else "ies"
+    cost = estimate_cost_usd(
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cache_read=result.cache_read,
+        cache_write=result.cache_write,
+    )
     footer = _FOOTER_TMPL.format(
-        tokens=total_tokens, q=len(result.queries), plural=plural,
+        tokens=total_tokens, cost=cost, q=len(result.queries), plural=plural,
     )
     if result.truncated:
         footer = f"{footer} · iteration cap hit"
