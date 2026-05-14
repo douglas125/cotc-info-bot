@@ -13,7 +13,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import config
 
@@ -104,15 +104,31 @@ def _build_tools() -> list[dict[str, Any]]:
     return [QUERY_SQLITE_TOOL]
 
 
-def _run_loop_sync(client: Any, question: str) -> AskResult:
+ProgressCallback = Callable[[int], None]
+
+
+def _run_loop_sync(
+    client: Any,
+    question: str,
+    progress_cb: ProgressCallback | None = None,
+) -> AskResult:
     """The synchronous tool-use loop. Wrapped by `answer_question` in an
-    asyncio.to_thread so it doesn't block the Discord event loop."""
+    asyncio.to_thread so it doesn't block the Discord event loop.
+
+    `progress_cb` is invoked with the 1-indexed iteration number BEFORE
+    each Anthropic call. Exceptions in the callback are swallowed — a
+    misbehaving UI hook must not bring the agent down."""
     result = AskResult(text="")
     messages: list[dict[str, Any]] = [
         {"role": "user", "content": question},
     ]
 
     for iteration in range(ASK_AI_MAX_ITERATIONS):
+        if progress_cb is not None:
+            try:
+                progress_cb(iteration + 1)
+            except Exception:
+                logger.exception("ask_ai: progress_cb raised; continuing")
         try:
             response = client.messages.create(
                 model=ASK_AI_MODEL,
@@ -187,8 +203,15 @@ def _make_client() -> Any:
     return Anthropic(api_key=api_key)
 
 
-async def answer_question(question: str) -> AskResult:
-    """Run the agent in a background thread so the Discord event loop stays free."""
+async def answer_question(
+    question: str,
+    progress_cb: ProgressCallback | None = None,
+) -> AskResult:
+    """Run the agent in a background thread so the Discord event loop stays free.
+
+    `progress_cb` runs in the worker thread on every iteration. The Discord
+    handler uses `asyncio.run_coroutine_threadsafe` inside the callback to
+    schedule message edits back on the bot's loop."""
     if not is_configured():
         return AskResult(text=AGENT_UNCONFIGURED_MESSAGE, error="unconfigured")
     try:
@@ -196,7 +219,7 @@ async def answer_question(question: str) -> AskResult:
     except Exception as e:
         logger.exception("ask_ai: failed to construct Anthropic client")
         return AskResult(text=INTERNAL_ERROR_MESSAGE, error=f"client-init: {e!r}")
-    return await asyncio.to_thread(_run_loop_sync, client, question)
+    return await asyncio.to_thread(_run_loop_sync, client, question, progress_cb)
 
 
 def queries_to_json(queries: list[str]) -> str:

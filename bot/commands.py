@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -30,7 +31,7 @@ from bot.ask_ai.constants import (
     GLOBAL_CAP_MESSAGE,
     RATE_LIMIT_MESSAGE_TMPL,
 )
-from bot.ask_ai.embeds import build_ask_ai_embed
+from bot.ask_ai.embeds import build_ask_ai_embed, build_progress_embed
 from bot.enemy_views import EnemyView
 from bot.views import CharacterView
 from db import repo
@@ -764,14 +765,45 @@ def register(tree: app_commands.CommandTree) -> None:
 
         _record_command_usage(conn, "ask_ai")
         await interaction.response.defer(thinking=True)
+
+        # Send a placeholder we can edit as the agent iterates. Using
+        # followup.send (vs. edit_original_response) returns the message
+        # object directly, which is the cleanest handle for streaming.
+        progress_msg = await interaction.followup.send(
+            embed=build_progress_embed(body, step=1),
+            wait=True,
+        )
+
+        loop = asyncio.get_running_loop()
+        edit_state = {"last_edit": 0.0, "last_step": 1}
+
+        def _progress_cb(step: int) -> None:
+            # Runs in the worker thread. Throttle to ~1 edit/s and skip
+            # duplicates so a fast-iterating run doesn't blow Discord's
+            # ~5-edits-per-5s rate limit.
+            now = time.monotonic()
+            if step == edit_state["last_step"]:
+                return
+            if now - edit_state["last_edit"] < 1.0:
+                return
+            edit_state["last_edit"] = now
+            edit_state["last_step"] = step
+            asyncio.run_coroutine_threadsafe(
+                progress_msg.edit(embed=build_progress_embed(body, step=step)),
+                loop,
+            )
+
         try:
-            result = await ask_ai.answer_question(body)
+            result = await ask_ai.answer_question(body, progress_cb=_progress_cb)
         except Exception as exc:
             logger.exception("/ask_ai unexpected failure")
-            await interaction.followup.send(
-                "Something went wrong. The error has been logged.",
-                ephemeral=True,
-            )
+            try:
+                await progress_msg.edit(
+                    content="Something went wrong. The error has been logged.",
+                    embed=None,
+                )
+            except discord.HTTPException:
+                logger.exception("failed to surface /ask_ai error to Discord")
             try:
                 repo.insert_ai_query(
                     conn,
@@ -803,7 +835,7 @@ def register(tree: app_commands.CommandTree) -> None:
         except sqlite3.Error:
             logger.exception("ai_queries log insert failed")
 
-        await interaction.followup.send(embed=build_ask_ai_embed(body, result))
+        await progress_msg.edit(embed=build_ask_ai_embed(body, result))
 
     @tree.command(
         name="feedback_clear",

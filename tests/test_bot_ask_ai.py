@@ -252,7 +252,52 @@ def test_loop_runs_tool_then_finishes(tmp_db_path: Path, monkeypatch) -> None:
     assert last_user["content"][0]["tool_use_id"] == "tool_001"
 
 
+def test_loop_invokes_progress_cb_each_iteration() -> None:
+    client = SimpleNamespace()
+    client.messages = SimpleNamespace()
+    responses = [
+        _fake_response(
+            stop_reason="tool_use",
+            content=[{
+                "type": "tool_use",
+                "id": "tool_a",
+                "name": "query_sqlite",
+                "input": {"sql": "SELECT 1"},
+            }],
+        ),
+        _fake_response(
+            stop_reason="end_turn",
+            content=[{"type": "text", "text": "done"}],
+        ),
+    ]
+    client.messages.create = mock.Mock(side_effect=responses)
+
+    seen: list[int] = []
+    with mock.patch.object(ask_ai_agent, "run_query", return_value="(no rows)"):
+        _run_loop_sync(client, "q?", progress_cb=seen.append)
+
+    assert seen == [1, 2]
+
+
+def test_loop_swallows_progress_cb_exceptions() -> None:
+    client = SimpleNamespace()
+    client.messages = SimpleNamespace()
+    client.messages.create = mock.Mock(return_value=_fake_response(
+        stop_reason="end_turn",
+        content=[{"type": "text", "text": "ok"}],
+    ))
+
+    def bad_cb(_step: int) -> None:
+        raise RuntimeError("ui blew up")
+
+    result = _run_loop_sync(client, "q?", progress_cb=bad_cb)
+    assert result.text == "ok"
+    assert result.error is None
+
+
 def test_loop_respects_iteration_cap(monkeypatch) -> None:
+    # Local cap so the test isn't dominated by the production 200-iter cap.
+    monkeypatch.setattr(ask_ai_agent, "ASK_AI_MAX_ITERATIONS", 5)
     monkeypatch.setattr(ask_ai_agent, "run_query", lambda sql: "(no rows)")
     client = SimpleNamespace()
     client.messages = SimpleNamespace()
@@ -272,7 +317,7 @@ def test_loop_respects_iteration_cap(monkeypatch) -> None:
     result = _run_loop_sync(client, "Loop forever")
     assert result.truncated is True
     assert result.error == "iteration-cap"
-    assert client.messages.create.call_count == constants.ASK_AI_MAX_ITERATIONS
+    assert client.messages.create.call_count == 5
 
 
 def test_loop_passes_off_topic_refusal_through(monkeypatch) -> None:
