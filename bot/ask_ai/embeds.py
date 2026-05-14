@@ -20,10 +20,24 @@ from bot.embeds import (
 )
 
 from .agent import AskResult
+from .constants import ASK_AI_MAX_ITERATIONS
 
 
 _QUESTION_TITLE_LIMIT = TITLE_LIMIT
 _FOOTER_TMPL = "Sonnet 4.6 · {tokens} tokens · {q} quer{plural}"
+
+
+def build_progress_embed(question: str, step: int) -> discord.Embed:
+    """Placeholder embed shown while the agent is iterating.
+
+    `step` is the 1-indexed iteration number; rendered as `(step / max)`."""
+    embed = discord.Embed(
+        title=_truncate(f"❓ {question}", _QUESTION_TITLE_LIMIT),
+        color=discord.Color.greyple(),
+        description=f"🔄 Working… (step {step} / {ASK_AI_MAX_ITERATIONS})",
+    )
+    embed.set_footer(text="Sonnet 4.6 · streaming")
+    return embed
 
 
 def _split_answer(text: str) -> list[str]:

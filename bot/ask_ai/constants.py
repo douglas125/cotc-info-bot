@@ -10,7 +10,7 @@ ASK_AI_RATE_WINDOW_SEC = 60 * 60
 ASK_AI_GLOBAL_DAILY_CAP = 100
 
 # Tool-use loop
-ASK_AI_MAX_ITERATIONS = 5
+ASK_AI_MAX_ITERATIONS = 200
 
 # HARD cap on output tokens; passed as `max_tokens=` on EVERY messages.create
 # call. Bounds cost per question and guarantees the answer fits Discord's
