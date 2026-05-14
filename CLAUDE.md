@@ -145,8 +145,9 @@ in `bot/`; entry point is `python -m bot`.
   enforced by counting recent rows in the same table — survives bot
   restarts. Reply is ephemeral.
 - `/feedback_list [limit:1-25]` — admin-gated; ephemeral embed of the
-  newest submissions, with a per-day `/character` and `/enemy` usage
-  breakdown for the last 10 days (UTC) prepended.
+  newest submissions, with a per-day usage breakdown of every tracked
+  slash command (`/character`, `/enemy`, `/pet`, `/ask_ai`, …) for the
+  last 10 days (UTC) prepended.
 - `/feedback_clear confirm:bool` — admin-gated; deletes all rows from
   `feedback_submissions`. Refuses unless `confirm:true`.
 - `/ask_ai question:<≤2000 chars>` — anyone; runs a Sonnet-4.6 SQL agent

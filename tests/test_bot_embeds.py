@@ -739,7 +739,7 @@ def test_feedback_results_embed_handles_no_usage(tmp_db_path: Path) -> None:
     conn.close()
     embed = embeds.feedback_results_to_embed(rows, usage_rows=[], usage_days=10)
     usage_field = next(f for f in embed.fields if f.name.startswith("Usage"))
-    assert "No /character or /enemy invocations" in usage_field.value
+    assert "No command invocations recorded" in usage_field.value
 
 
 def test_split_bullets_round_trips_and_respects_limit() -> None:

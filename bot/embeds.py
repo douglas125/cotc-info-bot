@@ -685,7 +685,7 @@ def feedback_results_to_embed(
 
 def _format_usage_block(rows: list[Any]) -> str:
     if not rows:
-        return "_No /character or /enemy invocations recorded yet._"
+        return "_No command invocations recorded yet._"
     by_date: dict[str, dict[str, int]] = {}
     for r in rows:
         by_date.setdefault(r["usage_date"], {})[r["command_name"]] = r["count"]
