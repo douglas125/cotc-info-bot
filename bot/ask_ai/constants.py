@@ -27,6 +27,31 @@ ASK_AI_QUERY_TIMEOUT_SEC = 2.0
 ASK_AI_MODEL = "claude-sonnet-4-6"
 ASK_AI_CACHE_TTL = "1h"
 
+# Sonnet 4.6 published pricing in USD per 1M tokens. Used to surface a
+# rough per-question cost in the embed footer; if Anthropic changes
+# pricing, update these and the footer auto-corrects.
+# Source: https://platform.claude.com/docs/en/about-claude/pricing
+SONNET_PRICE_INPUT_PER_M = 3.0       # uncached input
+SONNET_PRICE_CACHE_WRITE_PER_M = 6.0 # 1 h TTL
+SONNET_PRICE_CACHE_READ_PER_M = 0.30
+SONNET_PRICE_OUTPUT_PER_M = 15.0
+
+
+def estimate_cost_usd(
+    *,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read: int,
+    cache_write: int,
+) -> float:
+    """Rough USD cost of one /ask_ai run from the four token counters."""
+    return (
+        input_tokens  * SONNET_PRICE_INPUT_PER_M       / 1_000_000
+        + output_tokens * SONNET_PRICE_OUTPUT_PER_M      / 1_000_000
+        + cache_read    * SONNET_PRICE_CACHE_READ_PER_M  / 1_000_000
+        + cache_write   * SONNET_PRICE_CACHE_WRITE_PER_M / 1_000_000
+    )
+
 # User-facing strings (extracted so tests can assert on them)
 AGENT_UNCONFIGURED_MESSAGE = (
     "The /ask_ai agent isn't configured on this server "
