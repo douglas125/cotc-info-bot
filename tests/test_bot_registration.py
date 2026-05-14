@@ -21,7 +21,6 @@ def test_core_commands_still_registered() -> None:
     expected = {
         "character", "enemy", "pet", "search",
         "refresh", "feedback", "feedback_list", "feedback_clear",
-        "ask_ai",
     }
     assert expected.issubset(_registered_names())
 
@@ -32,3 +31,11 @@ def test_analyze_team_is_not_registered() -> None:
     # and the analysis/ package, but is not wired into the Discord tree.
     # See README.md "Dormant features".
     assert "analyze_team" not in _registered_names()
+
+
+def test_ask_ai_is_not_registered() -> None:
+    # /ask_ai is intentionally un-hooked — the implementation lives
+    # under bot/ask_ai/ + db.ai_queries + tests/test_bot_ask_ai.py and
+    # is not wired into the Discord tree. See README.md "Dormant
+    # features".
+    assert "ask_ai" not in _registered_names()
