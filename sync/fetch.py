@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import httplib2
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -39,8 +40,50 @@ _FIELDS = (
 )
 
 
+class _IdentityEncodingHttp(httplib2.Http):
+    """httplib2 transport that opts out of compressed response bodies.
+
+    The character spreadsheet response is highly repetitive JSON: in
+    production it has compressed to ~192 KiB and inflated to ~19 MiB, just
+    over a downstream 100x decompression-amplification guard. Requesting
+    identity encoding avoids that guard entirely; we still gzip our stored
+    raw snapshot after the response is parsed.
+    """
+
+    def request(
+        self,
+        uri,
+        method="GET",
+        body=None,
+        headers=None,
+        redirections=httplib2.DEFAULT_MAX_REDIRECTS,
+        connection_type=None,
+    ):
+        clean_headers = {
+            k: v
+            for k, v in (headers or {}).items()
+            if k.lower() != "accept-encoding"
+        }
+        clean_headers["accept-encoding"] = "identity"
+        return super().request(
+            uri,
+            method=method,
+            body=body,
+            headers=clean_headers,
+            redirections=redirections,
+            connection_type=connection_type,
+        )
+
+
 def _build_service(api_key: str):
-    return build("sheets", "v4", developerKey=api_key, cache_discovery=False)
+    return build(
+        "sheets",
+        "v4",
+        developerKey=api_key,
+        cache_discovery=False,
+        http=_IdentityEncodingHttp(),
+    )
+
 
 
 @retry(
