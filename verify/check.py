@@ -235,8 +235,8 @@ def check_skill_counts_per_form(conn) -> list[tuple[bool, str]]:
 
 
 def check_skill_uniqueness_per_form(conn) -> list[tuple[bool, str]]:
-    """Each form has at most one TP/divine active, one TP passive
-    (kind='tp_passive'), one EX, one latent power, and between 0 and 3
+    """Each form has at most one base TP/divine active, one base TP passive
+    (extra TP2 rows use tier_level=2), one EX, one latent power, and between 0 and 3
     ultimate-tier rows (the Lv1/Lv10/Lv20 tiers of the same Special
     skill). Some units have only 1 or 2 tiers released (Lv20 lands
     later), so we allow {0,1,2,3}; anything ≥4 means the parser is
@@ -245,22 +245,30 @@ def check_skill_uniqueness_per_form(conn) -> list[tuple[bool, str]]:
     """
     out: list[tuple[bool, str]] = []
     rows = conn.execute(
-        "SELECT cf.display_name, s.kind, COUNT(*) AS n "
+        "SELECT cf.display_name, s.kind, s.tier_level, COUNT(*) AS n "
         "FROM character_forms cf JOIN skills s ON s.form_id = cf.id "
         "WHERE cf.server = 'global' "
         "  AND s.kind IN ('ex','divine','tp_passive','latent','ultimate') "
-        "GROUP BY cf.id, s.kind"
+        "GROUP BY cf.id, s.kind, s.tier_level"
     ).fetchall()
-    by_form: dict[str, dict[str, int]] = defaultdict(dict)
+    by_form: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for r in rows:
-        by_form[r["display_name"]][r["kind"]] = r["n"]
+        kind = r["kind"]
+        by_form[r["display_name"]][kind] += r["n"]
+        if r["tier_level"] is None:
+            by_form[r["display_name"]][f"{kind}:base"] += r["n"]
     bad: list[tuple[str, str]] = []
     bad_forms: set[str] = set()
     for name, counts in by_form.items():
-        for kind in ("ex", "divine", "tp_passive", "latent"):
+        for kind in ("ex", "latent"):
             n = counts.get(kind, 0)
             if n > 1:
                 bad.append((name, f"{n} {kind} skills (expected ≤1)"))
+                bad_forms.add(name)
+        for kind in ("divine", "tp_passive"):
+            n = counts.get(f"{kind}:base", 0)
+            if n > 1:
+                bad.append((name, f"{n} base {kind} skills (expected <=1)"))
                 bad_forms.add(name)
         n_ult = counts.get("ultimate", 0)
         if n_ult > 3:
