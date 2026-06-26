@@ -267,6 +267,54 @@ def test_build_section_actives_tp_field_has_no_redundant_tp_badge(tmp_db_path: P
     assert "Deep Wound" not in tp_field.value
 
 
+def test_build_section_actives_renders_active_tp2(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed_full_kit(conn)
+    repo.insert_skills(conn, form_id, [{
+        "slot_order": 35, "name": None, "sp_cost": None, "kind": "divine",
+        "learn_board": None, "tier_level": 2, "initial_use": None, "cooldown": None,
+        "description": "Adds 1x Single Target Bow follow-up.",
+        "power_min": None, "power_max": None, "hits": None,
+    }])
+    embed = embeds.build_section_embed(conn, form_id, "actives")
+    conn.close()
+
+    tp_field = next(f for f in embed.fields if f.name == "TP")
+    assert "`Lv2`" in tp_field.value
+    assert "Bow follow-up" in tp_field.value
+    assert "Deep Wound" not in tp_field.value
+
+
+def test_build_section_passives_renders_passive_tp2_and_combined_note(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed_full_kit(conn)
+    repo.insert_skills(conn, form_id, [
+        {
+            "slot_order": 35, "name": None, "sp_cost": None, "kind": "tp_passive",
+            "learn_board": None, "tier_level": 2, "initial_use": None, "cooldown": None,
+            "description": "Potency Up Buffs applied to self will be 1.5x more Potent.",
+            "power_min": None, "power_max": None, "hits": None,
+        },
+        {
+            "slot_order": 36, "name": None, "sp_cost": None, "kind": "tp_passive",
+            "learn_board": None, "tier_level": 2, "initial_use": None, "cooldown": None,
+            "description": (
+                "If both the Active and Passive TP Skills are at Lv2, "
+                "EX Richard will gain +50,000 Damage Cap."
+            ),
+            "power_min": None, "power_max": None, "hits": None,
+        },
+    ])
+    embed = embeds.build_section_embed(conn, form_id, "passives")
+    conn.close()
+
+    passive_field = next(f for f in embed.fields if f.name == "Passive")
+    assert passive_field.value.count("`TP`") >= 3
+    assert passive_field.value.count("`Lv2`") == 2
+    assert "1.5x more Potent" in passive_field.value
+    assert "+50,000 Damage Cap" in passive_field.value
+
+
 def test_build_section_actives_ex_field_shows_uses_and_unlock(tmp_db_path: Path) -> None:
     """EX bullets should carry a `# N` badge for max-uses-per-battle and an
     italicized 'Unlock: <condition>' suffix that mirrors the spreadsheet's

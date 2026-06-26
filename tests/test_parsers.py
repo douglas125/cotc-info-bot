@@ -662,6 +662,7 @@ def test_parse_role_tab_handles_short_rows() -> None:
 def _row(*, sp: str = "", kind: str = "", desc: str = "",
          passive_desc: str = "", latent_desc: str = "",
          icon17: str = "", icon19: str = "",
+         tp2_desc: str = "",
          equipment: str = "",
          ex_uses: int | None = None, ex_cond: str = "",
          ex_anchor_col: int = 8) -> list[dict]:
@@ -690,6 +691,9 @@ def _row(*, sp: str = "", kind: str = "", desc: str = "",
         cells[17] = _cell(icon17)
     if icon19:
         cells[19] = _cell(icon19)
+    if tp2_desc:
+        cells[15] = _cell("Lv2")
+        cells[16] = _cell(tp2_desc)
     if equipment:
         cells[21] = _cell(equipment)
     if ex_uses is not None:
@@ -704,6 +708,19 @@ def _section_divider(name: str) -> list[dict]:
     """A divider row carries the section name in col 5 with cols 6/7 empty."""
     cells = [_cell()] * 26
     cells[5] = _cell(name)
+    return cells
+
+
+def _notes_header() -> list[dict]:
+    cells = [_cell()] * 26
+    cells[23] = _cell("Notes")
+    return cells
+
+
+def _note_row(label: str, desc: str) -> list[dict]:
+    cells = [_cell()] * 26
+    cells[23] = _cell(label)
+    cells[24] = _cell(desc)
     return cells
 
 
@@ -918,6 +935,78 @@ def test_parse_role_tab_tp_inside_passive_section_becomes_tp_passive() -> None:
     # Rarity passives are unaffected.
     passive = [s for s in skills if s["kind"] == "passive"]
     assert sorted(s["learn_board"] for s in passive) == [1, 3]
+
+
+def test_parse_role_tab_tp2_side_lanes_and_combined_note() -> None:
+    """TP2 upgrades in the right-side lane must attach to the correct view.
+
+    Active-section TP2 is another divine row. Passive-section TP2 and the
+    "both TP skills are Lv2" note are passive TP rows so /character shows
+    them in Passive Skills.
+    """
+    rows = []
+    header = [_cell()] * 26
+    header[0] = _cell("EX Richard")
+    header[6] = _cell("SP")
+    header[7] = _cell("Active")
+    rows.append(header)
+    rows.append(_row(sp="20", desc="basic active"))
+    rows.append(_row(
+        kind="TP",
+        sp="300",
+        desc="Base active TP attack.",
+        tp2_desc="Adds 1x Single Target Bow follow-up.",
+    ))
+    # Non-TP level-based side lanes, such as SP discount rows, are ignored.
+    sp_discount = _row(kind="4*", sp="70", desc="2x AoE Spear.")
+    sp_discount[15] = _cell("Lv100")
+    sp_discount[16] = _cell("SP Cost: 70 -> 56")
+    rows.append(sp_discount)
+    rows.append(_section_divider("Passive"))
+    rows.append(_row(kind="1*", passive_desc="Rarity passive."))
+    rows.append(_row(
+        kind="TP",
+        passive_desc="At max HP: Grant self 100% Potency Up.",
+        tp2_desc=(
+            "Potency Up Buffs applied to self will be 1.5x more Potent. "
+            "Also grant self +100,000 Damage Cap."
+        ),
+    ))
+    rows.append(_notes_header())
+    rows.append(_note_row(
+        "1",
+        "If EX Richard is paired with Hammy, trigger only selected follow up attacks.",
+    ))
+    rows.append(_note_row(
+        "2",
+        (
+            "If both the Active and Passive TP Skills are at Lv2, "
+            "EX Richard will gain +50,000 Damage Cap."
+        ),
+    ))
+
+    sheet = _make_role_sheet(rows)
+    blocks = parse_role_tab(sheet, gid=999)
+    assert len(blocks) == 1
+    skills = blocks[0].skills
+
+    divine = [s for s in skills if s["kind"] == "divine"]
+    assert len(divine) == 2
+    assert divine[0]["sp_cost"] == 300
+    assert divine[0]["tier_level"] is None
+    assert divine[1]["sp_cost"] is None
+    assert divine[1]["tier_level"] == 2
+    assert "Bow follow-up" in divine[1]["description"]
+    assert all("SP Cost" not in s["description"] for s in skills)
+
+    tp_passive = [s for s in skills if s["kind"] == "tp_passive"]
+    assert len(tp_passive) == 3
+    assert tp_passive[0]["tier_level"] is None
+    assert tp_passive[1]["tier_level"] == 2
+    assert "1.5x more Potent" in tp_passive[1]["description"]
+    assert tp_passive[2]["tier_level"] == 2
+    assert "+50,000 Damage Cap" in tp_passive[2]["description"]
+    assert not any("Hammy" in s["description"] for s in tp_passive)
 
 
 def test_parse_role_tab_basic_passive_tier_keeps_row_with_zero_board() -> None:
@@ -1257,6 +1346,32 @@ def test_parse_role_tab_stats_block_unknown_formula_terminates_scan() -> None:
     block = blocks[0]
     names = {s["stat_name"] for s in block.stats}
     assert names == {"HP", "SP"}
+
+
+def test_parse_role_tab_stats_duplicate_key_keeps_first_row() -> None:
+    """A live sheet typo duplicated a stat icon; this must not abort sync."""
+    rows = _stats_block_rows(
+        "Phenn",
+        alignment=None,
+        lv100=None,
+        lv120={"HP": 4280, "SP": 390, "ATK": 540},
+        lv100_col=1,
+        lv120_col=3,
+    )
+    dup = [_cell() for _ in range(26)]
+    dup[0] = _cell(formula="=ATK")
+    dup[3] = _cell(number=999)
+    rows.insert(6, dup)
+
+    sheet = _make_role_sheet(rows)
+    blocks = parse_role_tab(sheet, gid=999)
+    assert len(blocks) == 1
+    atk_rows = [
+        s for s in blocks[0].stats
+        if s["level"] == 120 and s["stat_name"] == "ATK"
+    ]
+    assert len(atk_rows) == 1
+    assert atk_rows[0]["stat_value"] == 540
 
 
 def test_parse_role_tab_stats_missing_alignment_is_none() -> None:

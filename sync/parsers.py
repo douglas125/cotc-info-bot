@@ -303,6 +303,7 @@ def _infer_weapon_from_descriptions(descriptions: list[str]) -> str | None:
 _LV_RE = re.compile(r"Lv\s*(\d+)", re.IGNORECASE)
 _POWER_RE = re.compile(r"\((\d+)x\s*(\d+)(?:\s*[~\-]\s*(\d+))?\s*Power", re.IGNORECASE)
 _BOARD_RE = re.compile(r"^\s*(\d)\*\s*$")  # prestige-board indicator (1*..6*)
+_TP2_LABEL_RE = re.compile(r"^Lv\s*2$", re.IGNORECASE)
 
 # Role-tab column indices. The layout is fixed across all role tabs.
 _COL_KIND      = 5   # board indicator (N*) / section divider / kind label
@@ -319,6 +320,7 @@ _COL_PROFILE   = 25  # profile section header / values
 
 _TAG_EXCLUSIVE_PREFIX = "exclusive accessory"
 _TAG_UNIQUE_EFFECTS   = "unique effects"
+_TAG_NOTES            = "notes"
 
 # Restricted to stat names that the live snapshot pairs with a numeric col-21
 # value. Without an allowlist, status-effect icons sharing col 20 on
@@ -528,6 +530,61 @@ def _parse_skill_description(desc: str) -> dict:
     return out
 
 
+def _first_text_to_right(row: list[dict[str, Any]], col: int, *,
+                         max_scan: int = 3) -> str:
+    """Return the first non-empty cell text to the right of ``col``."""
+    for c in range(col + 1, min(len(row), col + 1 + max_scan)):
+        txt = _cell_text(row[c]).strip()
+        if txt:
+            return txt
+    return ""
+
+
+def _tp2_description_from_row(row: list[dict[str, Any]]) -> str:
+    """Read a right-side TP2 description from a row, if present.
+
+    Role tabs place TP2 upgrades in a secondary lane: a black ``Lv2`` cell
+    followed by the effect text. Other right-side upgrade lanes use labels
+    such as ``Lv88``/``Lv100`` for SP discounts; those must be ignored.
+    """
+    for c in range(_COL_DESC + 1, len(row)):
+        if _TP2_LABEL_RE.match(_cell_text(row[c])):
+            return _first_text_to_right(row, c)
+    return ""
+
+
+def _combined_tp2_notes(block_rows: list[list[dict[str, Any]]]) -> list[str]:
+    """Return notes that apply only when active and passive TP2 are both live."""
+    notes: list[str] = []
+    note_col: int | None = None
+    for row in block_rows:
+        for c, cell in enumerate(row):
+            if _cell_text(cell).strip().lower() == _TAG_NOTES:
+                note_col = c
+                break
+        if note_col is not None:
+            break
+    if note_col is None:
+        return notes
+
+    for row in block_rows:
+        if note_col >= len(row):
+            continue
+        label = _cell_text(row[note_col]).strip()
+        if not label.isdigit():
+            continue
+        desc = _first_text_to_right(row, note_col, max_scan=4)
+        low = desc.lower()
+        if (
+            "active" in low
+            and "passive" in low
+            and "tp" in low
+            and "lv2" in low.replace(" ", "")
+        ):
+            notes.append(desc)
+    return notes
+
+
 def _classify_skill_kind(
     col5_label: str | None,
 ) -> tuple[str | None, int | None, int | None]:
@@ -719,6 +776,7 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
 
         icon_col = max(0, lv100_col - 1)
         order = 0
+        seen_stat_keys: set[tuple[int, str]] = set()
         for ridx in range(lv100_row + 1, min(lv100_row + 1 + 12, len(block_rows))):
             r = block_rows[ridx]
             if icon_col >= len(r):
@@ -730,7 +788,8 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
                     break
                 continue
             v100 = _cell_int(r[lv100_col]) if lv100_col < len(r) else None
-            if v100 is not None:
+            if v100 is not None and (100, name) not in seen_stat_keys:
+                seen_stat_keys.add((100, name))
                 block.stats.append({
                     "level": 100,
                     "stat_name": name,
@@ -739,7 +798,8 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
                 })
             if lv120_col is not None and lv120_col < len(r):
                 v120 = _cell_int(r[lv120_col])
-                if v120 is not None:
+                if v120 is not None and (120, name) not in seen_stat_keys:
+                    seen_stat_keys.add((120, name))
                     block.stats.append({
                         "level": 120,
                         "stat_name": name,
@@ -792,6 +852,38 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
     latent_cooldown: int | None = None
     skills: list[dict] = []
     slot = 0
+
+    def append_skill(
+        *,
+        kind: str,
+        desc: str,
+        sp: int | None = None,
+        learn_board: int | None = None,
+        tier_level: int | None = None,
+        initial_use: int | None = None,
+        cooldown: int | None = None,
+        max_uses: int | None = None,
+        unlock_condition: str | None = None,
+    ) -> None:
+        nonlocal slot
+        slot += 1
+        parsed = _parse_skill_description(desc)
+        skills.append({
+            "slot_order": slot,
+            "name": None,
+            "sp_cost": sp,
+            "kind": kind,
+            "learn_board": learn_board,
+            "tier_level": tier_level,
+            "initial_use": initial_use,
+            "cooldown": cooldown,
+            "description": desc,
+            "power_min": parsed.get("power_min"),
+            "power_max": parsed.get("power_max"),
+            "hits": parsed.get("hits"),
+            "max_uses": max_uses,
+            "unlock_condition": unlock_condition,
+        })
 
     for r in block_rows:
         sp_text = _cell_text(r[_COL_SP]) if _COL_SP < len(r) else ""
@@ -870,46 +962,38 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
         else:
             sp = int(sp_text) if is_numeric_sp else None
 
-        slot += 1
-        parsed = _parse_skill_description(desc)
         max_uses, unlock_condition = (None, None)
         if kind == "ex":
             max_uses, unlock_condition = _extract_ex_meta(r)
-        skills.append({
-            "slot_order": slot,
-            "name": None,
-            "sp_cost": sp,
-            "kind": kind,
-            "learn_board": learn_board,
-            "tier_level": tier_level,
-            "initial_use": None,
-            "cooldown": None,
-            "description": desc,
-            "power_min": parsed.get("power_min"),
-            "power_max": parsed.get("power_max"),
-            "hits": parsed.get("hits"),
-            "max_uses": max_uses,
-            "unlock_condition": unlock_condition,
-        })
+        append_skill(
+            kind=kind,
+            desc=desc,
+            sp=sp,
+            learn_board=learn_board,
+            tier_level=tier_level,
+            max_uses=max_uses,
+            unlock_condition=unlock_condition,
+        )
+
+        if kind_label.strip().lower() == "tp":
+            tp2_desc = _tp2_description_from_row(r)
+            if tp2_desc:
+                append_skill(
+                    kind="tp_passive" if current_section == "passive" else "divine",
+                    desc=tp2_desc,
+                    tier_level=2,
+                )
 
     if latent_lines:
-        slot += 1
-        skills.append({
-            "slot_order": slot,
-            "name": None,
-            "sp_cost": None,
-            "kind": "latent",
-            "learn_board": None,
-            "tier_level": None,
-            "initial_use": latent_initial_use,
-            "cooldown": latent_cooldown,
-            "description": "\n".join(latent_lines),
-            "power_min": None,
-            "power_max": None,
-            "hits": None,
-            "max_uses": None,
-            "unlock_condition": None,
-        })
+        append_skill(
+            kind="latent",
+            desc="\n".join(latent_lines),
+            initial_use=latent_initial_use,
+            cooldown=latent_cooldown,
+        )
+
+    for note in _combined_tp2_notes(block_rows):
+        append_skill(kind="tp_passive", desc=note, tier_level=2)
 
     block.skills = skills
     return block
