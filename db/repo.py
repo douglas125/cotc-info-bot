@@ -243,6 +243,7 @@ def clear_character_tables(conn: sqlite3.Connection) -> None:
         "characters_fts",
         "character_profile",
         "character_stats",
+        "unique_effects",
         "equipment_stats",
         "equipment",
         "skills",
@@ -435,6 +436,21 @@ def insert_equipment(conn: sqlite3.Connection, form_id: int, items: list[dict]) 
                 [(cur.lastrowid, name, value, order)
                  for order, (name, value) in enumerate(stats)],
             )
+
+
+def insert_unique_effects(conn: sqlite3.Connection, form_id: int,
+                          items: list[dict]) -> None:
+    if not items:
+        return
+    conn.executemany(
+        "INSERT INTO unique_effects(form_id, effect_order, name, description) "
+        "VALUES (?, ?, ?, ?)",
+        [
+            (form_id, item.get("effect_order", order), item["name"],
+             item.get("description"))
+            for order, item in enumerate(items)
+        ],
+    )
 
 
 def insert_stats(conn: sqlite3.Connection, form_id: int, stats: list[dict]) -> None:
@@ -695,6 +711,14 @@ def get_equipment(conn: sqlite3.Connection, form_id: int) -> list[sqlite3.Row]:
     ))
 
 
+def get_unique_effects(conn: sqlite3.Connection, form_id: int) -> list[sqlite3.Row]:
+    return list(conn.execute(
+        "SELECT * FROM unique_effects WHERE form_id = ? "
+        "ORDER BY effect_order, id",
+        (form_id,),
+    ))
+
+
 def get_stats(conn: sqlite3.Connection, form_id: int) -> list[sqlite3.Row]:
     """Lv100/Lv120 base stats for one form, ordered by (level, stat_order)."""
     return list(conn.execute(
@@ -731,7 +755,7 @@ def get_profile(conn: sqlite3.Connection, form_id: int) -> sqlite3.Row | None:
 def counts(conn: sqlite3.Connection) -> dict[str, int]:
     out = {}
     for tbl in ("characters", "character_forms", "skills", "equipment",
-                "equipment_stats", "character_affinities",
+                "equipment_stats", "unique_effects", "character_affinities",
                 "enemies", "enemy_forms", "enemy_member_stats", "enemy_weaknesses",
                 "pets"):
         out[tbl] = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]

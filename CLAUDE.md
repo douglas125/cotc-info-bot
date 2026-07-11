@@ -237,8 +237,9 @@ in another pipeline's.
 
 **Wiped on every refresh** (sheet-derived, regenerated from the snapshot):
 
-- Character side: `characters_fts`, `character_profile`, `equipment_stats`,
-  `equipment`, `skills`, `character_affinities`, `character_forms`, `characters`
+- Character side: `characters_fts`, `character_profile`, `unique_effects`,
+  `equipment_stats`, `equipment`, `skills`, `character_affinities`,
+  `character_forms`, `characters`
 - Enemy side: `enemies_fts`, `enemy_weaknesses`, `enemy_member_stats`,
   `enemy_forms`, `enemies`
 - Pet side: `pets_fts`, `pets`

@@ -83,6 +83,20 @@ CREATE TABLE IF NOT EXISTS equipment_stats (
 CREATE INDEX IF NOT EXISTS ix_equipment_stats_equipment
     ON equipment_stats(equipment_id);
 
+-- Explanations of unit-specific statuses and mechanics shown below the
+-- role tabs' "Unique Effects" heading. These are glossary entries, not A4
+-- accessory effects. They are sheet-derived and regenerated on refresh.
+CREATE TABLE IF NOT EXISTS unique_effects (
+    id              INTEGER PRIMARY KEY,
+    form_id         INTEGER NOT NULL REFERENCES character_forms(id) ON DELETE CASCADE,
+    effect_order    INTEGER NOT NULL,
+    name            TEXT NOT NULL,
+    description     TEXT,
+    UNIQUE(form_id, effect_order)
+);
+CREATE INDEX IF NOT EXISTS ix_unique_effects_form
+    ON unique_effects(form_id, effect_order);
+
 CREATE TABLE IF NOT EXISTS character_profile (
     form_id         INTEGER PRIMARY KEY REFERENCES character_forms(id) ON DELETE CASCADE,
     splash_art_url  TEXT,

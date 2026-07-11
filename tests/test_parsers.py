@@ -506,11 +506,11 @@ def test_parse_accessory_blank_spacer_row_before_first_stat() -> None:
     assert eq[0]["is_exclusive"] is False
 
 
-def test_parse_accessory_unique_effects_subbuff_overflow_layout() -> None:
-    """EX Partitio's "Unique Effects" layout: each sub-buff is a name row
+def test_parse_unique_effects_are_glossary_not_accessory() -> None:
+    """EX Partitio's "Unique Effects" layout: each definition is a name row
     (c20=icon formula like `=Legendary`, c21=name) followed by a separate
-    overflow row (c20=description text, c21 empty). The parser concatenates
-    them into the equipment description, prefixed with **name**."""
+    row (c20=description text, c21 empty). The parser stores ordered glossary
+    rows and does not contaminate equipment."""
     rows: list[list[dict]] = []
     # Header row + primary accessory with stats — confirms the primary
     # extraction path is unaffected by the new sub-buff fallback.
@@ -579,34 +579,28 @@ def test_parse_accessory_unique_effects_subbuff_overflow_layout() -> None:
     notes_row[21] = _cell("Some unrelated note text")
     rows.append(notes_row)
 
-    eq = parse_role_tab(_make_role_sheet(rows), gid=291065169)[0].equipment
+    block = parse_role_tab(_make_role_sheet(rows), gid=291065169)[0]
+    eq = block.equipment
     primary = next(e for e in eq if e["name"] == "Martial Artist's Koshiobi")
-    excl = next(e for e in eq if e["name"] == "Unique Effects")
     # Regression guard: primary accessory continues to parse normally.
     assert primary["description"] == "primary description here"
     assert primary["stats"] == [("ATK", 100), ("MAG", -60), ("CRIT", 100)]
     assert primary["is_exclusive"] is False
-    # Unique Effects entry: no stats, sub-buffs concatenated as markdown.
-    assert excl["is_exclusive"] is False
-    assert excl["stats"] == []
-    desc = excl["description"]
-    assert desc is not None
-    assert "**Soul Sigil**: 5% Atk/Mag/Def/MDef granted to the frontrow." in desc
-    assert "**Sun Sigil**: 30% Crit Up, +100,000 Damage Cap, +1 BP Regen." in desc
-    # 4-blank-row gap is now tolerated; Fighting Spirit + its description
-    # captured.
-    assert "**Fighting Spirit**: BP is not consumed when used." in desc
-    # Notes-section content must not have leaked into the description.
-    assert "Some unrelated note text" not in desc
-    # Order is preserved.
-    assert desc.index("Soul Sigil") < desc.index("Sun Sigil") < desc.index("Fighting Spirit")
+    assert all(e["name"] != "Unique Effects" for e in eq)
+    assert block.unique_effects == [
+        {"effect_order": 0, "name": "Soul Sigil",
+         "description": "5% Atk/Mag/Def/MDef granted to the frontrow."},
+        {"effect_order": 1, "name": "Sun Sigil",
+         "description": "30% Crit Up, +100,000 Damage Cap, +1 BP Regen."},
+        {"effect_order": 2, "name": "Fighting Spirit",
+         "description": "BP is not consumed when used."},
+    ]
+    assert all("Some unrelated note text" not in (e["description"] or "")
+               for e in block.unique_effects)
 
 
-def test_parse_accessory_unique_effects_with_c23_description_unaffected() -> None:
-    """Regression: the standard "Unique Effects" layout (description sits on
-    c23 of the row immediately after the marker) must still parse via the
-    existing path — the new sub-buff fallback must not run when c23 has
-    text."""
+def test_parse_unique_effects_name_without_icon_formula() -> None:
+    """Pathological live rows can omit the c20 icon formula on a name row."""
     rows: list[list[dict]] = []
     header = [_cell("Cardona"), _cell(), _cell(), _cell(), _cell(), _cell(),
               _cell("SP"), _cell("Active")] + [_cell()] * 12 + [
@@ -621,21 +615,64 @@ def test_parse_accessory_unique_effects_with_c23_description_unaffected() -> Non
     p1[23] = _cell("primary effect")
     rows.append(p1)
     rows.append([_cell()] * 26)
-    # Unique Effects marker, then description on the very next row's c23.
+    # Unique Effects marker, formula-less name row, then c20 description.
     marker = [_cell()] * 26
     marker[20] = _cell("Unique Effects")
     rows.append(marker)
+    name_row = [_cell()] * 26
+    name_row[21] = _cell("Unhealable")
+    rows.append(name_row)
     desc_row = [_cell()] * 26
-    desc_row[23] = _cell("Heals 5% of Max HP at the start of every turn.")
+    desc_row[20] = _cell("Cannot recover HP by any means.")
     rows.append(desc_row)
 
-    eq = parse_role_tab(_make_role_sheet(rows), gid=999)[0].equipment
-    ue = next(e for e in eq if e["name"] == "Unique Effects")
-    assert ue["description"] == "Heals 5% of Max HP at the start of every turn."
-    assert ue["stats"] == []
-    assert ue["is_exclusive"] is False
-    # The new fallback's markdown formatting must NOT have been applied.
-    assert "**" not in (ue["description"] or "")
+    block = parse_role_tab(_make_role_sheet(rows), gid=999)[0]
+    assert all(e["name"] != "Unique Effects" for e in block.equipment)
+    assert block.unique_effects == [{
+        "effect_order": 0,
+        "name": "Unhealable",
+        "description": "Cannot recover HP by any means.",
+    }]
+
+
+def test_parse_ex2_araune_a4_and_unique_effects_regression() -> None:
+    rune_effect = (
+        "Grants the user the ability to crit with Elemental attacks.\n"
+        "When using 3+ BP: Grant self guaranteed critical hits and increase "
+        "Crit Damage by 15%."
+    )
+    rows = _accessory_block(
+        "EX2 Araune", "Rune of Hope", rune_effect,
+        [("SP", 60), ("MAG", 150), ("CRIT", -20)],
+    )
+    marker = [_cell()] * 26
+    marker[20] = _cell("Unique Effects")
+    rows.append(marker)
+    definitions = [
+        ("Rehabilitate", "Removes basic status ailments and grants immunity."),
+        ("[Element] Weakness Implant", "Adds or strengthens an elemental weakness."),
+        ("Rune of Diffusion", "Allows self-target buffs to target the frontrow."),
+    ]
+    for name, description in definitions:
+        name_row = [_cell()] * 26
+        name_row[20] = _cell(formula="=StatusIcon")
+        name_row[21] = _cell(name)
+        rows.append(name_row)
+        desc_row = [_cell()] * 26
+        desc_row[20] = _cell(description)
+        rows.append(desc_row)
+
+    block = parse_role_tab(_make_role_sheet(rows), gid=519845584)[0]
+    assert block.equipment == [{
+        "slot": None,
+        "name": "Rune of Hope",
+        "description": rune_effect,
+        "is_exclusive": False,
+        "stats": [("SP", 60), ("MAG", 150), ("CRIT", -20)],
+    }]
+    assert [entry["name"] for entry in block.unique_effects] == [
+        "Rehabilitate", "[Element] Weakness Implant", "Rune of Diffusion",
+    ]
 
 
 def test_parse_role_tab_ignores_rows_without_sp_active_marker() -> None:

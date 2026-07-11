@@ -16,7 +16,8 @@ def test_bootstrap_creates_all_tables(tmp_db_path: Path) -> None:
     )}
     expected = {
         "characters", "character_forms", "character_affinities",
-        "skills", "equipment", "equipment_stats", "character_profile",
+        "skills", "equipment", "equipment_stats", "unique_effects",
+        "character_profile",
         "sync_runs", "raw_snapshots",
         "feedback_submissions",
         "command_usage_daily",
@@ -86,6 +87,24 @@ def test_clear_character_tables_keeps_sync_history(tmp_db_path: Path) -> None:
     assert conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0] == 0
     # sync_runs should NOT be wiped
     assert conn.execute("SELECT COUNT(*) FROM sync_runs").fetchone()[0] == 1
+    conn.close()
+
+
+def test_unique_effects_round_trip_and_refresh_wipe(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed(conn)
+    repo.insert_unique_effects(conn, form_id, [
+        {"effect_order": 1, "name": "Second", "description": "B"},
+        {"effect_order": 0, "name": "First", "description": "A"},
+    ])
+    rows = repo.get_unique_effects(conn, form_id)
+    assert [(r["effect_order"], r["name"], r["description"]) for r in rows] == [
+        (0, "First", "A"),
+        (1, "Second", "B"),
+    ]
+
+    repo.clear_character_tables(conn)
+    assert conn.execute("SELECT COUNT(*) FROM unique_effects").fetchone()[0] == 0
     conn.close()
 
 

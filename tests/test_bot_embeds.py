@@ -132,7 +132,7 @@ def _seed_full_kit(conn) -> int:
 
 def test_section_keys_and_labels_are_consistent() -> None:
     assert embeds.SECTIONS == (
-        "actives", "passives", "ultimate", "a4", "stats", "info",
+        "actives", "passives", "ultimate", "a4", "unique_effects", "stats", "info",
     )
     assert set(embeds.SECTION_LABELS.keys()) == set(embeds.SECTIONS)
     assert set(embeds.SECTION_DESCRIPTIONS.keys()) == set(embeds.SECTIONS)
@@ -428,6 +428,34 @@ def test_build_section_a4_handles_no_equipment(tmp_db_path: Path) -> None:
     conn.close()
     a4_field = next(f for f in embed.fields if f.name == "A4 Accessory")
     assert "no a4 accessory" in a4_field.value.lower()
+
+
+def test_build_section_unique_effects_renders_ordered_glossary(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed(conn)
+    repo.insert_unique_effects(conn, form_id, [
+        {"effect_order": 0, "name": "Rehabilitate",
+         "description": "Removes basic status ailments."},
+        {"effect_order": 1, "name": "Rune of Diffusion",
+         "description": "Allows self buffs to target the frontrow."},
+    ])
+    embed = embeds.build_section_embed(conn, form_id, "unique_effects")
+    conn.close()
+
+    assert embed is not None
+    assert [(f.name, f.value) for f in embed.fields] == [
+        ("Rehabilitate", "Removes basic status ailments."),
+        ("Rune of Diffusion", "Allows self buffs to target the frontrow."),
+    ]
+
+
+def test_build_section_unique_effects_handles_empty_glossary(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    form_id = _seed(conn)
+    embed = embeds.build_section_embed(conn, form_id, "unique_effects")
+    conn.close()
+    assert embed is not None
+    assert "no unique-effect definitions" in embed.fields[0].value.lower()
 
 
 def test_build_section_stats_two_columns(tmp_db_path: Path) -> None:

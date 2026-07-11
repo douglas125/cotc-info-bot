@@ -4,8 +4,9 @@ These take a sqlite3 connection plus a form_id (or a list of search rows)
 and return a `discord.Embed`. They have no Discord runtime dependency
 beyond the `Embed` data class — fully unit-testable.
 
-The `/character` command surfaces six sections through a dropdown:
-"actives" (default), "passives", "ultimate", "a4", "stats", and "info".
+The `/character` command surfaces seven sections through a dropdown:
+"actives" (default), "passives", "ultimate", "a4", "unique_effects",
+"stats", and "info".
 Each section is a self-contained embed; the dropdown swaps which one is
 shown.
 """
@@ -28,15 +29,18 @@ FIELD_NAME_LIMIT = 256
 TITLE_LIMIT = 256
 MAX_FIELDS = 25
 
-Section = Literal["actives", "passives", "ultimate", "a4", "stats", "info"]
+Section = Literal[
+    "actives", "passives", "ultimate", "a4", "unique_effects", "stats", "info",
+]
 SECTIONS: tuple[Section, ...] = (
-    "actives", "passives", "ultimate", "a4", "stats", "info",
+    "actives", "passives", "ultimate", "a4", "unique_effects", "stats", "info",
 )
 SECTION_LABELS: dict[Section, str] = {
     "actives": "Active Skills",
     "passives": "Passive Skills",
     "ultimate": "Ultimate",
     "a4": "A4 Accessory",
+    "unique_effects": "Unique Effects",
     "stats": "Level 120 Stats",
     "info": "Info",
 }
@@ -45,6 +49,7 @@ SECTION_DESCRIPTIONS: dict[Section, str] = {
     "passives": "Passive skills and Latent Power",
     "ultimate": "Ultimate (Special) tiers",
     "a4": "A4 accessory and effect",
+    "unique_effects": "Unit-specific effect glossary",
     "stats": "Alignment and Lv100 / Lv120 base stats",
     "info": "Affinities, release info, source link",
 }
@@ -470,6 +475,30 @@ def _build_a4_section(
     return embed
 
 
+def _build_unique_effects_section(
+    form: sqlite3.Row,
+    unique_effects: list[sqlite3.Row],
+) -> discord.Embed:
+    embed = _new_header_embed(form)
+    if not unique_effects:
+        embed.add_field(
+            name="Unique Effects",
+            value="_No unique-effect definitions recorded for this form._",
+            inline=False,
+        )
+        return embed
+    for effect in unique_effects:
+        embed.add_field(
+            name=_truncate(effect["name"], FIELD_NAME_LIMIT),
+            value=_truncate(
+                effect["description"] or "_No description recorded._",
+                FIELD_VALUE_LIMIT,
+            ),
+            inline=False,
+        )
+    return embed
+
+
 def _build_stats_section(
     form: sqlite3.Row,
     stats: list[sqlite3.Row],
@@ -590,6 +619,10 @@ def build_section_embed(
             form,
             repo.get_equipment(conn, form_id),
             repo.get_equipment_stats_by_form(conn, form_id),
+        )
+    elif section == "unique_effects":
+        embed = _build_unique_effects_section(
+            form, repo.get_unique_effects(conn, form_id),
         )
     elif section == "stats":
         embed = _build_stats_section(form, repo.get_stats(conn, form_id))

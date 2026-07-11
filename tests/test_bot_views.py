@@ -52,3 +52,11 @@ def test_dropdown_lists_level_120_stats_between_a4_and_info() -> None:
     labels = [o.label for o in sel.options]
     assert "Level 120 Stats" in labels
     assert labels.index("A4 Accessory") < labels.index("Level 120 Stats") < labels.index("Info")
+
+
+def test_dropdown_lists_unique_effects_between_a4_and_stats() -> None:
+    view = CharacterView(form_id=1)
+    sel = next(c for c in view.children if isinstance(c, discord.ui.Select))
+    labels = [o.label for o in sel.options]
+    assert labels.index("A4 Accessory") < labels.index("Unique Effects")
+    assert labels.index("Unique Effects") < labels.index("Level 120 Stats")
