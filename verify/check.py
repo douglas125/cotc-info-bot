@@ -16,14 +16,18 @@ import gzip
 import json
 import sys
 from collections import Counter, defaultdict
+from types import SimpleNamespace
 from typing import Any
 
-from sync.runner import _levenshtein
+from sync.runner import _levenshtein, _select_block_for
 
-from config import NAME_ALIASES, ROLE_TABS, TABS, TABS_BY_GID, canonicalize_name
+from config import (
+    NAME_ALIASES, ROLE_TABS, TABS, TABS_BY_GID, canonical_name_keys,
+    canonicalize_name,
+)
 from db import repo
 from sync.fetch import sheet_by_gid
-from sync.parsers import SEA_GID, _cell_text, parse_sea_kits
+from sync.parsers import SEA_GID, _cell_text, parse_role_tab, parse_sea_kits
 
 
 # UTF-8 stdout for Windows consoles (tab names contain ⭐).
@@ -506,20 +510,152 @@ def check_a4_accessory_stats(conn) -> list[tuple[bool, str]]:
                         f"expected {expected_stats}, got {actual}"))
 
     # Primary A4s almost always carry stats; <95% indicates a parser regression.
-    # Excludes "Unique Effects" pseudo-rows (those exist to anchor status icons).
     total = conn.execute(
         "SELECT COUNT(*) FROM equipment "
-        "WHERE is_exclusive = 0 AND lower(name) != 'unique effects'"
+        "WHERE is_exclusive = 0"
     ).fetchone()[0]
     with_stats = conn.execute(
         "SELECT COUNT(DISTINCT e.id) FROM equipment e "
         "JOIN equipment_stats es ON es.equipment_id = e.id "
-        "WHERE e.is_exclusive = 0 AND lower(e.name) != 'unique effects'"
+        "WHERE e.is_exclusive = 0"
     ).fetchone()[0]
     pct = (100.0 * with_stats / total) if total else 0.0
     out.append((pct >= 95.0,
                 f"primary-A4 stat coverage: {with_stats}/{total} ({pct:.0f}%) "
                 f"have at least one stat row"))
+    return out
+
+
+def check_unique_effects(payload: dict, conn) -> list[tuple[bool, str]]:
+    """Audit glossary parsing and ensure it never contaminates equipment."""
+    out: list[tuple[bool, str]] = []
+    source_blocks = []
+    blocks_by_name: dict[str, list[tuple[int, Any]]] = defaultdict(list)
+    blocks_by_tab: dict[int, list[Any]] = defaultdict(list)
+    for tab in ROLE_TABS:
+        sheet = sheet_by_gid(payload, tab.gid)
+        if sheet:
+            blocks = parse_role_tab(sheet, gid=tab.gid)
+            source_blocks.extend(blocks)
+            blocks_by_tab[tab.gid].extend(blocks)
+            for block in blocks:
+                for key in canonical_name_keys(block.display_name):
+                    blocks_by_name[key].append((tab.gid, block))
+    sea_sheet = sheet_by_gid(payload, SEA_GID)
+    sea_blocks = []
+    sea_blocks_by_name: dict[str, Any] = {}
+    if sea_sheet:
+        sea_blocks = parse_sea_kits(sea_sheet)
+        source_blocks.extend(sea_blocks)
+        for block in sea_blocks:
+            for key in canonical_name_keys(block.display_name):
+                sea_blocks_by_name.setdefault(key, block)
+
+    glossary_blocks = [b for b in source_blocks if b.unique_effects]
+    source_entries = [e for b in glossary_blocks for e in b.unique_effects]
+    incomplete = [
+        (b.display_name, e.get("name"))
+        for b in glossary_blocks for e in b.unique_effects
+        if not e.get("name") or not e.get("description")
+    ]
+    duplicates = [
+        b.display_name for b in glossary_blocks
+        if len({e["name"].casefold() for e in b.unique_effects}) != len(b.unique_effects)
+    ]
+    out.append((bool(source_entries) and not incomplete and not duplicates,
+                f"source glossary audit: {len(source_entries)} definitions across "
+                f"{len(glossary_blocks)} blocks; incomplete={incomplete[:3]}, "
+                f"duplicate-name blocks={duplicates[:3]}"))
+
+    bad_equipment = conn.execute(
+        "SELECT COUNT(*) FROM equipment WHERE lower(name) = 'unique effects'"
+    ).fetchone()[0]
+    out.append((bad_equipment == 0,
+                f"equipment rows named 'Unique Effects': {bad_equipment}"))
+
+    db_total = conn.execute("SELECT COUNT(*) FROM unique_effects").fetchone()[0]
+    db_incomplete = conn.execute(
+        "SELECT COUNT(*) FROM unique_effects "
+        "WHERE trim(name) = '' OR description IS NULL OR trim(description) = ''"
+    ).fetchone()[0]
+    out.append((db_total > 0 and db_incomplete == 0,
+                f"persisted glossary: {db_total} definitions, "
+                f"{db_incomplete} incomplete"))
+
+    mismatches = []
+    checked = 0
+    forms = conn.execute(
+        "SELECT cf.id, cf.display_name, cf.rarity, c.base_role "
+        "FROM character_forms cf JOIN characters c ON c.id = cf.character_id"
+    ).fetchall()
+    for form in forms:
+        block = sea_blocks_by_name.get(form["display_name"])
+        if block is None:
+            entry = SimpleNamespace(
+                canonical_name=form["display_name"],
+                role=form["base_role"],
+                rarity=form["rarity"],
+            )
+            block = _select_block_for(
+                entry,
+                blocks_by_name.get(form["display_name"], []),
+                blocks_by_tab,
+            )
+        if block is None:
+            continue
+        checked += 1
+        expected = [
+            (e["effect_order"], e["name"], e["description"])
+            for e in block.unique_effects
+        ]
+        actual_rows = conn.execute(
+            "SELECT effect_order, name, description FROM unique_effects "
+            "WHERE form_id = ? ORDER BY effect_order",
+            (form["id"],),
+        ).fetchall()
+        actual = [(r["effect_order"], r["name"], r["description"])
+                  for r in actual_rows]
+        if actual != expected:
+            mismatches.append((form["display_name"], expected, actual))
+    out.append((not mismatches,
+                f"DB ↔ selected snapshot blocks: {checked} forms checked, "
+                f"{len(mismatches)} mismatches {mismatches[:1]}"))
+
+    expected_names = {
+        "EX2 Araune": ["Rehabilitate", "[Element] Weakness Implant", "Rune of Diffusion"],
+        "EX2 Viola": ["[Weapon] Weakness Implant", "Weakness Implant Freeze (Ally Buff)"],
+        "Auron": ["Undying", "Unhealable"],
+        "EX Temenos": ["[Element] Fragility", "Burning", "Frostbite", "Short Circuit"],
+        "Black Maiden": ["Weakness Implant (Sword and Dark)", "Necromance", "Black Flame Blessing"],
+        "Rocbouquet": ["Deep Grudge", "Enchant", "Rehabilitate", "Miss Elemental Attacks",
+                       "Miss Physical Attacks", "Shock", "Dizziness", "Disable Dodge",
+                       "Disable Zero Damage"],
+        "EX Partitio": ["Soul Sigil", "Sun Sigil", "Fighting Spirit"],
+    }
+    for display_name, expected in expected_names.items():
+        rows = conn.execute(
+            "SELECT ue.name FROM unique_effects ue "
+            "JOIN character_forms cf ON cf.id = ue.form_id "
+            "WHERE cf.display_name = ? ORDER BY ue.effect_order",
+            (display_name,),
+        ).fetchall()
+        actual = [r["name"] for r in rows]
+        out.append((actual == expected,
+                    f"glossary '{display_name}': expected {expected}, got {actual}"))
+
+    rune = conn.execute(
+        "SELECT e.description FROM equipment e "
+        "JOIN character_forms cf ON cf.id = e.form_id "
+        "WHERE cf.display_name = 'EX2 Araune' AND e.name = 'Rune of Hope'"
+    ).fetchone()
+    expected_rune = (
+        "Grants the user the ability to crit with Elemental attacks.\n"
+        "When using 3+ BP: Grant self guaranteed critical hits and increase "
+        "Crit Damage by 15%."
+    )
+    actual_rune = rune["description"] if rune else None
+    out.append((actual_rune == expected_rune,
+                f"EX2 Araune Rune of Hope effect exact match: {actual_rune!r}"))
     return out
 
 
@@ -614,6 +750,7 @@ def run_all() -> int:
         ("Splash-art coverage",      check_splash_art_coverage(conn)),
         ("Spot-check characters",    check_spot_characters(payload, conn)),
         ("A4 accessory stats",       check_a4_accessory_stats(conn)),
+        ("Unique Effects glossary",  check_unique_effects(payload, conn)),
         ("Character base stats",     check_character_base_stats(conn)),
     ]
 

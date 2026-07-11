@@ -36,7 +36,7 @@ QUERY_SQLITE_TOOL: dict[str, Any] = {
         "Run a single read-only SELECT statement against the CotC SQLite "
         "mirror and get up to 200 rows back as plain text (TSV with a "
         "header row). Use this for every factual lookup: characters, "
-        "forms, skills, equipment, stats, profiles, enemies, enemy "
+        "forms, skills, equipment, unique-effect glossaries, stats, profiles, enemies, enemy "
         "stats/weaknesses, pets. For text searches over skill or "
         "equipment text, use the *_fts tables with `MATCH 'word'`, NOT "
         "LIKE. Always add a tight LIMIT clause; results past 200 rows "

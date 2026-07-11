@@ -1,7 +1,8 @@
 """Interactive `discord.ui.View` for `/character`.
 
 The View carries a single `Select` dropdown that swaps the embed between
-"actives", "passives", "ultimate", "a4", and "info" sections. Each callback
+"actives", "passives", "ultimate", "a4", "unique_effects", "stats", and
+"info" sections. Each callback
 rebuilds the embed via `embeds.build_section_embed` and edits the message
 in place.
 

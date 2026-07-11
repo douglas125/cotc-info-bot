@@ -614,6 +614,7 @@ def register(tree: app_commands.CommandTree) -> None:
             f"Sync OK. forms={summary.get('character_forms', '?')} · "
             f"skills={summary.get('skills', '?')} · "
             f"equipment={summary.get('equipment', '?')} · "
+            f"unique_effects={summary.get('unique_effects', '?')} · "
             f"enemies={summary.get('enemies', '?')} · "
             f"enemy_forms={summary.get('enemy_forms', '?')} · "
             f"pets={summary.get('pets', '?')}{notes_suffix}",

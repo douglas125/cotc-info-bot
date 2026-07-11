@@ -142,6 +142,10 @@ _SCHEMA_REFERENCE = """\
 `equipment_stats(id, equipment_id, stat_name, stat_value, stat_order)`
   - `stat_name`: 'ATK'|'MAG'|'SP'|'HP'|'SPD'|'DEF'|'MDEF'|'CRIT' (signed int values)
 
+`unique_effects(id, form_id, effect_order, name, description)`
+  - Form-specific glossary definitions from the sheet; these are not equipment effects
+  - Order by `effect_order`; glossary text is intentionally not part of `characters_fts`
+
 `character_profile(form_id, splash_art_url, self_buffs_text)`
   - `splash_art_url` is mostly NULL today; `self_buffs_text` is the start-of-battle buff note
 

@@ -305,7 +305,8 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             pets_count=c["pets"],
         )
         progress(f"Sync OK. Forms={c['character_forms']} Skills={c['skills']} "
-                 f"Equipment={c['equipment']} Affinities={c['character_affinities']} "
+                 f"Equipment={c['equipment']} UniqueEffects={c['unique_effects']} "
+                 f"Affinities={c['character_affinities']} "
                  f"Enemies={c['enemies']} EnemyForms={c['enemy_forms']} "
                  f"Pets={c['pets']}.")
         return {"run_id": run_id, "status": "ok",
@@ -348,6 +349,7 @@ def _persist_block(conn: sqlite3.Connection, form_id: int, block: Any) -> None:
         )
     repo.insert_skills(conn, form_id, block.skills)
     repo.insert_equipment(conn, form_id, block.equipment)
+    repo.insert_unique_effects(conn, form_id, block.unique_effects)
     repo.insert_stats(conn, form_id, block.stats)
     if block.splash_art_url or block.self_buffs_text:
         repo.upsert_profile(
