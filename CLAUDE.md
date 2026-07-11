@@ -267,7 +267,11 @@ in another pipeline's.
   outage during `/refresh` only logs `WARN: sprite refresh skipped: …`
   while leaving existing rows intact. The table is keyed by
   `canonical_name`; `repo.get_form` LEFT JOINs it so the embed code is
-  a single guarded `set_thumbnail` call.
+  a single guarded `set_thumbnail` call. The Champions page is the primary
+  inventory; reviewed omissions and ambiguous EX/EX2 names live in
+  `scripts.refresh_sprite_urls.SPRITE_FILE_OVERRIDES`. Add an exact Fandom
+  filename there rather than guessing from names. The verifier intentionally
+  fails when a canonical character has no sprite, making new gaps explicit.
 - `ai_queries` — `/ask_ai` invocation log. Drives the per-user 3/hour
   rate limit and the global 100/day circuit breaker (counted from this
   table — survives bot restarts). Also captures token usage

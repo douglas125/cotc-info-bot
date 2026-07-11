@@ -287,10 +287,18 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             from scripts.refresh_sprite_urls import refresh_sprite_urls
             sprite_summary = refresh_sprite_urls(conn)
             unmatched = len(sprite_summary["unmatched"])
-            note = f", {unmatched} unmatched" if unmatched else ""
+            missing = len(sprite_summary["missing"])
+            notes = []
+            if unmatched:
+                notes.append(f"{unmatched} unmatched wiki rows")
+            if missing:
+                notes.append(f"{missing} characters missing")
+            note = f" ({', '.join(notes)})" if notes else ""
             progress(
-                f"Refreshed sprites: {sprite_summary['matched']}/"
-                f"{sprite_summary['parsed']} matched{note}"
+                f"Refreshed sprites: {sprite_summary['total_mapped']}/"
+                f"{sprite_summary['character_total']} characters mapped "
+                f"({sprite_summary['page_mapped']} page + "
+                f"{sprite_summary['overrides']} curated){note}"
             )
         except Exception as exc:
             progress(f"WARN: sprite refresh skipped: {exc}")

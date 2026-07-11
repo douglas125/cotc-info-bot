@@ -5,8 +5,9 @@ Source page: https://octopathtraveler.fandom.com/wiki/Champions
 The page lists ~263 characters in 8 job-tab tables. Each row carries a
 wikia-CDN-hosted PNG sprite. We grab the canonical full-res URL,
 reconcile the wiki name against ``characters.canonical_name`` (applying
-``config.NAME_ALIASES`` and the EX prefix↔suffix swap), and upsert into
-``character_sprites``.
+``config.NAME_ALIASES`` and the EX prefix↔suffix swap), then layer exact
+``SPRITE_FILE_OVERRIDES`` for reviewed omissions and ambiguous EX/EX2 rows
+before upserting into ``character_sprites``.
 
 Two entry points share the same ``refresh_sprite_urls(conn)`` function:
 
@@ -31,6 +32,7 @@ import json
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 from typing import Iterable
@@ -51,7 +53,36 @@ WIKI_API_URL = (
     "https://octopathtraveler.fandom.com/api.php"
     "?action=parse&page=Champions&format=json&prop=text&redirects=1"
 )
+WIKI_FILE_API_URL = "https://octopathtraveler.fandom.com/api.php"
 USER_AGENT = "cotc-info-bot sprite-grabber (one-off, https://github.com/douglas125/cotc-info-bot)"
+
+# Exact Fandom file mappings for characters the Champions page cannot identify
+# unambiguously (EX/EX2 rows share the same visible name), omits entirely, or
+# spells differently from the Index. These are intentionally reviewed instead
+# of inferred: a wrong thumbnail is harder to notice than a missing one.
+SPRITE_FILE_OVERRIDES: dict[str, str] = {
+    "EX Araune": "Alaune_EX_Dancer_Sprite.png",
+    "EX2 Araune": "Alaune_EX_Warrior_Sprite.png",
+    "EX Erika": "Elrica_EX_Thief_Sprite.png",
+    "EX2 Erika": "Elrica_EX_Dancer_Sprite.png",
+    "Levina EX": "Levina_EX_Dancer_Sprite.png",
+    "EX2 Levina": "Levina_EX_Thief_Sprite.png",
+    "EX Viola": "Viola_EX_Scholar_Sprite.png",
+    "EX2 Viola": "Viola_EX_Warrior_Sprite.png",
+    "Levina EX ⚔️": "Levina_EX_Dancer_Sprite.png",
+    "Lynette EX ⚔️": "Lynette_EX_Sprite.png",
+    "Phenn ⚔️": "Phenn_Sprite.png",
+    "Xerc ⚔️": "Xerc_Sprite.png",
+    "Mooloo": "Molu_Sprite.png",
+    "Auron": "Auron_Sprite.png",
+    "EX Mydia": "Mydia_EX_Sprite.png",
+    "EX Temenos": "Temenos_EX_Sprite.png",
+    "EX Tiziano": "Tiziano_EX_Sprite.png",
+    "Nada": "Nada_Sprite.png",
+    "Reime": "Reime_Sprite.png",
+    "Tidus": "Tidus_Sprite.png",
+    "Yuna": "Yuna_Sprite.png",
+}
 
 # Wikia URLs land in `data-src` because the page lazy-loads images.
 # Format: .../images/<X>/<XY>/<Filename>.png/revision/latest[/scale-to-width-down/N][?cb=...]
@@ -81,6 +112,73 @@ def fetch_wiki_html() -> str:
     if isinstance(text, dict):
         return text.get("*", "") or ""
     return text or ""
+
+
+def _file_title_key(title: str) -> str:
+    """Normalize a MediaWiki file title for underscore/space-insensitive matching."""
+    if title.casefold().startswith("file:"):
+        title = title[5:]
+    return " ".join(title.replace("_", " ").split()).casefold()
+
+
+def parse_wiki_file_urls(
+    payload: dict, requested_titles: Iterable[str],
+) -> dict[str, str]:
+    """Validate an imageinfo response and return requested title -> CDN URL.
+
+    Curated mappings fail closed. Every requested title must resolve to a PNG
+    on Fandom's image CDN, otherwise the caller raises before touching SQLite.
+    """
+    requested = {_file_title_key(title): title for title in requested_titles}
+    resolved: dict[str, str] = {}
+    for page in payload.get("query", {}).get("pages", {}).values():
+        key = _file_title_key(str(page.get("title", "")))
+        original = requested.get(key)
+        if original is None:
+            continue
+        info = (page.get("imageinfo") or [{}])[0]
+        url = str(info.get("url", ""))
+        mime = info.get("mime")
+        if (
+            mime != "image/png"
+            or urllib.parse.urlparse(url).hostname != _WIKIA_HOST
+        ):
+            continue
+        resolved[original] = normalize_url(url)
+
+    missing = [title for title in requested.values() if title not in resolved]
+    if missing:
+        raise RuntimeError(
+            "wiki file lookup did not return valid PNGs for: "
+            + ", ".join(sorted(missing))
+        )
+    return resolved
+
+
+@retry(
+    retry=retry_if_exception_type((urllib.error.URLError, OSError, TimeoutError)),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=15),
+    reraise=True,
+)
+def fetch_wiki_file_urls(file_titles: Iterable[str]) -> dict[str, str]:
+    """Resolve reviewed Fandom file titles in one MediaWiki API request."""
+    titles = list(dict.fromkeys(file_titles))
+    if not titles:
+        return {}
+    params = urllib.parse.urlencode({
+        "action": "query",
+        "format": "json",
+        "prop": "imageinfo",
+        "iiprop": "url|mime",
+        "titles": "|".join(f"File:{title}" for title in titles),
+    })
+    req = urllib.request.Request(
+        f"{WIKI_FILE_API_URL}?{params}", headers={"User-Agent": USER_AGENT},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    return parse_wiki_file_urls(payload, titles)
 
 
 # --- HTML parsing -----------------------------------------------------------
@@ -216,7 +314,9 @@ def refresh_sprite_urls(conn) -> dict:
 
     Returns a summary dict::
 
-        {"parsed": int, "matched": int, "unmatched": list[str]}
+        {"parsed": int, "matched": int, "page_mapped": int,
+         "overrides": int, "total_mapped": int, "character_total": int,
+         "missing": list[str], "unmatched": list[str]}
 
     Raises on network/HTML/parse errors — callers (the ``/refresh``
     runner, the CLI ``main``) decide whether to swallow or surface.
@@ -235,22 +335,63 @@ def refresh_sprite_urls(conn) -> dict:
     ]
     db_index = build_db_index(db_canonicals)
 
-    upserts: list[tuple[str, str]] = []
+    applicable_overrides = {
+        canonical: file_title
+        for canonical, file_title in SPRITE_FILE_OVERRIDES.items()
+        if canonical.casefold() in db_index
+    }
+    override_urls = fetch_wiki_file_urls(applicable_overrides.values())
+
+    page_urls: dict[str, str] = {}
     unmatched: list[str] = []
     for wiki_name, raw_url in pairs:
         canonical = reconcile(wiki_name, db_index)
         if canonical is None:
             unmatched.append(wiki_name)
             continue
-        upserts.append((canonical, normalize_url(raw_url)))
+        url = normalize_url(raw_url)
+        previous = page_urls.get(canonical)
+        if (
+            previous is not None
+            and previous != url
+            and canonical not in applicable_overrides
+        ):
+            raise RuntimeError(
+                f"unreviewed wiki sprite collision for {canonical!r}"
+            )
+        page_urls[canonical] = url
 
-    if upserts:
+    rows: dict[str, tuple[str, str]] = {
+        canonical: (url, "wikia") for canonical, url in page_urls.items()
+    }
+    for canonical, file_title in applicable_overrides.items():
+        rows[canonical] = (override_urls[file_title], "wikia-file-override")
+
+    if rows:
         with repo.transaction(conn):
             repo.upsert_sprites_batch(
-                conn, ((canonical, url, "wikia") for canonical, url in upserts),
+                conn,
+                (
+                    (canonical, url, source)
+                    for canonical, (url, source) in rows.items()
+                ),
             )
 
-    return {"parsed": len(pairs), "matched": len(upserts), "unmatched": unmatched}
+    character_total = len(db_canonicals)
+    mapped_names = {
+        r[0] for r in conn.execute("SELECT canonical_name FROM character_sprites")
+    }
+    missing = sorted(set(db_canonicals) - mapped_names, key=str.casefold)
+    return {
+        "parsed": len(pairs),
+        "matched": len(rows),
+        "page_mapped": len(page_urls),
+        "overrides": len(applicable_overrides),
+        "total_mapped": character_total - len(missing),
+        "character_total": character_total,
+        "missing": missing,
+        "unmatched": unmatched,
+    }
 
 
 def main() -> int:
@@ -275,13 +416,23 @@ def main() -> int:
             f"Parsed {summary['parsed']} (name, url) pairs from the page.",
             flush=True,
         )
-        print(f"\nMatched: {summary['matched']} / {summary['parsed']}", flush=True)
+        print(
+            f"\nMapped: {summary['total_mapped']} / "
+            f"{summary['character_total']} characters "
+            f"({summary['page_mapped']} page, "
+            f"{summary['overrides']} curated)",
+            flush=True,
+        )
         if summary["unmatched"]:
             print(
                 f"Unmatched ({len(summary['unmatched'])}) — "
                 "extend config.NAME_ALIASES if needed:"
             )
             for name in summary["unmatched"]:
+                print(f"  - {name!r}")
+        if summary["missing"]:
+            print(f"Missing sprites ({len(summary['missing'])}):")
+            for name in summary["missing"]:
                 print(f"  - {name!r}")
 
         total = conn.execute(
