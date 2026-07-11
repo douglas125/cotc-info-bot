@@ -121,11 +121,18 @@ bot_admin_user_ids = "111111111111111111,222222222222222222"
 
 ### Discord application setup
 
+**Quick invite:** [Add the CotC Info Bot to a server](https://discord.com/oauth2/authorize?client_id=1498428376984322149&permissions=51200&scope=bot%20applications.commands)
+
+The invite requests only `Send Messages`, `Embed Links`, and `Attach Files`
+(used by generated `/enemy` image panels), plus the `bot` and
+`applications.commands` scopes needed to install the bot and its slash
+commands.
+
 1. Create an application at <https://discord.com/developers/applications>.
 2. **Bot** tab → reset token → put it in `DISCORD_BOT_TOKEN`.
 3. **OAuth2 → URL Generator** → scopes `bot` + `applications.commands`,
-   permissions `Send Messages` + `Embed Links`. Open the generated URL to
-   invite the bot to your guild.
+   permissions `Send Messages` + `Embed Links` + `Attach Files`. Open the
+   generated URL to invite the bot to your guild.
 
 ## Deploy (Docker / Railway)
 
