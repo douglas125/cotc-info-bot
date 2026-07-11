@@ -442,6 +442,27 @@ def check_splash_art_coverage(conn) -> list[tuple[bool, str]]:
     return [(True, f"{with_art}/{total} forms have splash_art_url ({pct:.0f}%)")]
 
 
+def check_sprite_coverage(conn) -> list[tuple[bool, str]]:
+    """Require one reviewed or page-derived sprite per canonical character."""
+    missing = [
+        r[0] for r in conn.execute(
+            "SELECT c.canonical_name FROM characters c "
+            "LEFT JOIN character_sprites cs "
+            "ON cs.canonical_name = c.canonical_name "
+            "WHERE cs.canonical_name IS NULL "
+            "ORDER BY c.canonical_name COLLATE NOCASE"
+        )
+    ]
+    total = conn.execute("SELECT COUNT(*) FROM characters").fetchone()[0]
+    mapped = total - len(missing)
+    if missing:
+        return [(
+            False,
+            f"sprite coverage: {mapped}/{total}; missing: {', '.join(missing)}",
+        )]
+    return [(True, f"sprite coverage: {mapped}/{total} characters")]
+
+
 def check_spot_characters(payload: dict, conn) -> list[tuple[bool, str]]:
     """Spot-check N specific characters: skill text and equipment from snapshot
     must appear in DB for that character."""
@@ -748,6 +769,7 @@ def run_all() -> int:
         ("SEA/GL kit precedence",    check_sea_kit_precedence(payload, conn)),
         ("FTS searchable",           check_fts_searchable(conn)),
         ("Splash-art coverage",      check_splash_art_coverage(conn)),
+        ("Sprite coverage",          check_sprite_coverage(conn)),
         ("Spot-check characters",    check_spot_characters(payload, conn)),
         ("A4 accessory stats",       check_a4_accessory_stats(conn)),
         ("Unique Effects glossary",  check_unique_effects(payload, conn)),
