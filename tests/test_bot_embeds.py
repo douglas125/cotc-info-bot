@@ -250,6 +250,58 @@ def test_build_section_passives_renders_basic_passive_with_badge(tmp_db_path: Pa
     assert "Sword attack" in passive_field.value
 
 
+def test_build_section_passives_renders_named_latent_passive_variants(tmp_db_path: Path) -> None:
+    conn = repo.connect(tmp_db_path)
+    ch_id = repo.upsert_character(
+        conn, canonical_name="Composite Latent", base_role="scholar", base_weapon="tome",
+    )
+    form_id = repo.insert_form(
+        conn, character_id=ch_id, display_name="Composite Latent", rarity="5*",
+        sheet_gid=999, source_row=5,
+    )
+    repo.insert_skills(conn, form_id, [
+        {
+            "slot_order": 1, "name": "Latent Power", "sp_cost": None,
+            "kind": "passive", "learn_board": 0, "tier_level": None,
+            "initial_use": 0, "cooldown": 0,
+            "description": "Basic latent description.",
+        },
+        {
+            "slot_order": 2, "name": "Latent Power", "sp_cost": None,
+            "kind": "passive", "learn_board": 1, "tier_level": None,
+            "initial_use": 2, "cooldown": 4,
+            "description": "One-star latent description.",
+        },
+        {
+            "slot_order": 3, "name": "Latent Power", "sp_cost": None,
+            "kind": "tp_passive", "learn_board": None, "tier_level": None,
+            "initial_use": 3, "cooldown": 6,
+            "description": "TP latent description.",
+        },
+        {
+            "slot_order": 4, "name": "Latent Power", "sp_cost": None,
+            "kind": "tp_passive", "learn_board": None, "tier_level": 2,
+            "initial_use": None, "cooldown": None,
+            "description": "TP latent upgrade description.",
+        },
+    ])
+
+    embed = embeds.build_section_embed(conn, form_id, "passives")
+    conn.close()
+
+    assert embed is not None
+    assert "Latent" not in [field.name for field in embed.fields]
+    passive_text = "\n".join(
+        field.value for field in embed.fields if field.name.startswith("Passive")
+    )
+    assert "`Basic` **Latent Power**" in passive_text
+    assert "`1⭐` **Latent Power**" in passive_text
+    assert "`TP` **Latent Power**" in passive_text
+    assert "`TP` `Lv2` **Latent Power**" in passive_text
+    assert "[init 2t / cd 4t] One-star latent description." in passive_text
+    assert "[init 3t / cd 6t] TP latent description." in passive_text
+
+
 def test_build_section_actives_tp_field_has_no_redundant_tp_badge(tmp_db_path: Path) -> None:
     """The actives view shows the SP-costing TP/divine skill under a "TP"
     field. The bullet should lead with the SP cost, not with a redundant

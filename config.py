@@ -85,6 +85,17 @@ def parse_admin_ids(raw: str | None) -> set[int]:
 SPREADSHEET_ID = "1LF2NbjnMsq8Jo2TSpocu6NN-o9dsUlmd8xCMZpKUHNw"
 SPREADSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
 
+# Product-facing exceptions to the Index roster. Xerc's sheet rows expose a
+# GL and JP comparison pair, but the bot should publish only the GL kit under
+# the established display name "Xerc".
+INDEX_CHARACTER_NAME_POLICY: dict[str, str | None] = {
+    "Xerc (GL)": "Xerc",
+    "Xerc (JP)": None,
+}
+
+# Source-only comparison blocks that should not be required as bot forms.
+ROLE_BLOCK_EXCLUSIONS: frozenset[str] = frozenset({"(JP) Xerc"})
+
 
 @dataclass(frozen=True)
 class TabSpec:

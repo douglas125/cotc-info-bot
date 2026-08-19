@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import re
 import sys
 from collections import Counter, defaultdict
 from types import SimpleNamespace
@@ -22,8 +23,8 @@ from typing import Any
 from sync.runner import _levenshtein, _select_block_for
 
 from config import (
-    NAME_ALIASES, ROLE_TABS, TABS, TABS_BY_GID, canonical_name_keys,
-    canonicalize_name,
+    INDEX_CHARACTER_NAME_POLICY, NAME_ALIASES, ROLE_BLOCK_EXCLUSIONS,
+    ROLE_TABS, TABS, TABS_BY_GID, canonical_name_keys, canonicalize_name,
 )
 from db import repo
 from sync.fetch import sheet_by_gid
@@ -67,6 +68,8 @@ def _live_role_tab_names(payload: dict, gid: int) -> list[tuple[int, str]]:
         sp = _cell_text(row[6]).upper() if len(row) > 6 else ""
         active = _cell_text(row[7]).lower() if len(row) > 7 else ""
         if name and 1 <= len(name) <= 30 and sp == "SP" and active in ("active", "actives"):
+            if name in ROLE_BLOCK_EXCLUSIONS:
+                continue
             out.append((ridx, name))
     return out
 
@@ -99,6 +102,10 @@ def _live_index_names(payload: dict) -> list[str]:
             if col < len(rows[ridx]):
                 t = _cell_text(rows[ridx][col])
                 if t and not t.startswith("Color Key") and not t.lower().startswith("note"):
+                    if t in INDEX_CHARACTER_NAME_POLICY:
+                        t = INDEX_CHARACTER_NAME_POLICY[t]
+                        if t is None:
+                            continue
                     # only count if it has a hyperlink or a foreground color (real entries)
                     cell = rows[ridx][col]
                     if cell.get("hyperlink") or cell.get("effectiveFormat", {}).get("textFormat", {}).get("foregroundColor"):
@@ -287,6 +294,148 @@ def check_skill_uniqueness_per_form(conn) -> list[tuple[bool, str]]:
     if bad:
         out.append((False, f"  offenders (sample): {bad[:5]}"))
     return out
+
+
+_COMPOSITE_LATENT_RE = re.compile(
+    r"^Latent\s+Power\s*\(\s*"
+    r"(?:(?P<tp>TP)|(?P<basic>Basic)|(?P<board>[1-6])\*)\s+Passive\s*\)$",
+    re.IGNORECASE,
+)
+
+
+def check_composite_latent_sections(payload: dict) -> list[tuple[bool, str]]:
+    """Every composite Latent divider must retain its exact source text.
+
+    Detection and expected-field derivation are intentionally independent of
+    ``sync.parsers._classify_latent_section`` so a shared parser regression
+    cannot make this check pass by construction.
+    """
+    base_failures: list[str] = []
+    upgrade_failures: list[str] = []
+    base_count = 0
+    upgrade_count = 0
+    gids = [tab.gid for tab in ROLE_TABS] + [SEA_GID]
+
+    for gid in gids:
+        sheet = sheet_by_gid(payload, gid)
+        if sheet is None:
+            continue
+        rows: list[list[dict]] = []
+        for grid in sheet.get("data", []) or []:
+            for row in grid.get("rowData", []) or []:
+                rows.append(row.get("values", []) or [])
+
+        starts: list[tuple[int, str]] = []
+        for ridx, row in enumerate(rows):
+            if len(row) < 8:
+                continue
+            if (
+                _cell_text(row[0])
+                and _cell_text(row[6]).upper() == "SP"
+                and _cell_text(row[7]).lower() in ("active", "actives")
+            ):
+                starts.append((ridx, _cell_text(row[0])))
+        parsed = {
+            (block.source_row, block.display_name): block
+            for block in parse_role_tab(sheet, gid=gid)
+        }
+
+        for index, (start, name) in enumerate(starts):
+            end = starts[index + 1][0] if index + 1 < len(starts) else len(rows)
+            block = parsed.get((start, name))
+            if block is None:
+                continue
+            for ridx in range(start, end):
+                row = rows[ridx]
+                label = _cell_text(row[5]) if len(row) > 5 else ""
+                match = _COMPOSITE_LATENT_RE.fullmatch(label)
+                if match is None:
+                    continue
+                # A supported label is a divider only when the normal SP and
+                # description cells are empty. Text embedded in a skill row
+                # must never be treated as structural.
+                sp_text = _cell_text(row[6]) if len(row) > 6 else ""
+                desc_text = _cell_text(row[7]) if len(row) > 7 else ""
+                if sp_text or desc_text:
+                    continue
+
+                if match.group("tp"):
+                    expected_kind, expected_board = "tp_passive", None
+                elif match.group("basic"):
+                    expected_kind, expected_board = "passive", 0
+                else:
+                    expected_kind = "passive"
+                    expected_board = int(match.group("board"))
+
+                source_desc = ""
+                section_end = end
+                for content_idx in range(ridx + 1, end):
+                    content_row = rows[content_idx]
+                    content = _cell_text(content_row[5]) if len(content_row) > 5 else ""
+                    if content.lower() in ("passive", "passives", "active", "actives", "special"):
+                        section_end = content_idx
+                        break
+                    if content and not source_desc:
+                        source_desc = content
+                base_count += 1
+                base_matches = [
+                    skill for skill in block.skills
+                    if skill.get("name") == "Latent Power"
+                    and skill.get("kind") == expected_kind
+                    and skill.get("learn_board") == expected_board
+                    and skill.get("tier_level") is None
+                    and skill.get("description") == source_desc
+                ]
+                if len(base_matches) != 1:
+                    base_failures.append(
+                        f"{name}: base description/classification mismatch"
+                    )
+
+                for upgrade_row in rows[ridx + 1:section_end]:
+                    for col in range(8, min(len(upgrade_row), 23)):
+                        upgrade_label = _cell_text(upgrade_row[col])
+                        is_lv2 = re.fullmatch(r"Lv\s*2", upgrade_label, re.IGNORECASE)
+                        is_six = upgrade_label.strip() == "6*"
+                        if not is_lv2 and not is_six:
+                            continue
+                        value = ""
+                        value_col: int | None = None
+                        for candidate_col in range(col + 1, min(len(upgrade_row), col + 5)):
+                            candidate = _cell_text(upgrade_row[candidate_col])
+                            if candidate:
+                                value = candidate
+                                value_col = candidate_col
+                                break
+                        if not value:
+                            continue
+                        if value.isdigit() and value_col in (17, 19):
+                            counter = "Initial use" if value_col == 17 else "Cooldown"
+                            value = f"{counter} changes to {value} turns."
+                        upgrade_count += 1
+                        upgrade_matches = [
+                            skill for skill in block.skills
+                            if skill.get("name") == "Latent Power"
+                            and skill.get("description") == value
+                            and (
+                                (is_lv2 and skill.get("tier_level") == 2)
+                                or (is_six and skill.get("learn_board") == 6)
+                            )
+                        ]
+                        if len(upgrade_matches) != 1:
+                            upgrade_failures.append(
+                                f"{name}: {upgrade_label} upgrade mismatch"
+                            )
+
+    failures = base_failures + upgrade_failures
+    return [
+        (
+            base_count > 0 and not failures,
+            f"composite Latent Power descriptions: "
+            f"{base_count - len(base_failures)}/{base_count} base sections exact; "
+            f"{upgrade_count - len(upgrade_failures)}/{upgrade_count} upgrades exact",
+        ),
+        *([(False, f"offenders (sample): {failures[:8]}")] if failures else []),
+    ]
 
 
 def check_rarity_distribution(conn) -> list[tuple[bool, str]]:
@@ -765,6 +914,7 @@ def run_all() -> int:
         ("Role-tab blocks vs DB",    check_role_tab_blocks(payload, conn)),
         ("Skill counts per form",    check_skill_counts_per_form(conn)),
         ("Skill kind uniqueness",    check_skill_uniqueness_per_form(conn)),
+        ("Composite Latent sections", check_composite_latent_sections(payload)),
         ("Rarity distribution",      check_rarity_distribution(conn)),
         ("SEA/GL kit precedence",    check_sea_kit_precedence(payload, conn)),
         ("FTS searchable",           check_fts_searchable(conn)),

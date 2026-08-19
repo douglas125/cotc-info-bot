@@ -12,7 +12,13 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from config import TABS_BY_GID, WEAPON_TO_ROLE, color_family, rarity_from_color
+from config import (
+    INDEX_CHARACTER_NAME_POLICY,
+    TABS_BY_GID,
+    WEAPON_TO_ROLE,
+    color_family,
+    rarity_from_color,
+)
 
 
 # --- color helpers ----------------------------------------------------------
@@ -213,6 +219,10 @@ def parse_index(sheet: dict[str, Any]) -> list[IndexEntry]:
             # filter junk values: section labels, etc.
             if name.startswith("Color Key") or name.lower().startswith("note"):
                 continue
+            if name in INDEX_CHARACTER_NAME_POLICY:
+                name = INDEX_CHARACTER_NAME_POLICY[name]
+                if name is None:
+                    continue
             color_hex = _cell_color_hex(cell)
             fam = color_family(color_hex)
             rarity = rarity_from_color(color_hex)
@@ -305,6 +315,12 @@ _LV_RE = re.compile(r"Lv\s*(\d+)", re.IGNORECASE)
 _POWER_RE = re.compile(r"\((\d+)x\s*(\d+)(?:\s*[~\-]\s*(\d+))?\s*Power", re.IGNORECASE)
 _BOARD_RE = re.compile(r"^\s*(\d)\*\s*$")  # prestige-board indicator (1*..6*)
 _TP2_LABEL_RE = re.compile(r"^Lv\s*2$", re.IGNORECASE)
+_LATENT_SECTION_RE = re.compile(
+    r"^Latent\s+Power"
+    r"(?:\s*\(\s*(?:(?P<tp>TP)|(?P<basic>Basic)|(?P<board>[1-6])\*)"
+    r"\s+Passive\s*\))?$",
+    re.IGNORECASE,
+)
 
 # Role-tab column indices. The layout is fixed across all role tabs.
 _COL_KIND      = 5   # board indicator (N*) / section divider / kind label
@@ -487,10 +503,31 @@ _SECTION_MARKERS = {
     "active":       "active",
     "actives":      "active",
     "special":      "special",
-    "latent power": "latent",
     "passive":      "passive",
     "passives":     "passive",
 }
+
+
+def _classify_latent_section(
+    label: str,
+) -> tuple[str, int | None, str | None] | None:
+    """Classify a Latent Power divider and its passive unlock suffix.
+
+    Returns ``(kind, learn_board, name)``. Plain ``Latent Power`` keeps the
+    historical ``kind='latent'`` representation and NULL name. Composite
+    dividers are passive skills rendered in the Passive field under the stable
+    name ``Latent Power``.
+    """
+    match = _LATENT_SECTION_RE.fullmatch(label.strip())
+    if match is None:
+        return None
+    if match.group("tp"):
+        return "tp_passive", None, "Latent Power"
+    if match.group("basic"):
+        return "passive", 0, "Latent Power"
+    if match.group("board"):
+        return "passive", int(match.group("board")), "Latent Power"
+    return "latent", None, None
 
 
 def _parse_skill_description(desc: str) -> dict:
@@ -825,6 +862,10 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
     latent_lines: list[str] = []
     latent_initial_use: int | None = None
     latent_cooldown: int | None = None
+    latent_kind = "latent"
+    latent_learn_board: int | None = None
+    latent_name: str | None = None
+    latent_upgrades: list[dict[str, Any]] = []
     skills: list[dict] = []
     slot = 0
 
@@ -832,6 +873,7 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
         *,
         kind: str,
         desc: str,
+        name: str | None = None,
         sp: int | None = None,
         learn_board: int | None = None,
         tier_level: int | None = None,
@@ -845,7 +887,7 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
         parsed = _parse_skill_description(desc)
         skills.append({
             "slot_order": slot,
-            "name": None,
+            "name": name,
             "sp_cost": sp,
             "kind": kind,
             "learn_board": learn_board,
@@ -860,13 +902,60 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
             "unlock_condition": unlock_condition,
         })
 
+    def reset_latent() -> None:
+        nonlocal latent_lines, latent_initial_use, latent_cooldown
+        nonlocal latent_kind, latent_learn_board, latent_name, latent_upgrades
+        latent_lines = []
+        latent_initial_use = None
+        latent_cooldown = None
+        latent_kind = "latent"
+        latent_learn_board = None
+        latent_name = None
+        latent_upgrades = []
+
+    def flush_latent() -> None:
+        if not latent_lines:
+            reset_latent()
+            return
+        append_skill(
+            kind=latent_kind,
+            name=latent_name,
+            desc="\n".join(latent_lines),
+            learn_board=latent_learn_board,
+            initial_use=latent_initial_use,
+            cooldown=latent_cooldown,
+        )
+        for upgrade in latent_upgrades:
+            append_skill(
+                kind=upgrade["kind"],
+                name=latent_name,
+                desc=upgrade["description"],
+                learn_board=upgrade.get("learn_board"),
+                tier_level=upgrade.get("tier_level"),
+            )
+        reset_latent()
+
     for r in block_rows:
         sp_text = _cell_text(r[_COL_SP]) if _COL_SP < len(r) else ""
         kind_label = _cell_text(r[_COL_KIND]) if _COL_KIND < len(r) else ""
         c7_text = _cell_text(r[_COL_DESC]) if _COL_DESC < len(r) else ""
 
+        latent_marker = (
+            _classify_latent_section(kind_label)
+            if not sp_text and not c7_text
+            else None
+        )
+        if latent_marker is not None:
+            if current_section == "latent":
+                flush_latent()
+            current_section = "latent"
+            latent_kind, latent_learn_board, latent_name = latent_marker
+            continue
+
         marker = _SECTION_MARKERS.get(kind_label.strip().lower())
         if marker and not sp_text and not c7_text:
+            if current_section == "latent":
+                flush_latent()
             current_section = marker
             continue
 
@@ -879,6 +968,10 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
                     latent_initial_use = init_use
                 if latent_cooldown is None and cooldown is not None:
                     latent_cooldown = cooldown
+            if latent_name is not None:
+                upgrade = _latent_passive_upgrade_from_row(r, latent_kind)
+                if upgrade is not None:
+                    latent_upgrades.append(upgrade)
             continue
 
         is_numeric_sp = sp_text.isdigit()
@@ -959,13 +1052,8 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
                     tier_level=2,
                 )
 
-    if latent_lines:
-        append_skill(
-            kind="latent",
-            desc="\n".join(latent_lines),
-            initial_use=latent_initial_use,
-            cooldown=latent_cooldown,
-        )
+    if current_section == "latent":
+        flush_latent()
 
     for note in _combined_tp2_notes(block_rows):
         append_skill(kind="tp_passive", desc=note, tier_level=2)
@@ -1019,6 +1107,54 @@ def _scan_latent_counters(
     initial_use = found[0] if len(found) >= 1 else None
     cooldown = found[1] if len(found) >= 2 else None
     return initial_use, cooldown
+
+
+def _latent_passive_upgrade_from_row(
+    row: list[dict[str, Any]], base_kind: str,
+) -> dict[str, Any] | None:
+    """Extract a supported upgrade lane from a composite Latent section.
+
+    Most lanes use ``Lv2``/``6*`` in col 8 and description text in col 10.
+    A small number use the latent counter strip instead (for example a Lv2
+    marker followed only by the new cooldown value). Those numeric values are
+    converted to explicit text rather than being stored as an opaque number.
+    """
+    for c in range(_COL_DESC + 1, min(len(row), _COL_LATENT_E + 1)):
+        label = _cell_text(row[c]).strip()
+        is_tp2 = bool(_TP2_LABEL_RE.fullmatch(label))
+        board_match = _BOARD_RE.fullmatch(label)
+        is_six_star = bool(board_match and int(board_match.group(1)) == 6)
+        if not is_tp2 and not is_six_star:
+            continue
+
+        value = ""
+        value_col: int | None = None
+        for value_col_candidate in range(c + 1, min(len(row), c + 5)):
+            candidate = _cell_text(row[value_col_candidate]).strip()
+            if candidate:
+                value = candidate
+                value_col = value_col_candidate
+                break
+        if not value:
+            return None
+        if value.isdigit() and value_col in (17, 19):
+            counter = "Initial use" if value_col == 17 else "Cooldown"
+            value = f"{counter} changes to {value} turns."
+
+        if is_six_star:
+            return {
+                "kind": "passive",
+                "learn_board": 6,
+                "tier_level": None,
+                "description": value,
+            }
+        return {
+            "kind": base_kind,
+            "learn_board": None,
+            "tier_level": 2,
+            "description": value,
+        }
+    return None
 
 
 # --- SEA/GL Unique Kits parser ---------------------------------------------

@@ -1,7 +1,14 @@
 """Sanity-check the static config tables don't drift out of sync."""
 from __future__ import annotations
 
-from config import ROLE_TABS, TABS, TABS_BY_GID, WEAPON_TO_ROLE
+from config import (
+    INDEX_CHARACTER_NAME_POLICY,
+    ROLE_BLOCK_EXCLUSIONS,
+    ROLE_TABS,
+    TABS,
+    TABS_BY_GID,
+    WEAPON_TO_ROLE,
+)
 
 
 def test_tabs_inventory_count() -> None:
@@ -47,3 +54,11 @@ def test_weapon_to_role_mapping() -> None:
 def test_tabs_by_gid_is_complete() -> None:
     for t in TABS:
         assert TABS_BY_GID[t.gid] is t
+
+
+def test_xerc_index_policy_keeps_only_global_display_name() -> None:
+    assert INDEX_CHARACTER_NAME_POLICY == {
+        "Xerc (GL)": "Xerc",
+        "Xerc (JP)": None,
+    }
+    assert ROLE_BLOCK_EXCLUSIONS == {"(JP) Xerc"}

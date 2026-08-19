@@ -14,6 +14,7 @@ from config import (
 from sync.parsers import (
     Anchor,
     FormBlock,
+    _classify_latent_section,
     _color_dict_to_hex,
     _classify_skill_kind,
     _extract_ex_meta,
@@ -122,6 +123,27 @@ def test_classify_skill_kind_special_levels() -> None:
     assert _classify_skill_kind("Lv10") == ("ultimate", None, 10)
     assert _classify_skill_kind("Lv1") == ("ultimate", None, 1)
     assert _classify_skill_kind("Lv20") == ("ultimate", None, 20)
+
+
+@pytest.mark.parametrize(("label", "expected"), [
+    ("Latent Power", ("latent", None, None)),
+    ("Latent Power (TP Passive)", ("tp_passive", None, "Latent Power")),
+    ("Latent Power (Basic Passive)", ("passive", 0, "Latent Power")),
+    ("Latent Power (1* Passive)", ("passive", 1, "Latent Power")),
+    ("latent power (6* passive)", ("passive", 6, "Latent Power")),
+])
+def test_classify_latent_section(label: str, expected: tuple) -> None:
+    assert _classify_latent_section(label) == expected
+
+
+@pytest.mark.parametrize("label", [
+    "Latent Power is reduced",
+    "Latent Power (Basic)",
+    "Latent Power (Unknown Passive)",
+    "Cooldown of Latent Power",
+])
+def test_classify_latent_section_rejects_description_text(label: str) -> None:
+    assert _classify_latent_section(label) is None
 
 
 # --- skill description parser ----------------------------------------------
@@ -1085,6 +1107,122 @@ def test_parse_role_tab_basic_passive_tier_keeps_row_with_zero_board() -> None:
     assert [s["learn_board"] for s in passive_sorted] == [0, 1, 3]
 
 
+@pytest.mark.parametrize(("divider", "expected_kind", "expected_board"), [
+    ("Latent Power (Basic Passive)", "passive", 0),
+    ("Latent Power (1* Passive)", "passive", 1),
+    ("Latent Power (TP Passive)", "tp_passive", None),
+])
+def test_parse_role_tab_composite_latent_is_named_passive_without_description_churn(
+    divider: str, expected_kind: str, expected_board: int | None,
+) -> None:
+    rows = []
+    header = [_cell()] * 26
+    header[0] = _cell("EX2 Araune")
+    header[6] = _cell("SP")
+    header[7] = _cell("Active")
+    rows.append(header)
+    active_desc = "Reduce Latent Power cooldown by 2 turns."
+    rows.append(_row(kind="1*", sp="20", desc=active_desc))
+    rows.append(_section_divider(divider))
+    latent_desc = (
+        'Change all skills for 1 turn:\n'
+        '"Hero Rune": Self 30% Atk, Mag, and Crit Rate Up.\n'
+        '"Diffusion Rune": Self buffs target the frontrow instead.'
+    )
+    rows.append(_row(latent_desc=latent_desc, icon17="0", icon19="4"))
+    rows.append(_section_divider("Passive"))
+    ordinary_passive = "When spending 1+ BP, gain [Priority]."
+    rows.append(_row(kind="3*", passive_desc=ordinary_passive))
+
+    skills = parse_role_tab(_make_role_sheet(rows), gid=999)[0].skills
+    recovered = next(s for s in skills if s["name"] == "Latent Power")
+
+    assert recovered["kind"] == expected_kind
+    assert recovered["learn_board"] == expected_board
+    assert recovered["description"] == latent_desc
+    assert recovered["initial_use"] == 0
+    assert recovered["cooldown"] == 4
+    assert next(s for s in skills if s["description"] == active_desc)["kind"] == "active"
+    passive = next(s for s in skills if s["description"] == ordinary_passive)
+    assert passive["kind"] == "passive"
+    assert recovered["slot_order"] < passive["slot_order"]
+
+
+def test_parse_role_tab_composite_tp_latent_keeps_lv2_upgrade_separate() -> None:
+    rows = []
+    header = [_cell()] * 26
+    header[0] = _cell("Osvald")
+    header[6] = _cell("SP")
+    header[7] = _cell("Active")
+    rows.extend([header, _row(sp="20", desc="active")])
+    rows.append(_section_divider("Latent Power (TP Passive)"))
+    rows.append(_row(
+        latent_desc='Gain "Concentrate Spells" for 1 turn.',
+        icon17="2", icon19="2",
+        tp2_desc="When active, add 30% of Atk to Mag.",
+    ))
+    rows.append(_section_divider("Passive"))
+    rows.append(_row(kind="1*", passive_desc="ordinary passive"))
+
+    named = [
+        s for s in parse_role_tab(_make_role_sheet(rows), gid=999)[0].skills
+        if s["name"] == "Latent Power"
+    ]
+    assert len(named) == 2
+    assert named[0]["description"] == 'Gain "Concentrate Spells" for 1 turn.'
+    assert named[0]["tier_level"] is None
+    assert named[1]["kind"] == "tp_passive"
+    assert named[1]["tier_level"] == 2
+    assert named[1]["description"] == "When active, add 30% of Atk to Mag."
+
+
+def test_parse_role_tab_composite_latent_captures_following_upgrade_rows() -> None:
+    rows = []
+    header = [_cell()] * 26
+    header[0] = _cell("Aval")
+    header[6] = _cell("SP")
+    header[7] = _cell("Active")
+    rows.extend([header, _row(sp="20", desc="active")])
+    rows.append(_section_divider("Latent Power (1* Passive)"))
+    rows.append(_row(latent_desc='Grant self "Rampage" for 2 turns.', icon17="3", icon19="6"))
+    six_star = [_cell()] * 26
+    six_star[8] = _cell("6*")
+    six_star[10] = _cell("Duration increases from 2 to 3 turns.")
+    rows.append(six_star)
+    rows.append(_section_divider("Passive"))
+
+    named = [
+        s for s in parse_role_tab(_make_role_sheet(rows), gid=999)[0].skills
+        if s["name"] == "Latent Power"
+    ]
+    assert [(s["learn_board"], s["tier_level"]) for s in named] == [(1, None), (6, None)]
+    assert named[1]["description"] == "Duration increases from 2 to 3 turns."
+
+
+def test_parse_role_tab_composite_latent_explains_counter_only_lv2_upgrade() -> None:
+    rows = []
+    header = [_cell()] * 26
+    header[0] = _cell("Black Maiden")
+    header[6] = _cell("SP")
+    header[7] = _cell("Active")
+    rows.extend([header, _row(sp="20", desc="active")])
+    rows.append(_section_divider("Latent Power (TP Passive)"))
+    rows.append(_row(latent_desc='Grant self "Black Curse".', icon17="3", icon19="6"))
+    counter_upgrade = [_cell()] * 26
+    counter_upgrade[16] = _cell("Lv2")
+    counter_upgrade[19] = _cell("3")
+    rows.append(counter_upgrade)
+    rows.append(_section_divider("Passive"))
+
+    named = [
+        s for s in parse_role_tab(_make_role_sheet(rows), gid=999)[0].skills
+        if s["name"] == "Latent Power"
+    ]
+    assert len(named) == 2
+    assert named[1]["tier_level"] == 2
+    assert named[1]["description"] == "Cooldown changes to 3 turns."
+
+
 def test_parse_role_tab_partial_ultimate_release() -> None:
     """A unit with only Lv1/Lv10 released (Lv20 not out yet) must still
     surface those tiers as ultimate — verify allows {0,1,2,3} ultimate
@@ -1218,6 +1356,27 @@ def test_parse_index_extracts_role_columns_and_rarity() -> None:
     tressa = next(e for e in entries if e.canonical_name == "Tressa")
     assert tressa.role == "merchant"
     assert tressa.rarity == "free35"  # green → free 3→5★
+
+
+def test_parse_index_publishes_xerc_global_name_and_skips_jp_comparison() -> None:
+    role_names = ["Warrior (Sword)", "Merchant (Spear)", "Thief (Dagger)",
+                  "Apothecary (Axe)", "Hunter (Bow)", "Cleric (Staff)",
+                  "Scholar (Tome)", "Dancer (Fan)"]
+    row_count = len(role_names) * 11
+    header = [_cell()] * row_count
+    for i, name in enumerate(role_names):
+        header[i * 11 + 1] = _cell(name)
+    gl_row = [_cell()] * row_count
+    jp_row = [_cell()] * row_count
+    scholar_col = 6 * 11 + 1
+    gl_row[scholar_col] = _cell("Xerc (GL)", color={"red": 0.8})
+    jp_row[scholar_col] = _cell("Xerc (JP)", color={"red": 0.8})
+
+    entries = parse_index(_make_role_sheet([header, gl_row, jp_row]))
+
+    assert [entry.canonical_name for entry in entries] == ["Xerc"]
+    assert entries[0].role == "scholar"
+    assert entries[0].source_row == 1
 
 
 # --- image extraction ------------------------------------------------------
