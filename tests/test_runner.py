@@ -239,6 +239,7 @@ def _index_sheet_with(*characters: tuple[str, str]) -> dict:
     cols_by_role = {
         "warrior":    0 * 11 + 1,
         "apothecary": 3 * 11 + 1,
+        "scholar":    6 * 11 + 1,
     }
     char_row = [_idx_cell()] * width
     for name, role in characters:
@@ -328,6 +329,52 @@ def test_run_sync_sea_kit_takes_precedence_and_emits_one_form(
         )]
         assert any("WARRIOR_ROLE_TAB_KIT" in (d or "") for d in therion_descs), \
             f"non-SEA character lost role-tab kit: {therion_descs!r}"
+    finally:
+        conn.close()
+
+
+def test_run_sync_publishes_only_global_xerc_with_sea_kit(
+    tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sheets = [
+        _index_sheet_with(("Xerc (GL)", "scholar")),
+        _sheet(SCHOLARS_5_GID, "Scholars 5",
+               _block_rows("(JP) Xerc", "JP_ONLY_KIT")),
+        _sheet(SEA_GID, "SEA/GL Unique Kits",
+               _block_rows("Xerc", "GLOBAL_XERC_KIT")),
+    ]
+    used = {sheet["properties"]["sheetId"] for sheet in sheets}
+    for tab in TABS:
+        if tab.gid not in used:
+            sheets.append(_sheet(tab.gid, tab.name, [[_idx_cell()]]))
+    payload = {"sheets": sheets}
+    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key, *_: payload)
+    monkeypatch.setattr("db.repo.DB_PATH", tmp_db_path)
+
+    summary = runner_mod.run_sync("dummy-key")
+    assert summary["status"] == "ok"
+
+    conn = sqlite3.connect(tmp_db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        names = [
+            row["canonical_name"]
+            for row in conn.execute(
+                "SELECT canonical_name FROM characters WHERE canonical_name LIKE '%Xerc%'"
+            )
+        ]
+        assert names == ["Xerc"]
+        descriptions = [
+            row["description"]
+            for row in conn.execute(
+                "SELECT s.description FROM skills s "
+                "JOIN character_forms cf ON cf.id=s.form_id "
+                "JOIN characters c ON c.id=cf.character_id "
+                "WHERE c.canonical_name='Xerc'"
+            )
+        ]
+        assert any("GLOBAL_XERC_KIT" in description for description in descriptions)
+        assert not any("JP_ONLY_KIT" in description for description in descriptions)
     finally:
         conn.close()
 

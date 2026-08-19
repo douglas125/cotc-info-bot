@@ -142,7 +142,8 @@ def _format_skill_line(s: sqlite3.Row) -> str:
     if name:
         bits.append(f"**{name}**")
     desc = " ".join((s["description"] or "").split())
-    if s["kind"] == "latent" and (s["initial_use"] or s["cooldown"]):
+    is_latent_power = s["kind"] == "latent" or s["name"] == "Latent Power"
+    if is_latent_power and (s["initial_use"] or s["cooldown"]):
         prefix = []
         if s["initial_use"]:
             prefix.append(f"init {s['initial_use']}t")
