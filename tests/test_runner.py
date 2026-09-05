@@ -6,6 +6,9 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures('offline_sprite_refresh')
+
+from tests.enemy_fixtures import fetch_with_enemies
 from config import TABS
 from sync import runner as runner_mod
 from sync.parsers import FormBlock, IndexEntry, SEA_GID, parse_sea_kits
@@ -240,6 +243,7 @@ def _index_sheet_with(*characters: tuple[str, str]) -> dict:
         "warrior":    0 * 11 + 1,
         "apothecary": 3 * 11 + 1,
         "scholar":    6 * 11 + 1,
+        "dancer":     7 * 11 + 1,
     }
     char_row = [_idx_cell()] * width
     for name, role in characters:
@@ -282,7 +286,7 @@ def test_run_sync_sea_kit_takes_precedence_and_emits_one_form(
     SEA tab's skills (not the role tab's) to win.
     """
     payload = _build_payload_with_overlap()
-    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key, *_: payload)
+    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", fetch_with_enemies(payload))
     monkeypatch.setattr("db.repo.DB_PATH", tmp_db_path)
 
     summary = runner_mod.run_sync("dummy-key")
@@ -348,7 +352,7 @@ def test_run_sync_publishes_only_global_xerc_with_sea_kit(
         if tab.gid not in used:
             sheets.append(_sheet(tab.gid, tab.name, [[_idx_cell()]]))
     payload = {"sheets": sheets}
-    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key, *_: payload)
+    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", fetch_with_enemies(payload))
     monkeypatch.setattr("db.repo.DB_PATH", tmp_db_path)
 
     summary = runner_mod.run_sync("dummy-key")
@@ -401,7 +405,7 @@ def test_run_sync_creates_form_for_sea_only_block(
     """SEA-only EX variants (e.g. Lynette EX) must surface as their own form
     even though they aren't listed in the Characters Index."""
     payload = _build_payload_with_sea_only_ex()
-    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key, *_: payload)
+    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", fetch_with_enemies(payload))
     monkeypatch.setattr("db.repo.DB_PATH", tmp_db_path)
 
     summary = runner_mod.run_sync("dummy-key")
@@ -475,7 +479,7 @@ def test_run_sync_aliases_ex_role_tab_to_index_entry(
     """Regression: NAME_ALIASES must apply to EX/EX2 forms, regardless of
     whether the marker comes before or after the bare name."""
     payload = _build_payload_with_aliased_ex(index_name, role_tab_name)
-    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key, *_: payload)
+    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", fetch_with_enemies(payload))
     monkeypatch.setattr("db.repo.DB_PATH", tmp_db_path)
 
     summary = runner_mod.run_sync("dummy-key")
@@ -530,7 +534,7 @@ def test_run_sync_persists_alignment_and_lv100_lv120_stats(
     """End-to-end: a role-tab block carrying Glory + Lv100/Lv120 stats lands
     in character_forms.alignment and character_stats."""
     payload = _build_payload_with_aviete_stats()
-    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key, *_: payload)
+    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", fetch_with_enemies(payload))
     monkeypatch.setattr("db.repo.DB_PATH", tmp_db_path)
 
     summary = runner_mod.run_sync("dummy-key")
@@ -578,7 +582,7 @@ def test_run_sync_creates_form_for_role_tab_only_ex_block(
     tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payload = _build_payload_with_role_tab_only_ex()
-    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", lambda api_key, *_: payload)
+    monkeypatch.setattr(runner_mod, "fetch_spreadsheet", fetch_with_enemies(payload))
     monkeypatch.setattr("db.repo.DB_PATH", tmp_db_path)
 
     summary = runner_mod.run_sync("dummy-key")
@@ -608,3 +612,30 @@ def test_run_sync_creates_form_for_role_tab_only_ex_block(
         assert any("ROLE_TAB_EX_KIT" in (d or "") for d in descs)
     finally:
         conn.close()
+
+
+def test_dancer_rinyuu_is_ex2_and_keeps_apothecary_global_kit(tmp_db_path, monkeypatch):
+    from db import repo
+    sheets = [
+        _index_sheet_with(("EX Rinyuu", "apothecary"), ("EX Rinyuu", "dancer")),
+        _sheet(1672823319, "Apothecaries", _block_rows("EX Rinyuu", "APOTHECARY_ROLE_KIT")),
+        _sheet(1697308519, "Dancers", _block_rows("EX Rinyuu", "DANCER_EX2_KIT")),
+        _sheet(SEA_GID, "Global Unique Kits", _block_rows("EX Rinyuu", "APOTHECARY_GLOBAL_KIT")),
+    ]
+    present = {s['properties']['sheetId'] for s in sheets}
+    sheets.extend(_sheet(t.gid, t.name, []) for t in TABS if t.gid not in present)
+    monkeypatch.setattr(runner_mod, 'fetch_spreadsheet', fetch_with_enemies({'sheets': sheets}))
+    monkeypatch.setattr(repo, 'DB_PATH', tmp_db_path)
+    runner_mod.run_sync('test-key')
+    conn = repo.connect(tmp_db_path)
+    forms = conn.execute(
+        'SELECT f.id, c.canonical_name, c.base_role, f.variant_kind FROM characters c '
+        'JOIN character_forms f ON f.character_id=c.id ORDER BY c.canonical_name'
+    ).fetchall()
+    assert [(r['canonical_name'], r['base_role'], r['variant_kind']) for r in forms] == [
+        ('EX Rinyuu', 'apothecary', 'ex'), ('EX2 Rinyuu', 'dancer', 'ex2')]
+    for form, expected in zip(forms, ['APOTHECARY_GLOBAL_KIT', 'DANCER_EX2_KIT']):
+        descriptions = [r[0] for r in conn.execute('SELECT description FROM skills WHERE form_id=?', (form['id'],))]
+        assert expected in descriptions
+        assert 'APOTHECARY_ROLE_KIT' not in descriptions
+    conn.close()

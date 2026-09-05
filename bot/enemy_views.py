@@ -1,7 +1,7 @@
 """Interactive `discord.ui.View` for `/enemy`.
 
 The view holds an enemy_id and the current selection. The Select dropdown
-lists only the ranks this particular enemy actually has (Rank1..EX3 for
+lists only the ranks this particular enemy actually has (Rank1..EX<n> for
 ranked encounters) plus a Fight notes option when seeded notes match.
 
 On selection the callback rebuilds the stats embed/weakness image or the
@@ -25,6 +25,7 @@ ENEMY_REMOVED_MSG = (
 
 
 NOTES_VALUE = "notes"
+RANKS_PER_PAGE = 22  # Reserve Discord's remaining three options for navigation/notes.
 
 
 class _EnemySelect(discord.ui.Select["EnemyView"]):
@@ -34,16 +35,26 @@ class _EnemySelect(discord.ui.Select["EnemyView"]):
         current: str,
         *,
         has_fight_notes: bool = False,
+        page: int | None = None,
     ) -> None:
+        self.current = current
+        current_rank = current.removeprefix("rank:")
+        self.page = (available.index(current_rank) // RANKS_PER_PAGE
+                     if page is None and current_rank in available else page or 0)
+        first = self.page * RANKS_PER_PAGE
         options = [
             discord.SelectOption(
-                label=enemy_embeds.RANK_LABELS[r],
-                description=enemy_embeds.RANK_DESCRIPTIONS[r],
+                label=enemy_embeds.rank_label(r),
+                description=enemy_embeds.rank_description(r),
                 value=f"rank:{r}",
                 default=(f"rank:{r}" == current),
             )
-            for r in available
+            for r in available[first:first + RANKS_PER_PAGE]
         ]
+        if self.page:
+            options.append(discord.SelectOption(label="Higher ranks", value=f"page:{self.page - 1}"))
+        if first + RANKS_PER_PAGE < len(available):
+            options.append(discord.SelectOption(label="Lower ranks", value=f"page:{self.page + 1}"))
         if has_fight_notes:
             options.append(discord.SelectOption(
                 label="Fight notes",
@@ -63,13 +74,21 @@ class _EnemySelect(discord.ui.Select["EnemyView"]):
         if view is None:
             await interaction.response.defer()
             return
-        conn = bot_db.conn()
         selected = self.values[0]
+        if selected.startswith("page:"):
+            view.clear_items()
+            view.add_item(_EnemySelect(
+                available=view.available_ranks, current=self.current,
+                has_fight_notes=view.has_fight_notes, page=int(selected.removeprefix("page:")),
+            ))
+            await interaction.response.edit_message(view=view)
+            return
+        conn = bot_db.conn()
         if selected == NOTES_VALUE:
             message = enemy_embeds.build_enemy_fight_notes_message(conn, view.enemy_id)
             current = NOTES_VALUE
         else:
-            rank: enemy_embeds.Rank = selected.removeprefix("rank:")  # type: ignore[assignment]
+            rank: enemy_embeds.Rank = selected.removeprefix("rank:")
             message = enemy_embeds.build_enemy_message(conn, view.enemy_id, rank)
             current = f"rank:{rank}"
         if message is None:
@@ -82,6 +101,7 @@ class _EnemySelect(discord.ui.Select["EnemyView"]):
             available=view.available_ranks,
             current=current,
             has_fight_notes=view.has_fight_notes,
+            page=self.page,
         ))
         if message.embeds:
             await interaction.response.edit_message(
@@ -122,7 +142,8 @@ class EnemyView(discord.ui.View):
         self.has_fight_notes = has_fight_notes
         self.available_ranks = sorted(
             available_ranks,
-            key=lambda rank: enemy_embeds.RANK_ORDER.get(rank, 99),
+            key=enemy_embeds.rank_order,
+            reverse=True,
         )
         if len(self.available_ranks) > 1 or self.has_fight_notes:
             self.add_item(_EnemySelect(

@@ -35,7 +35,7 @@ from sync.fetch import fetch_spreadsheet, iter_rows
 
 
 _OUT_DIR = Path(__file__).resolve().parent / "out"
-_RANK_RE = re.compile(r"^\s*(rank\s*[123]|ex\s*[123])\s*$", re.IGNORECASE)
+from enemy_ranks import RANK_PATTERN as _RANK_RE
 
 
 def _color_to_hex(c: dict[str, float] | None) -> str:

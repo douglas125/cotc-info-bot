@@ -237,22 +237,21 @@ CREATE TABLE IF NOT EXISTS arena_fight_notes (
 -- Modeling decisions (driven by verify/probe_enemies.py findings):
 --  * The Lvl-N display tabs hold the user-facing name + a per-cell rank
 --    dropdown. The displayed stats are whichever rank was last selected, so
---    they cannot drive a multi-rank /enemy. The *Data tabs hold all 6 ranks
+--    they cannot drive a multi-rank /enemy. The *Data tabs hold all available ranks
 --    × N members per encounter, indexed by encounter name.
 --  * One `enemies` row per (canonical_name, category) — the same encounter
 --    can appear in multiple Lvl-N tabs and we want each as a separate entry.
---  * One `enemy_forms` row per rank (Rank1/2/3, EX1/2/3, or 'Default' for
+--  * One `enemy_forms` row per rank (Rank1/2/3, numbered EX ranks, or 'Default' for
 --    NPCs which only have one stat row).
 --  * Stats stored long-form in `enemy_member_stats`: variable encounter
 --    composition (1 leader, optionally 1-2 adds) is data-driven by position.
---  * Weakness icons are inserted images, not API-readable. Break-shield
---    counts are folded into the stats grid as the 'Shields' stat. The /enemy
---    embed adds a "see sheet for weakness icons" link.
+--  * Weakness icons are readable named-range formulas. Break-shield
+--    counts are stored as the Shields stat alongside each member's other stats.
 
 CREATE TABLE IF NOT EXISTS enemies (
     id              INTEGER PRIMARY KEY,
     canonical_name  TEXT NOT NULL,        -- e.g. 'Sly Leader Lloris'
-    category        TEXT NOT NULL,        -- 'Lvl 1' | ... | 'Solistia Lvl 75' | '120 NPCs'
+    category        TEXT NOT NULL,        -- 'Lvl 1' | ... | 'Solistia Lvl 75' | '120 NPCs' | '140 NPCs'
     region          TEXT,                 -- 'Osterra' | 'Solistia' | 'NPCs'
     sheet_gid       INTEGER,
     source_row      INTEGER,
@@ -273,8 +272,8 @@ CREATE INDEX IF NOT EXISTS ix_enemies_search_key ON enemies(search_key);
 CREATE TABLE IF NOT EXISTS enemy_forms (
     id              INTEGER PRIMARY KEY,
     enemy_id        INTEGER NOT NULL REFERENCES enemies(id) ON DELETE CASCADE,
-    rank            TEXT NOT NULL,         -- 'Rank1'|'Rank2'|'Rank3'|'EX1'|'EX2'|'EX3'|'Default'
-    rank_order      INTEGER NOT NULL,      -- 1..6 for ranked, 0 for NPC 'Default'
+    rank            TEXT NOT NULL,         -- 'Rank1'|'Rank2'|'Rank3'|'EX<n>'|'Default'
+    rank_order      INTEGER NOT NULL,      -- Rank n => n; EX n => 3+n; NPC Default => 0
     UNIQUE(enemy_id, rank)
 );
 CREATE INDEX IF NOT EXISTS ix_enemy_forms_enemy ON enemy_forms(enemy_id);

@@ -139,7 +139,7 @@ WEAPON_TO_ROLE: dict[str, str] = {
 
 
 # Adversary Log CotC — sibling enemy spreadsheet.
-ENEMIES_SPREADSHEET_ID = "1Of4zz3rlV973Rt2kzHqoSWjiJmfhb77iMnAYofCT3Gs"
+ENEMIES_SPREADSHEET_ID = "1zcc5VqORiplxZ0tnff8wxuvPDJ0AUneljT16RwMEOa8"
 ENEMIES_SPREADSHEET_URL = f"https://docs.google.com/spreadsheets/d/{ENEMIES_SPREADSHEET_ID}"
 
 
@@ -153,17 +153,18 @@ class EnemyTabSpec:
 
 # GIDs and metadata discovered via verify/probe_enemies.py. Each Lvl-N tab
 # is a "category" of enemies (the level at which the player encounters them).
-# 120 NPCs is single-rank; the parser treats it as is_npc=True.
+# Both NPC categories are single-rank; the parser treats them as is_npc=True.
 ENEMIES_TABS: list[EnemyTabSpec] = [
     EnemyTabSpec(336420009,  "Lvl 1",            "Lvl 1",            "Osterra"),
     EnemyTabSpec(462109912,  "Lvl 25",           "Lvl 25",           "Osterra"),
     EnemyTabSpec(1105319828, "Lvl 50",           "Lvl 50",           "Osterra"),
-    EnemyTabSpec(441922710,  "Lvl 75",           "Lvl 75",           "Osterra"),
+    EnemyTabSpec(2066203872, "Lvl 75",           "Lvl 75",           "Osterra"),
     EnemyTabSpec(1544805455, "Solistia Lvl 1",   "Solistia Lvl 1",   "Solistia"),
     EnemyTabSpec(795720982,  "Solistia Lvl 25",  "Solistia Lvl 25",  "Solistia"),
     EnemyTabSpec(1229169620, "Solistia Lvl 50",  "Solistia Lvl 50",  "Solistia"),
     EnemyTabSpec(945280021,  "Solistia Lvl 75",  "Solistia Lvl 75",  "Solistia"),
     EnemyTabSpec(2117870435, "120 NPCs",         "120 NPCs",         "NPCs"),
+    EnemyTabSpec(1358661359, "140 NPCs",         "140 NPCs",         "NPCs"),
 ]
 ENEMIES_TABS_BY_GID: dict[int, EnemyTabSpec] = {t.gid: t for t in ENEMIES_TABS}
 
@@ -172,10 +173,12 @@ ENEMY_DATA_TAB_GIDS: dict[str, int] = {
     "Osterra":  758398692,   # 'Osterra Data'
     "Solistia": 761197564,   # 'Solistia Data'
     "NPCs":     1230510791,  # '120 NPCs Data'
+    "NPCs140":  493800596,   # '140 NPCs Data'
 }
 
 # Display tabs whose blocks should be treated as NPCs (single-rank, no dropdown).
-ENEMY_NPC_TAB_GIDS: frozenset[int] = frozenset({2117870435})
+ENEMY_NPC_DATA_KEYS: dict[int, str] = {2117870435: "NPCs", 1358661359: "NPCs140"}
+ENEMY_NPC_TAB_GIDS: frozenset[int] = frozenset(ENEMY_NPC_DATA_KEYS)
 
 
 # Seed Story Content — sibling pet spreadsheet.
@@ -327,6 +330,26 @@ NAME_ALIASES: dict[str, str] = {
     "Ri'tu":       "L'eeto",      # JP↔EN transliteration drift
     "No. 7":       "Emil",        # in-game alias for the cleric Emil
 }
+
+
+# The source reuses EX Rinyuu for two jobs. User-confirmed on 2026-09-05:
+# the dancer is EX2; the apothecary/Global Unique Kit remains EX Rinyuu.
+# Keep this separate from global aliases so the first EX is never renamed.
+ROLE_NAME_ALIASES: dict[tuple[str, str], str] = {
+    ("dancer", "EX Rinyuu"): "EX2 Rinyuu",
+}
+
+
+def canonicalize_role_name(name: str, role: str | None) -> str:
+    """Apply reviewed, job-scoped form aliases, accepting EX prefix/suffix."""
+    if role is None:
+        return name
+    prefix, bare, suffix = _split_variant(name)
+    key = f"{prefix or suffix} {bare}".strip().casefold()
+    for (alias_role, alias_name), canonical in ROLE_NAME_ALIASES.items():
+        if role.casefold() == alias_role and key == alias_name.casefold():
+            return canonical
+    return name
 
 
 def _split_variant(name: str) -> tuple[str, str, str]:

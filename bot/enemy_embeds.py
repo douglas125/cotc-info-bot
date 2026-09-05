@@ -10,7 +10,7 @@ from io import BytesIO
 import json
 import sqlite3
 import textwrap
-from typing import Any, Literal
+from typing import Any
 
 import discord
 
@@ -28,28 +28,7 @@ from bot.embeds import (
 from config import ENEMIES_SPREADSHEET_URL
 from db import repo
 
-Rank = Literal["Rank1", "Rank2", "Rank3", "EX1", "EX2", "EX3", "Default"]
-RANKS: tuple[Rank, ...] = ("EX3", "EX2", "EX1", "Rank3", "Rank2", "Rank1")
-RANK_LABELS: dict[Rank, str] = {
-    "Rank1": "Rank 1",
-    "Rank2": "Rank 2",
-    "Rank3": "Rank 3",
-    "EX1": "EX 1",
-    "EX2": "EX 2",
-    "EX3": "EX 3",
-    "Default": "Default",
-}
-RANK_DESCRIPTIONS: dict[Rank, str | None] = {
-    "Rank1": "Lowest difficulty",
-    "Rank2": None,
-    "Rank3": None,
-    "EX1": "Endgame difficulty",
-    "EX2": None,
-    "EX3": "Highest difficulty",
-    "Default": "Single-stat NPC",
-}
-RANK_ORDER: dict[str, int] = {r: i for i, r in enumerate(RANKS, start=1)}
-RANK_ORDER["Default"] = 0
+from enemy_ranks import Rank, normalize_rank, rank_order, rank_label, rank_description
 
 
 @dataclass(frozen=True)
@@ -97,7 +76,7 @@ def available_ranks(conn: sqlite3.Connection, enemy_id: int) -> list[Rank]:
     seen = {row["rank"] for row in rows}
     if "Default" in seen:
         return ["Default"]
-    return [r for r in RANKS if r in seen]
+    return sorted((r for r in seen if normalize_rank(r) == r), key=rank_order, reverse=True)
 
 
 def default_rank(ranks: list[Rank]) -> Rank | None:
@@ -105,7 +84,7 @@ def default_rank(ranks: list[Rank]) -> Rank | None:
         return None
     if "Default" in ranks:
         return "Default"
-    return sorted(ranks, key=lambda r: RANK_ORDER.get(r, 99))[0]
+    return max(ranks, key=rank_order)
 
 
 def _format_stat_value(value: str) -> str:
@@ -499,7 +478,7 @@ def _build_enemy_parts(
 
     stats_rows = repo.get_enemy_member_stats(conn, form["id"])
     weakness_rows = repo.get_enemy_weaknesses(conn, form["id"])
-    embed = _new_enemy_header_embed(enemy, RANK_LABELS.get(rank, rank))
+    embed = _new_enemy_header_embed(enemy, rank_label(rank))
     for name, value, inline in _build_member_stat_fields(stats_rows):
         embed.add_field(name=name, value=value, inline=inline)
     _attach_footer(embed, repo.latest_sync_run(conn))

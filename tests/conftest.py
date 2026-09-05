@@ -27,3 +27,12 @@ def tmp_db_path(tmp_path: Path) -> Path:
     repo.bootstrap(conn)
     conn.close()
     return db
+
+
+@pytest.fixture()
+def offline_sprite_refresh(monkeypatch):
+    """Runner tests must not fetch the external sprite wiki."""
+    monkeypatch.setattr('scripts.refresh_sprite_urls.refresh_sprite_urls', lambda conn: {
+        'unmatched': [], 'missing': [], 'total_mapped': 0,
+        'character_total': 0, 'page_mapped': 0, 'overrides': 0,
+    })

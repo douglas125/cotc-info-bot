@@ -18,7 +18,7 @@ from config import (
     canonicalize_name,
 )
 from db import repo
-from sync.enemy_parsers import parse_all as parse_enemies, rank_order
+from sync.enemy_parsers import parse_all as parse_enemies, rank_order, validate_source
 from sync.fetch import fetch_spreadsheet, sheet_by_gid
 from sync.parsers import (
     Anchor,
@@ -231,7 +231,12 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             repo.rebuild_fts(conn)
 
             progress("Parsing enemy spreadsheet...")
+            validate_source(enemy_payload, ENEMY_DATA_TAB_GIDS)
             enemy_parse = parse_enemies(enemy_payload, ENEMY_DATA_TAB_GIDS)
+            if not enemy_parse.enemies:
+                raise ValueError("Enemy import is empty; refusing to replace the mirror")
+            for warning in enemy_parse.warnings:
+                progress(f"  WARN: {warning}")
             for name, tab in enemy_parse.unmatched:
                 progress(f"  WARN: enemy display block unmatched: '{name}' on tab '{tab}'")
             progress(f"  Parsed {len(enemy_parse.enemies)} enemies "
@@ -319,6 +324,7 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                  f"Pets={c['pets']}.")
         return {"run_id": run_id, "status": "ok",
                 "unmatched_enemies": list(enemy_parse.unmatched),
+                "enemy_warnings": list(enemy_parse.warnings),
                 "pet_warnings": list(pet_warnings),
                 **c}
 

@@ -204,7 +204,7 @@ def test_non_numeric_stat_values_pass_through(tmp_db_path: Path) -> None:
 def test_safe_enemy_url_prefixes_anchor() -> None:
     url = enemy_embeds._safe_enemy_url("#gid=123&range=A1")
     assert url is not None
-    assert "1Of4zz3rlV973Rt2kzHqoSWjiJmfhb77iMnAYofCT3Gs" in url
+    assert "1zcc5VqORiplxZ0tnff8wxuvPDJ0AUneljT16RwMEOa8" in url
     assert url.endswith("#gid=123&range=A1")
 
 

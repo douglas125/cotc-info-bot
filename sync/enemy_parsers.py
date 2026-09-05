@@ -3,8 +3,8 @@
 Two structurally different inputs feed this parser:
 
 1.  **Data tabs** (`Osterra Data`, `Solistia Data`, `120 NPCs Data`) are the
-    canonical source of stats. For ranked enemies they hold all 6 ranks
-    (Rank 1/2/3, EX1/2/3) × N members per encounter, in vertical 12-col
+    canonical source of stats. Ranked enemies have Rank 1/2/3 and populated
+    numbered EX ranks × N members per encounter, in vertical 12-col
     chunks separated by white spacer columns. NPCs are flat — one row per
     NPC, no rank dimension.
 
@@ -35,7 +35,9 @@ from config import (
     ENEMIES_TABS,
     ENEMY_NAME_ALIASES,
     ENEMY_NPC_TAB_GIDS,
+    ENEMY_NPC_DATA_KEYS,
 )
+from enemy_ranks import RANK_PATTERN, normalize_rank, rank_order
 from sync.fetch import iter_rows, sheet_by_gid
 from sync.parsers import (
     _cell_bg_hex, _cell_color_hex, _cell_text, _formula, _index_to_col_letters,
@@ -52,18 +54,13 @@ _STAT_HEADER_LABELS = frozenset({
     "Shields", "HP", "P. Atk", "P. Def", "E. Atk", "E. Def",
     "Speed", "Crit", "CritDef", "Equip Atk",
 })
-_RANKS = ("Rank 1", "Rank 2", "Rank 3", "EX1", "EX2", "EX3")
-_RANK_KEYS = ("Rank1", "Rank2", "Rank3", "EX1", "EX2", "EX3")
-_RANK_BY_NORMALIZED = {
-    re.sub(r"\s+", "", r).lower(): k for r, k in zip(_RANKS, _RANK_KEYS)
-}
 
 # Display-tab block layout (from Template tab):
 _DISPLAY_NAME_ROW = 3       # 0-based: r3 holds 'Sly Leader Lloris' / 'EX3' badge
 _DISPLAY_RANK_COL_OFFSET = 3
 _DISPLAY_BLOCK_HEIGHT = 13  # rows 3..15 are the block body
 
-_RANK_BADGE_RE = re.compile(r"^\s*(rank\s*[123]|ex\s*[123])\s*$", re.IGNORECASE)
+_RANK_BADGE_RE = RANK_PATTERN
 _DISPLAY_AUX_LABEL_RE = re.compile(r"^\s*wave\s+\d+\s*$", re.IGNORECASE)
 
 # Display-tab weakness icons are formula-named-range references like '=Sword'.
@@ -99,12 +96,15 @@ def _canonical_weakness(label: str) -> str:
 
 @dataclass
 class MemberRanks:
-    """One member of an encounter (e.g. 'Leader Lloris') and its 6-rank stats.
+    """One member of an encounter (e.g. 'Leader Lloris') and its available rank stats.
 
     `rank_stats[rank_key]` is `{stat_name: stat_value, ...}`.
     """
     member_name: str
     rank_stats: dict[str, dict[str, str]] = field(default_factory=dict)
+    source_start_row: int = -1
+    source_end_row: int = -1
+    rank_col: int = -1
 
 
 @dataclass
@@ -147,6 +147,8 @@ class DisplayBlock:
     # "stat_name", "stat_value"}) and the rank label to bucket them under.
     inline_rank: str | None = None
     inline_stats: list[dict[str, str]] = field(default_factory=list)
+    # HP formulas identify the underlying member rows, even after renames.
+    member_formulas: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -220,17 +222,18 @@ def parse_data_tab(sheet: dict[str, Any], region: str) -> dict[str, EncounterDat
             rank_text = _cell_text(row[rank_col])
             if not rank_text:
                 break
-            rank_key = _RANK_BY_NORMALIZED.get(re.sub(r"\s+", "", rank_text).lower())
-            if rank_key is None:
+            rank_key = normalize_rank(rank_text)
+            if rank_key is None or rank_key == "Default":
                 break
             name_text = (_cell_text(row[member_name_col])
                          if member_name_col < len(row) else "")
             if name_text:
                 if current_member is not None:
                     encounter.members.append(current_member)
-                current_member = MemberRanks(member_name=name_text)
+                current_member = MemberRanks(member_name=name_text, source_start_row=r_i, rank_col=rank_col)
             elif current_member is None:
-                current_member = MemberRanks(member_name=encounter_name)
+                current_member = MemberRanks(member_name=encounter_name, source_start_row=r_i, rank_col=rank_col)
+            current_member.source_end_row = r_i
             stats: dict[str, str] = {}
             for s_i, label in enumerate(stat_labels):
                 c = first_stat_col + s_i
@@ -369,26 +372,84 @@ def _is_display_aux_label(text: str) -> bool:
     return bool(_DISPLAY_AUX_LABEL_RE.match(text))
 
 
+def _formula_args(expression: str) -> list[str]:
+    """Split IF/IFS arguments without evaluating spreadsheet expressions."""
+    args, start, depth, quote = [], 0, 0, None
+    for index, char in enumerate(expression):
+        if quote:
+            if char == quote:
+                quote = None
+        elif char in ('"', "'"):
+            quote = char
+        elif char == '(':
+            depth += 1
+        elif char == ')':
+            depth -= 1
+        elif char == ',' and depth == 0:
+            args.append(expression[start:index].strip())
+            start = index + 1
+    args.append(expression[start:].strip())
+    return args
+
+
+def _selected_formula(formula: str, rows: list[list[dict[str, Any]]]) -> str:
+    """Select the source's current wave in simple IF/IFS formulas.
+
+    Only equality against a local text cell and literal TRUE are understood.
+    Unknown expressions are left unresolved, never executed or guessed.
+    """
+    match = re.fullmatch(r'=\s*(IF|IFS)\((.*)\)', formula.strip(), re.I | re.S)
+    if match is None:
+        return formula
+    args = _formula_args(match[2])
+    if match[1].upper() == 'IFS':
+        pairs = list(zip(args[::2], args[1::2]))
+    elif len(args) >= 2:
+        pairs = [(args[0], args[1])]
+    else:
+        return formula
+    for condition, value in pairs:
+        test = re.fullmatch(r'\$?([A-Z]+)\$?(\d+)\s*=\s*"([^"]*)"', condition, re.I)
+        if condition.lower() == 'true':
+            selected = True
+        elif test:
+            col = 0
+            for char in test[1].upper():
+                col = col * 26 + ord(char) - ord('A') + 1
+            row = int(test[2]) - 1
+            selected = (0 <= row < len(rows) and col <= len(rows[row])
+                        and _cell_text(rows[row][col - 1]) == test[3])
+        else:
+            return formula
+        if selected:
+            return _selected_formula('=' + value, rows)
+    if match[1].upper() == 'IF' and len(args) == 3:
+        return _selected_formula('=' + args[2], rows)
+    return formula
+
+
+def _block_end_col(rows: list[list[dict[str, Any]]], name_row: int, name_col: int) -> int:
+    row = rows[name_row]
+    return next((c for c in range(name_col + 1, len(row))
+                 if _cell_bg_hex(row[c]) == _BLOCK_SEPARATOR_BG), min(name_col + 12, len(row)))
+
+
 def _extract_weaknesses_for_block(
     rows: list[list[dict[str, Any]]], name_row: int, name_col: int,
 ) -> list[list[str]]:
     """Read the per-position weakness lists from a display block.
 
     Block weakness cells are formula-named-range references like '=Sword'
-    living in the rightward part of the block. They sit on the three rows
+    living in the rightward part of the block. They sit on the rows
     starting at `name_row + 3` (one row per encounter position). Stat-row
     labels (=HP, =Atk) and lookups (=B4) live in the same column range — we
     filter them by whitelist.
     """
     out: list[list[str]] = []
-    # Block widths vary (10..12 cols depending on layout). 12 is a safe upper
-    # bound — extra columns are dark separators with empty formulas.
-    col_window = range(name_col, name_col + 12)
-    # Scan three rows — that covers every observed layout (1-, 2-, and
-    # 3-position encounters; the 5-position 120 NPCs widgets only ever fill
-    # three rows on the display surface). Stop at the first row with no
-    # weaknesses.
-    for offset in range(3):
+    # Wider multi-member panels end at the next dark block separator.
+    col_window = range(name_col, _block_end_col(rows, name_row, name_col))
+    # Keep empty positions aligned; NPC groups may have more than three members.
+    for offset in range(max(3, len(_member_columns(rows, name_row, name_col)))):
         row_idx = name_row + 3 + offset
         if row_idx >= len(rows):
             break
@@ -397,16 +458,15 @@ def _extract_weaknesses_for_block(
         for c_i in col_window:
             if c_i >= len(row):
                 break
-            f = _formula(row[c_i])
+            f = _selected_formula(_formula(row[c_i]), rows)
             if not f.startswith("="):
                 continue
             label = f[1:].strip()
             if label in _WEAKNESS_NAMES:
                 weaknesses.append(_canonical_weakness(label))
-        if weaknesses:
-            out.append(weaknesses)
-        else:
-            break
+        out.append(weaknesses)
+    while out and not out[-1]:
+        out.pop()
     return out
 
 
@@ -427,11 +487,85 @@ _STAT_INT_RE = re.compile(r"^-?\d{1,3}(?:,\d{3})+$|^-?\d+$")
 
 
 def _is_hp_value(s: str) -> bool:
-    return bool(_HP_INT_RE.match(s))
+    return bool(_HP_INT_RE.match(_integer_text(s)))
 
 
 def _is_stat_value(s: str) -> bool:
-    return bool(_STAT_INT_RE.match(s))
+    return bool(_STAT_INT_RE.match(_integer_text(s)))
+
+
+def _integer_text(value: str) -> str:
+    # Some data cells format integer HP with a .00 suffix.
+    return re.sub(r'\.0+$', '', value.strip())
+
+
+_DATA_REFERENCE_RE = re.compile(
+    r"(?:'(?P<quoted>(?:[^']|'')+)'|(?P<plain>[A-Za-z_][A-Za-z_0-9 ]*))!"
+    r"\$?(?P<col>[A-Z]+)\$?(?P<row>[1-9]\d*)", re.IGNORECASE,
+)
+
+
+def _data_reference(formula: str) -> tuple[str, int, int] | None:
+    """Read a local A1 reference, never evaluate arbitrary formula text."""
+    expression = formula.strip().removeprefix('=')
+    lookup = re.fullmatch(r'VLOOKUP\((.*)\)', expression, re.I | re.S)
+    if lookup:
+        args = _formula_args(lookup[1])
+        if len(args) < 2:
+            return None
+        expression = args[1]
+    match = _DATA_REFERENCE_RE.match(expression)
+    if match is None:
+        return None
+    suffix = expression[match.end():]
+    if suffix and not re.fullmatch(r':\$?[A-Z]+\$?[1-9]\d*', suffix, re.I):
+        return None
+    col = 0
+    for char in match['col'].upper():
+        col = col * 26 + ord(char) - ord('A') + 1
+    return ((match['quoted'] or match['plain']).replace("''", "'"),
+            int(match['row']) - 1, col - 1)
+
+
+def _member_columns(rows: list[list[dict[str, Any]]], name_row: int, name_col: int) -> list[int]:
+    """Find consecutive HP columns, including formulas whose values are not ready."""
+    if name_row + 4 >= len(rows):
+        return []
+    row = rows[name_row + 4]
+
+    def is_member(col: int) -> bool:
+        cell = row[col]
+        formula = _selected_formula(_formula(cell), rows)
+        return _is_hp_value(_cell_text(cell)) or _data_reference(formula) is not None
+
+    first = next((c for c in range(name_col, min(name_col + 4, len(row))) if is_member(c)), None)
+    if first is None:
+        return []
+    columns = []
+    for col in range(first, min(_block_end_col(rows, name_row, name_col), len(row))):
+        if not is_member(col):
+            break
+        columns.append(col)
+    return columns
+
+
+def _inline_shields(rows: list[list[dict[str, Any]]], name_row: int, name_col: int, count: int) -> dict[int, str]:
+    """The SH icon labels the position/shield strip beside the stats grid."""
+    if name_row + 2 >= len(rows):
+        return {}
+    header = rows[name_row + 2]
+    col = next((c for c in range(name_col, min(_block_end_col(rows, name_row, name_col), len(header)))
+                if _formula(header[c]).strip().lower() == '=sh'), None)
+    if col is None:
+        return {}
+    shields = {}
+    for position in range(count):
+        ri = name_row + 3 + position
+        if ri < len(rows) and col + 1 < len(rows[ri]):
+            value = _integer_text(_cell_text(rows[ri][col + 1]))
+            if _is_stat_value(value):
+                shields[position] = value
+    return shields
 
 
 def _extract_inline_block_stats(
@@ -442,11 +576,8 @@ def _extract_inline_block_stats(
 ) -> tuple[str | None, list[dict[str, str]]]:
     """Extract single-rank stats from a display block's visible grid.
 
-    Used as a fallback when an unmatched display block has its stats hard-
-    coded in cell values (rather than VLOOKUPs into the data tab). Three of
-    the four Lvl-75 unmatched encounters are this shape — the data tab has
-    no row for them, but the maintainer typed the EX3 stat numbers straight
-    onto the display widget.
+    Used when a block has no matching data entry or mixes data formulas with
+    manually entered members. Values apply only to the selected rank.
 
     Returns (rank_key, [stat_rows]) or (None, []) if the block has no
     parseable inline stats (e.g. the formulas resolve to '#REF!').
@@ -468,37 +599,28 @@ def _extract_inline_block_stats(
     rank_label_raw = _cell_text(rows[name_row][rank_col])
     if not rank_label_raw:
         return None, []
-    rank_key = _RANK_BY_NORMALIZED.get(re.sub(r"\s+", "", rank_label_raw).lower())
+    rank_key = normalize_rank(rank_label_raw)
     if rank_key is None:
         return None, []
 
-    hp_row_idx = name_row + 4
-    if hp_row_idx >= len(rows):
+    columns = _member_columns(rows, name_row, name_col)
+    if not columns:
         return None, []
-    hp_row = rows[hp_row_idx]
-    first_col: int | None = None
-    for c in range(name_col, min(name_col + 4, len(hp_row))):
-        if _is_hp_value(_cell_text(hp_row[c])):
-            first_col = c
-            break
-    if first_col is None:
-        return None, []
-    n_positions = 0
-    for c in range(first_col, min(name_col + 12, len(hp_row))):
-        if _is_hp_value(_cell_text(hp_row[c])):
-            n_positions += 1
-        else:
-            break
 
     stat_rows: list[dict[str, str]] = []
-    for pos in range(n_positions):
-        col = first_col + pos
+    shields = _inline_shields(rows, name_row, name_col, len(columns))
+    for pos, col in enumerate(columns):
+        if not _positive_hp(_cell_text(rows[name_row + 4][col])):
+            return None, []
+        if pos in shields:
+            stat_rows.append({"position": pos, "member_name": None,
+                              "stat_name": "Shields", "stat_value": shields[pos]})
         for s_offset, stat_name in enumerate(_DISPLAY_STAT_NAMES):
             r = name_row + 4 + s_offset
             if r >= len(rows):
                 break
             row = rows[r]
-            val = _cell_text(row[col]) if col < len(row) else ""
+            val = _integer_text(_cell_text(row[col])) if col < len(row) else ""
             # Only keep cells that look like stat values; reject leaked
             # weakness/shields panel content like 'Notes' or single-digit
             # slot indicators that aren't real stats for this position.
@@ -593,6 +715,8 @@ def parse_display_tab(sheet: dict[str, Any], spec: EnemyTabSpec) -> list[Display
             inline_stats=inline_stats,
             weaknesses_by_position=weaknesses,
             member_names_by_position=member_names,
+            member_formulas=[_selected_formula(_formula(rows[name_row + 4][c]), rows)
+                             for c in _member_columns(rows, name_row, name_col)],
         ))
     return out
 
@@ -700,6 +824,7 @@ class ParseResult:
     enemies: list[ParsedEnemy] = field(default_factory=list)
     # (display_name, source_tab_name) for each block we couldn't bind to data.
     unmatched: list[tuple[str, str]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 def _try_inline_fallback(block: DisplayBlock, result: ParseResult) -> bool:
@@ -726,128 +851,147 @@ def _try_inline_fallback(block: DisplayBlock, result: ParseResult) -> bool:
     return True
 
 
-def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseResult:
-    """Top-level: produce a list of fully-merged ParsedEnemy records.
+def _positive_hp(value: str) -> bool:
+    return _is_stat_value(value) and int(_integer_text(value).replace(",", "")) > 0
 
-    `data_tab_gids` maps region label ('Osterra' | 'Solistia' | 'NPCs') to the
-    data-tab gid in the payload. The parser uses these to look up stats.
+
+def _member_stats(members: list[MemberRanks], name: str, result: ParseResult) -> dict[str, list[dict[str, Any]]]:
+    """Only publish ranks with usable HP for every encounter member."""
+    ranks = sorted({rank for member in members for rank in member.rank_stats}, key=rank_order)
+    out = {}
+    for rank in ranks:
+        values = [member.rank_stats.get(rank, {}) for member in members]
+        if not any(any(stats.values()) for stats in values):
+            continue  # An entirely blank future rank is a normal placeholder.
+        if not all(_positive_hp(stats.get("HP", "")) for stats in values):
+            result.warnings.append(f"{name} {rank}: incomplete member HP; rank omitted")
+            continue
+        stat_rows = []
+        for position, (member, stats) in enumerate(zip(members, values)):
+            for stat, value in stats.items():
+                if not value:
+                    continue
+                if not _is_stat_value(value):
+                    result.warnings.append(f"{name} {rank} member {position + 1}: invalid {stat} {value!r}; omitted")
+                    continue
+                stat_rows.append(dict(position=position, member_name=member.member_name,
+                                      stat_name=stat, stat_value=_integer_text(value)))
+        out[rank] = stat_rows
+    return out
+
+
+def validate_source(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> None:
+    """Fail before replacing a mirror when a required source tab disappears."""
+    if payload.get('spreadsheetId') != ENEMIES_SPREADSHEET_ID:
+        raise ValueError('Enemy payload is not from the configured replacement source')
+    required = {spec.gid for spec in ENEMIES_TABS} | set(data_tab_gids.values())
+    present = {sheet['properties']['sheetId'] for sheet in payload.get('sheets', [])}
+    missing = sorted(required - present)
+    if missing:
+        raise ValueError(f"Enemy source missing required tab gids: {missing}")
+
+
+def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseResult:
+    """Merge display encounters with all available ranks from their data members.
+
+    Formula references identify members independently of display names. Named
+    reconciliation remains a fallback for blocks without those references.
     """
-    # 1. Parse data tabs by region.
-    encounters_by_region: dict[str, dict[str, EncounterData]] = {}
+    sheets_by_title = {s['properties']['title']: s for s in payload.get('sheets', [])}
+    encounters_by_region = {}
+    npc_catalogs = {}
+    members_by_source = {}
+    npc_data_keys = set(ENEMY_NPC_DATA_KEYS.values())
     for region, gid in data_tab_gids.items():
-        if region == "NPCs":
-            continue  # NPCs handled separately
         sheet = sheet_by_gid(payload, gid)
         if sheet is None:
             continue
-        encounters_by_region[region] = parse_data_tab(sheet, region)
-    npc_data: dict[str, NpcStat] = {}
-    npc_gid = data_tab_gids.get("NPCs")
-    if npc_gid is not None:
-        sheet = sheet_by_gid(payload, npc_gid)
-        if sheet is not None:
-            npc_data = parse_npc_data_tab(sheet)
-
-    # 2. Pre-compute name lookups once per region so reconcile is O(1) per
-    #    display block instead of O(N) per call.
-    region_indexes = {
-        region: _build_name_index(list(encounters.keys()))
-        for region, encounters in encounters_by_region.items()
-    }
-    npc_index = _build_name_index(list(npc_data.keys()))
-
-    # 3. Walk display tabs and merge each block with its data-tab match.
+        if region in npc_data_keys:
+            npc_catalogs[region] = parse_npc_data_tab(sheet)
+            continue
+        encounters = parse_data_tab(sheet, region)
+        encounters_by_region[region] = encounters
+        for encounter in encounters.values():
+            for member in encounter.members:
+                for row in range(member.source_start_row, member.source_end_row + 1):
+                    members_by_source[(gid, row, member.rank_col)] = member
+    region_indexes = {region: _build_name_index(list(encounters))
+                      for region, encounters in encounters_by_region.items()}
     result = ParseResult()
     for spec in ENEMIES_TABS:
         sheet = sheet_by_gid(payload, spec.gid)
         if sheet is None:
             continue
-        blocks = parse_display_tab(sheet, spec)
-        for block in blocks:
+        for block in parse_display_tab(sheet, spec):
+            members = []
             if block.is_npc:
-                # NPC encounters are multi-position: the display block lists
-                # each member by name, and `120 NPCs Data` is a flat catalog
-                # of individual creatures keyed by name. Look up each member
-                # independently and stitch the result into one ParsedEnemy.
-                member_names = block.member_names_by_position or [block.display_name]
-                stats_rows: list[dict[str, Any]] = []
-                for pos, member_display in enumerate(member_names):
-                    key = reconcile_display_to_data(member_display, npc_index)
+                data_key = ENEMY_NPC_DATA_KEYS[spec.gid]
+                catalog = npc_catalogs.get(data_key, {})
+                index = _build_name_index(list(catalog))
+                names = block.member_names_by_position or [block.display_name]
+                # Direct cell formulas on 140 NPCs point at individual catalog rows.
+                direct = [_data_reference(f) if not f.upper().startswith('=VLOOKUP(') else None
+                          for f in block.member_formulas]
+                if any(direct):
+                    names = []
+                    for pos, ref in enumerate(direct):
+                        if ref is None:
+                            names.append(block.member_names_by_position[pos]
+                                         if pos < len(block.member_names_by_position) else "")
+                            continue
+                        target = sheets_by_title.get(ref[0]) if ref else None
+                        if target is None or target['properties']['sheetId'] != data_tab_gids.get(data_key):
+                            names.append("")
+                            continue
+                        rows = iter_rows(target)
+                        names.append(_cell_text(rows[ref[1]][1])
+                                     if ref[1] < len(rows) and len(rows[ref[1]]) > 1 else "")
+                for name in names:
+                    key = reconcile_display_to_data(name, index) if name else None
                     if key is None:
-                        result.unmatched.append((member_display, spec.name))
+                        result.unmatched.append((name or block.display_name, spec.name))
+                        break
+                    npc = catalog[key]
+                    members.append(MemberRanks(npc.npc_name, {"Default": npc.stats}))
+                if len(members) != len(names):
+                    continue
+            else:
+                refs = [_data_reference(f) for f in block.member_formulas]
+                if any(refs) and not all(refs) and _try_inline_fallback(block, result):
+                    result.warnings.append(f"{block.display_name}: mixed inline/data members; only displayed rank imported")
+                    continue
+                if any(refs):
+                    # Resolve every displayed position; never silently drop a member.
+                    for ref in refs:
+                        target = sheets_by_title.get(ref[0]) if ref else None
+                        gid = target['properties']['sheetId'] if target else None
+                        member = members_by_source.get((gid, ref[1], ref[2])) if ref else None
+                        if gid != data_tab_gids.get(block.region) or member is None:
+                            result.unmatched.append((block.display_name, spec.name))
+                            result.warnings.append(f"{block.display_name}: unresolved member data reference")
+                            break
+                        members.append(member)
+                    if len(members) != len(refs):
                         continue
-                    npc = npc_data[key]
-                    for stat, val in npc.stats.items():
-                        stats_rows.append({
-                            "position": pos,
-                            "member_name": npc.npc_name,
-                            "stat_name": stat,
-                            "stat_value": val,
-                        })
-                if not stats_rows:
-                    # No member resolved — drop the encounter entirely so the
-                    # bot doesn't surface a stats-less /enemy entry.
-                    continue
-                result.enemies.append(ParsedEnemy(
-                    canonical_name=block.display_name,
-                    category=block.category,
-                    region=block.region,
-                    sheet_gid=block.sheet_gid,
-                    source_row=block.source_row,
-                    name_color_hex=block.name_color_hex,
-                    hyperlink_url=block.hyperlink_url,
-                    is_npc=True,
-                    rank_stats={"Default": stats_rows},
-                    weaknesses_by_position=block.weaknesses_by_position,
-                ))
-                continue
-            # Ranked enemy: look up in the corresponding region's data tab.
-            region_index = region_indexes.get(block.region or "")
-            if region_index is None:
-                if _try_inline_fallback(block, result):
-                    continue
-                result.unmatched.append((block.display_name, spec.name))
-                continue
-            key = reconcile_display_to_data(block.display_name, region_index)
-            if key is None:
-                if _try_inline_fallback(block, result):
-                    continue
-                result.unmatched.append((block.display_name, spec.name))
-                continue
-            encounter = encounters_by_region[block.region][key]
-            rank_stats: dict[str, list[dict[str, Any]]] = {rk: [] for rk in _RANK_KEYS}
-            for pos, member in enumerate(encounter.members):
-                for rank_key in _RANK_KEYS:
-                    stats = member.rank_stats.get(rank_key, {})
-                    for stat_name, stat_value in stats.items():
-                        rank_stats[rank_key].append({
-                            "position": pos,
-                            "member_name": member.member_name,
-                            "stat_name": stat_name,
-                            "stat_value": stat_value,
-                        })
-            rank_stats = {k: v for k, v in rank_stats.items() if v}
+                else:
+                    index = region_indexes.get(block.region)
+                    key = reconcile_display_to_data(block.display_name, index) if index else None
+                    if key is not None:
+                        members = encounters_by_region[block.region][key].members
+                    elif _try_inline_fallback(block, result):
+                        continue
+                    else:
+                        result.unmatched.append((block.display_name, spec.name))
+                        continue
+            rank_stats = _member_stats(members, block.display_name, result)
             if not rank_stats:
-                result.unmatched.append((block.display_name, spec.name))
+                result.warnings.append(f"{block.display_name}: no usable ranks yet; encounter omitted")
                 continue
             result.enemies.append(ParsedEnemy(
-                canonical_name=block.display_name,
-                category=block.category,
-                region=block.region,
-                sheet_gid=block.sheet_gid,
-                source_row=block.source_row,
-                name_color_hex=block.name_color_hex,
-                hyperlink_url=block.hyperlink_url,
-                is_npc=False,
-                rank_stats=rank_stats,
-                weaknesses_by_position=block.weaknesses_by_position,
+                canonical_name=block.display_name, category=block.category,
+                region=block.region, sheet_gid=block.sheet_gid,
+                source_row=block.source_row, name_color_hex=block.name_color_hex,
+                hyperlink_url=block.hyperlink_url, is_npc=block.is_npc,
+                rank_stats=rank_stats, weaknesses_by_position=block.weaknesses_by_position,
             ))
     return result
-
-
-def rank_order(rank_key: str) -> int:
-    if rank_key == "Default":
-        return 0
-    if rank_key in _RANK_KEYS:
-        return _RANK_KEYS.index(rank_key) + 1
-    return 99
