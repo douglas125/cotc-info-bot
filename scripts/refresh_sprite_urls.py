@@ -61,6 +61,9 @@ USER_AGENT = "cotc-info-bot sprite-grabber (one-off, https://github.com/douglas1
 # spells differently from the Index. These are intentionally reviewed instead
 # of inferred: a wrong thumbnail is harder to notice than a missing one.
 SPRITE_FILE_OVERRIDES: dict[str, str] = {
+    "EX Auguste": "Auguste_EX_Sprite.png",
+    "EX Rinyuu": "Rinyuu_EX_Apothecary_Sprite.png",
+    "EX2 Rinyuu": "Rinyuu_EX_Dancer_Sprite.png",
     "EX Araune": "Alaune_EX_Dancer_Sprite.png",
     "EX2 Araune": "Alaune_EX_Warrior_Sprite.png",
     "EX Erika": "Elrica_EX_Thief_Sprite.png",

@@ -609,6 +609,8 @@ def register(tree: app_commands.CommandTree) -> None:
             notes.append(f"enemies_unmatched={len(unmatched)}")
         if pet_warnings:
             notes.append(f"pet_warnings={len(pet_warnings)}")
+        if summary.get("enemy_warnings"):
+            notes.append(f"enemy_warnings={len(summary['enemy_warnings'])}")
         notes_suffix = (" · " + " · ".join(notes)) if notes else ""
         await interaction.followup.send(
             f"Sync OK. forms={summary.get('character_forms', '?')} · "

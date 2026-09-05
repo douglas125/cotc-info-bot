@@ -8,6 +8,7 @@ from config import (
     TABS,
     TABS_BY_GID,
     WEAPON_TO_ROLE,
+    canonicalize_role_name,
 )
 
 
@@ -62,3 +63,12 @@ def test_xerc_index_policy_keeps_only_global_display_name() -> None:
         "Xerc (JP)": None,
     }
     assert ROLE_BLOCK_EXCLUSIONS == {"(JP) Xerc"}
+
+
+def test_rinyuu_ex2_alias_is_scoped_to_dancer():
+    assert canonicalize_role_name('EX Rinyuu', 'dancer') == 'EX2 Rinyuu'
+    assert canonicalize_role_name('Rinyuu EX', 'dancer') == 'EX2 Rinyuu'
+    assert canonicalize_role_name('EX Rinyuu', 'apothecary') == 'EX Rinyuu'
+    assert canonicalize_role_name('EX Rinyuu', None) == 'EX Rinyuu'
+    assert canonicalize_role_name('Rinyuu', 'cleric') == 'Rinyuu'
+    assert canonicalize_role_name('EX2 Rinyuu', 'dancer') == 'EX2 Rinyuu'

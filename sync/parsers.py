@@ -16,6 +16,7 @@ from config import (
     INDEX_CHARACTER_NAME_POLICY,
     TABS_BY_GID,
     WEAPON_TO_ROLE,
+    canonicalize_role_name,
     color_family,
     rarity_from_color,
 )
@@ -223,6 +224,7 @@ def parse_index(sheet: dict[str, Any]) -> list[IndexEntry]:
                 name = INDEX_CHARACTER_NAME_POLICY[name]
                 if name is None:
                     continue
+            name = canonicalize_role_name(name, role)
             color_hex = _cell_color_hex(cell)
             fam = color_family(color_hex)
             rarity = rarity_from_color(color_hex)
@@ -658,6 +660,8 @@ def parse_role_tab(sheet: dict[str, Any], gid: int,
         sp = _cell_text(row[6]).upper()
         active = _cell_text(row[7]).lower()
         if name and 1 <= len(name) <= 30 and sp == "SP" and active in ("active", "actives"):
+            spec = TABS_BY_GID.get(gid)
+            name = canonicalize_role_name(name, spec.role if spec else None)
             block_starts.append((ridx, name))
 
     blocks: list[FormBlock] = []

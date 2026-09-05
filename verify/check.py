@@ -25,6 +25,7 @@ from sync.runner import _levenshtein, _select_block_for
 from config import (
     INDEX_CHARACTER_NAME_POLICY, NAME_ALIASES, ROLE_BLOCK_EXCLUSIONS,
     ROLE_TABS, TABS, TABS_BY_GID, canonical_name_keys, canonicalize_name,
+    canonicalize_role_name,
 )
 from db import repo
 from sync.fetch import sheet_by_gid
@@ -109,7 +110,8 @@ def _live_index_names(payload: dict) -> list[str]:
                     # only count if it has a hyperlink or a foreground color (real entries)
                     cell = rows[ridx][col]
                     if cell.get("hyperlink") or cell.get("effectiveFormat", {}).get("textFormat", {}).get("foregroundColor"):
-                        names.append(t)
+                        role = pat.match(_cell_text(rows[header_row_idx][col])).group(1).lower()
+                        names.append(canonicalize_role_name(t, role))
     return names
 
 
@@ -192,7 +194,7 @@ def check_role_tab_blocks(payload: dict, conn) -> list[tuple[bool, str]]:
             if name in pool:
                 continue
             # 1. explicit alias map (config.NAME_ALIASES)
-            canon = canonicalize_name(name)
+            canon = canonicalize_name(canonicalize_role_name(name, tab.role))
             if canon != name and canon in pool:
                 alias_used.append((name, canon))
                 continue
@@ -334,7 +336,9 @@ def check_composite_latent_sections(payload: dict) -> list[tuple[bool, str]]:
                 and _cell_text(row[6]).upper() == "SP"
                 and _cell_text(row[7]).lower() in ("active", "actives")
             ):
-                starts.append((ridx, _cell_text(row[0])))
+                spec = TABS_BY_GID.get(gid)
+                name = canonicalize_role_name(_cell_text(row[0]), spec.role if spec else None)
+                starts.append((ridx, name))
         parsed = {
             (block.source_row, block.display_name): block
             for block in parse_role_tab(sheet, gid=gid)

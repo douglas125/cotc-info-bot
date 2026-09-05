@@ -47,6 +47,18 @@ References:
 - [Sheet resource](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets#resource:-sheet)
 - [CellData reference](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/cells)
 
+## Reviewed character form aliases
+
+The Index and role tabs currently call both Rinyuu job variants `EX Rinyuu`.
+Per the user's correction, `config.ROLE_NAME_ALIASES` maps the **dancer** entry
+to `EX2 Rinyuu`; the apothecary and its Global Unique Kit remain `EX Rinyuu`.
+This applies to both EX prefix and suffix spellings, only when the role is
+known to be dancer. It is deliberately not a global name alias.
+
+The wiki likewise labels both variants `Rinyuu EX`. Reviewed sprite overrides
+use `Rinyuu_EX_Apothecary_Sprite.png` for EX and
+`Rinyuu_EX_Dancer_Sprite.png` for EX2, verified through the wiki file API.
+
 ## Hyperlinks back to the source
 
 Every form's `hyperlink_url` (column on `character_forms`) points to a
@@ -56,66 +68,77 @@ character's block in the spreadsheet, where the inserted-image artwork is
 visible. This is the supported way to "see the art" until/unless we add
 a separate art source.
 
-## Secondary source — Adversary Log CotC (enemy spreadsheet)
+## Secondary source — (New) Adversary Log CotC
 
-- **URL**: <https://docs.google.com/spreadsheets/d/1Of4zz3rlV973Rt2kzHqoSWjiJmfhb77iMnAYofCT3Gs/>
-- **Spreadsheet ID**: `1Of4zz3rlV973Rt2kzHqoSWjiJmfhb77iMnAYofCT3Gs`
-- **Access**: public, read-only via the same Google Sheets v4 API key.
-- **Maintained by**: `:/Silence` (and contributors) in the CotC community.
-- **Why we mirror it**: each enemy encounter has stats for 6 difficulty
-  ranks (Rank 1/2/3, EX1/2/3) plus per-position break-shield counts,
-  weakness icons, and fight notes. Filtering across ranks and pulling one
-  rank's stats inline in Discord is what `/enemy` exists for.
+- **URL**: <https://docs.google.com/spreadsheets/d/1zcc5VqORiplxZ0tnff8wxuvPDJ0AUneljT16RwMEOa8/>
+- **Spreadsheet ID**: `1zcc5VqORiplxZ0tnff8wxuvPDJ0AUneljT16RwMEOa8`
+- **Access**: public; anonymous viewing and the existing Sheets v4 API key
+  were verified on 2026-09-05, including the hidden data tabs.
+- **Maintained by**: `:/Silence` and community contributors; the Guide lists
+  `@silence_ark` for source corrections.
+- **Replaces**: `1Of4zz3rlV973Rt2kzHqoSWjiJmfhb77iMnAYofCT3Gs`.
+- **Coverage**: base ranks 1–3, available numbered EX ranks (including EX4
+  and EX5), and 120/140 NPC encounters. EX coverage grows as fights release.
 
-### Tab inventory (15 tabs)
+### Tab inventory (17 tabs at migration)
 
-- 1 × `Guide` (instructional, parser skips)
-- 4 × Osterra difficulty tabs: `Lvl 1`, `Lvl 25`, `Lvl 50`, `Lvl 75`
-- 4 × Solistia difficulty tabs: `Solistia Lvl 1`/`25`/`50`/`75`
-- 1 × `120 NPCs` (single-rank stat blocks)
-- 3 × `*Data` lookup tabs: `Osterra Data`, `Solistia Data`, `120 NPCs Data`
-  — these are the canonical per-rank source of truth, **not** skipped
-  even though they're never displayed to users
-- 1 × `Template` (layout scaffold, parser skips)
-- 1 × `Images` (image asset storage, parser skips)
+- `Guide`, `Template`, `Images`: non-data tabs, skipped.
+- Eight ranked display tabs: `Lvl 1/25/50/75` and `Solistia Lvl 1/25/50/75`.
+- Two NPC display tabs: `120 NPCs` and `140 NPCs`.
+- Four hidden data tabs: `Orsterra Data` (source spelling), `Solistia Data`,
+  `120 NPCs Data`, and `140 NPCs Data`.
 
-The `gid → EnemyTabSpec` map lives in `config.py::ENEMIES_TABS`. The
-`*Data` tab gids are in `config.py::ENEMY_DATA_TAB_GIDS`.
+Gids are authoritative in `config.ENEMIES_TABS` and `ENEMY_DATA_TAB_GIDS`.
+`Lvl 75` changed to gid `2066203872`; `140 NPCs` is `1358661359` and its
+catalog is `493800596`. `ENEMY_NPC_DATA_KEYS` links each NPC display tab to
+its own catalog; NPC encounters remain single-rank `Default` forms.
 
-### Layout: display tabs vs. data tabs
+### Import behavior
 
-The visible Lvl-N display tabs hold **only the rank the maintainer last
-selected** (every block currently shows EX3). The rank cell is a Google
-Sheets dropdown (`dataValidation`), and the API returns whatever value
-is currently set — not the dropdown options. So:
+Display tabs provide encounter names, category, source anchors, and weakness
+icons. Their rank dropdown shows only the maintainer's current selection;
+its options do not prove that usable stats exist for a rank. Data tabs
+provide all populated ranks for each member. A refresh discovers new fights
+and EX ranks within these configured tabs without a per-fight code change.
 
-- **Display tabs** = source for: enemy canonical name (full lore name like
-  "Sly Leader Lloris"), category (which Lvl-N tab), region, and the
-  hyperlink anchor that points users back to the visual block.
-- **Data tabs** = source for: all 6 ranks of stats per encounter member,
-  indexed by an internal short name (e.g. "Lloris" rather than the
-  full display name). Block layout: a header cell + 'Shields' + 9 stat
-  headers in one row, then 6 rank rows × N members stacked vertically.
+The shared `enemy_ranks` helpers normalize and numerically sort `Rank1`–`Rank3`
+and `EX<n>` for positive integers. Only ranks with positive numeric HP for
+every identified member are published. Blank future ranks are valid; partial
+ranks and invalid optional stats produce sync warnings. `/enemy` defaults
+to the highest available rank. No scheduled refresh is configured.
 
-Display→data name reconciliation runs in `sync.enemy_parsers`: exact
-match → alias (`config.ENEMY_NAME_ALIASES`) → article-stripped substring
-match. Frequent unmatched display blocks should be promoted into the
-alias map.
+Display-to-data references take precedence over name reconciliation. Ranked
+VLOOKUP ranges identify member blocks; direct NPC references identify catalog
+rows. Exact names, explicit `ENEMY_NAME_ALIASES`, and article-stripped matching
+remain fallbacks for blocks without references. The importer resolves simple
+IF/IFS wave selectors using the current source selection; it does not add a
+wave selector to Discord or combine stats from different displayed waves.
 
-### What the API exposes vs. doesn't (enemy sheet)
+When an encounter combines data references and manually entered members,
+only its usable displayed rank is imported, with a warning. At migration,
+Aelfric and its manually entered pillar use this fallback. Inline shields
+are included, and stats for other ranks are never inferred from the display.
 
-Same v4 endpoint, same field mask. One enemy-specific gap:
+Weakness icons are named-range formulas (`=Sword`, `=Wind`, etc.), including
+conditional wave formulas; they are readable through the API. `Polearm`
+normalizes to `Spear`. The selected display wave's weaknesses are associated
+with that encounter's imported ranks, matching the existing data model.
+Threaded source comments are not fetched by this importer; Arena Fight notes
+continue to come from the separately maintained Game8 seed below.
 
-- ✅ Weakness icons look like inserted images visually but are actually
-  **named-range formulas** (`=Sword`, `=Wind`, `=Dark`, …) — fully
-  API-readable through `userEnteredValue.formulaValue`. The parser strips
-  the leading `=` and whitelists the result against
-  `sync.enemy_parsers._WEAKNESS_NAMES`. `Polearm` and `Spear` reference
-  the same icon — collapse to `Spear` via `_WEAKNESS_ALIASES`.
-- ❌ Fight notes (the "/Silence" timestamped strategy text in the
-  screenshot) are Google Sheets **comments** — a separate threaded
-  discussion API (`spreadsheets.comments.list`), not returned by
-  `spreadsheets.get`. We intentionally don't fetch them in v1.
+### Verification and deployment
+
+Run `pytest tests/`, then sync and run both `python -m verify.check` and
+`python -m verify.check_enemies`. Use `COTC_DB_PATH` to isolate migration
+validation from the local mirror. The enemy verifier compares ranks, member
+stats, weaknesses, and anchors against the latest snapshot instead of requiring
+exactly six ranks or a fixed count of EX4 encounters. Historical screenshot
+values remain in offline regression tests.
+
+Missing required tabs or an empty enemy import abort the transaction. Refresh
+preserves feedback, usage counters, fight notes, and sync history. After the
+approved deployment, run one `/refresh` (or the existing sync CLI on the deployed
+volume); an ordinary restart does not refresh an already populated database.
 
 ## Supplemental source — Game8 Arena fight guides
 

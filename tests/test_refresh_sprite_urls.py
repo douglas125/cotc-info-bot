@@ -329,3 +329,37 @@ def test_run_sync_continues_when_sprite_refresh_fails(
 
     assert any(m.startswith("WARN: sprite refresh skipped") for m in messages)
     assert "network unreachable" in messages[-1]
+
+
+def test_rinyuu_job_overrides_keep_ex_and_ex2_sprites_distinct(tmp_db_path, monkeypatch):
+    filenames = ['Rinyuu_EX_Apothecary_Sprite.png', 'Rinyuu_EX_Dancer_Sprite.png']
+    html = '<table>' + ''.join(
+        '<tr><td><img src="%s"></td><td><a>Rinyuu EX</a></td></tr>' % _cdn(filename)
+        for filename in filenames
+    ) + '</table>'
+    monkeypatch.setattr(scraper, 'fetch_wiki_html', lambda: html)
+    monkeypatch.setattr(scraper, 'fetch_wiki_file_urls', lambda titles: {t: _cdn(t) for t in titles})
+    conn = repo.connect(tmp_db_path)
+    for name, role in [('EX Rinyuu', 'apothecary'), ('EX2 Rinyuu', 'dancer')]:
+        repo.upsert_character(conn, name, role, None)
+    summary = scraper.refresh_sprite_urls(conn)
+    assert summary['missing'] == []
+    rows = {r['canonical_name']: r['sprite_url'] for r in conn.execute('SELECT * FROM character_sprites')}
+    assert rows == {'EX Rinyuu': _cdn(filenames[0]), 'EX2 Rinyuu': _cdn(filenames[1])}
+    conn.close()
+
+
+def test_auguste_ex_file_override_covers_missing_wiki_index_row(tmp_db_path, monkeypatch):
+    monkeypatch.setattr(scraper, 'fetch_wiki_html', lambda: _FAKE_HTML)
+    requested = []
+    def files(titles):
+        requested.extend(titles)
+        return {title: _cdn(title) for title in requested}
+    monkeypatch.setattr(scraper, 'fetch_wiki_file_urls', files)
+    conn = repo.connect(tmp_db_path)
+    repo.upsert_character(conn, 'EX Auguste', 'warrior', 'sword')
+    summary = scraper.refresh_sprite_urls(conn)
+    assert requested == ['Auguste_EX_Sprite.png']
+    assert summary['missing'] == []
+    assert conn.execute("SELECT sprite_url FROM character_sprites WHERE canonical_name='EX Auguste'").fetchone()[0] == _cdn('Auguste_EX_Sprite.png')
+    conn.close()

@@ -121,7 +121,7 @@ in `bot/`; entry point is `python -m bot`.
   accessories, profile, sync footer).
 - `/enemy name:<autocomplete>` — stats grid + per-position break-shield
   count + weakness labels for one encounter at a chosen rank. Dropdown
-  swaps among the enemy's available ranks (Rank1..EX3 for ranked
+  swaps among the enemy's available ranks (Rank1..EX<n> for ranked
   enemies; NPCs are single-rank with no dropdown). Source: the second
   enemy sheet (Adversary Log CotC), see `INFO_SOURCES.md`.
 - `/search role weapon rarity weakness text` — top-10 list, all params
@@ -307,6 +307,7 @@ pytest tests/
 
 # 2. Live verifier (reads the latest raw_snapshots payload back).
 python -m verify.check
+python -m verify.check_enemies
 ```
 
 `tests/` covers: schema bootstrap and FTS5 readiness, repo CRUD and search
@@ -328,6 +329,7 @@ sheet** when changing parsers, by running:
 
 ```bash
 conda activate cotc-search && python -m verify.check
+python -m verify.check_enemies
 ```
 
 `verify/check.py` reads the latest `raw_snapshots` payload and runs ~57
@@ -356,6 +358,10 @@ sheet typos or JP↔EN drift), the runner reconciles in this order:
 
 The verify script reports which blocks were resolved by which mechanism so
 you can promote frequent fuzzy hits into explicit aliases.
+
+Job-specific form collisions live in `config.ROLE_NAME_ALIASES`: the dancer
+`EX Rinyuu` is `EX2 Rinyuu`, while the apothecary and its Global kit retain
+`EX Rinyuu`. Never make this a global alias; it would conflate their kits.
 
 ## Common pitfalls when modifying
 
