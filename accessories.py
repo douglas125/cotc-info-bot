@@ -39,7 +39,7 @@ _RULES = {
     'bp_restore': r'\b(?:restore|recover)\b[^.!\n]*\b\d+\s*bp\b',
     'hp_regen': r'\b(?:grant\w*|gain)\b[^!\n]*\b(?:automatic hp recovery|hp regen\w*|automatic sp recovery[^!\n]*and hp recovery)\b',
     'sp_regen': r'\b(?:grant\w*|gain)\b[^!\n]*\b(?:automatic sp recovery|sp regen\w*)\b',
-    'ultimate': r'\bfill\b[^!\n]*\bultimate[^!\n]*\bgauge\b',
+    'ultimate': r'\bfill\b[^!\n]*\bultimate[^!\n]*\bgauge\b|\bultimate[^!\n]*\bgauge\s+(?:filled|increased)\b',
     'barrier': r'\b(?:grant\w*|gain)\b[^!\n]*\bhp barrier\b',
     'dead_aim': r'\b(?:grant\w*|gain)\b[^!\n]*\bdead aim\b',
     'elemental_crit': r'\b(?:grant\w*|gain|allow\w*)\b[^!\n]*\b(?:critical (?:hits|damage) with elemental|elemental[^!\n]*critical hits)\b',

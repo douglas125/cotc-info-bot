@@ -79,6 +79,8 @@ def test_optional_a4_fallback_and_unknown_tier():
     ('Grant automatic SP recovery (amount: 6) and HP recovery (amount: 100).', {'hp_regen', 'sp_regen'}),
     ('Grant SP regeneration (amount: 100) to All Allies who have an Evil Ward.', {'sp_regen'}),
     ('Start of battle: Fill own ultimate technique gauge by 100.0%.', {'ultimate'}),
+    ('Once per battle, after using their Ultimate Technique, recover 1 use of it and have their Ultimate Technique gauge filled by 200.0% at the end of the turn.', {'ultimate'}),
+    ('Ultimate Technique gauge increased by 200.0% (can only be used once in battle).', {'ultimate'}),
     ('Gain an HP barrier.', {'barrier'}),
     ('Grant Dead Aim.', {'dead_aim'}),
     ('Gain the ability to trigger critical hits with elemental attacks.', {'elemental_crit'}),
