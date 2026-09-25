@@ -215,6 +215,10 @@ decision, not a maintenance chore.
 
 **Wiped on every refresh** (sheet-derived, regenerated from the snapshot):
 
+- Accessory side: `accessories_fts`, `accessory_effects`, `accessories`, replaced
+  by `db.accessories.replace` inside the shared sync transaction. Stable
+  `accessory_id` values come from the accessory sheet; owner is optional.
+
 - Character side: `characters_fts`, `character_profile`, `unique_effects`,
   `equipment`, `skills`, `character_affinities`, `character_forms`, `characters`
 - Enemy side: `enemies_fts`, `enemy_member_stats`, `enemy_forms`, `enemies`

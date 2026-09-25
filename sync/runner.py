@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import Any, Callable
 
 from config import (
+    ACCESSORIES_SPREADSHEET_ID,
     ENEMIES_SPREADSHEET_ID,
     ENEMY_DATA_TAB_GIDS,
     PETS_LIST_GID,
@@ -31,6 +32,8 @@ from sync.parsers import (
     parse_sea_kits,
 )
 from sync.pet_parsers import parse_pets
+from sync.accessory_parsers import parse_accessories
+from db import accessories as accessory_repo
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -84,6 +87,13 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
         pets_payload = fetch_spreadsheet(api_key, PETS_SPREADSHEET_ID)
         progress("Persisting raw pet snapshot...")
         repo.store_raw_snapshot(conn, run_id, pets_payload, kind="pets")
+
+        progress("Fetching accessory spreadsheet...")
+        accessory_payload = fetch_spreadsheet(api_key, ACCESSORIES_SPREADSHEET_ID)
+        repo.store_raw_snapshot(conn, run_id, accessory_payload, kind="accessories")
+        parsed_accessories, accessory_warnings = parse_accessories(accessory_payload)
+        for warning in accessory_warnings:
+            progress(f"  WARN: {warning}")
 
         progress("Parsing Characters Index...")
         index_sheet = sheet_by_gid(payload, 1917707422)
@@ -285,6 +295,9 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             progress("Rebuilding pet FTS index...")
             repo.rebuild_pet_fts(conn)
 
+            progress(f"Writing {len(parsed_accessories)} accessories and rebuilding search...")
+            accessory_repo.replace(conn, parsed_accessories, run_id)
+
         # Non-fatal post-step OUTSIDE the main transaction so the HTTP
         # call doesn't hold a SQLite write lock — a wiki outage can't
         # abort an otherwise-good sync.
@@ -316,16 +329,18 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             enemies_count=c["enemies"],
             enemy_forms_count=c["enemy_forms"],
             pets_count=c["pets"],
+            accessories_count=c["accessories"],
         )
         progress(f"Sync OK. Forms={c['character_forms']} Skills={c['skills']} "
                  f"Equipment={c['equipment']} UniqueEffects={c['unique_effects']} "
                  f"Affinities={c['character_affinities']} "
                  f"Enemies={c['enemies']} EnemyForms={c['enemy_forms']} "
-                 f"Pets={c['pets']}.")
+                 f"Pets={c['pets']} Accessories={c['accessories']}.")
         return {"run_id": run_id, "status": "ok",
                 "unmatched_enemies": list(enemy_parse.unmatched),
                 "enemy_warnings": list(enemy_parse.warnings),
                 "pet_warnings": list(pet_warnings),
+                "accessory_warnings": list(accessory_warnings),
                 **c}
 
     except Exception as exc:

@@ -141,10 +141,12 @@ def test_historical_lloris_ex3_stats_and_weaknesses():
 
 
 def _sync_with(monkeypatch, path, payload):
+    from tests.accessory_fixtures import accessory_payload
     monkeypatch.setattr(repo, 'DB_PATH', path)
     characters = {'sheets': [sheet(t.gid, t.name, []) for t in config.TABS]}
     monkeypatch.setattr(runner, 'fetch_spreadsheet',
-                        lambda key, sid=None: payload if sid == config.ENEMIES_SPREADSHEET_ID else characters)
+                        lambda key, sid=None: payload if sid == config.ENEMIES_SPREADSHEET_ID else
+                        accessory_payload() if sid == config.ACCESSORIES_SPREADSHEET_ID else characters)
     return runner.run_sync('test-key')
 
 
@@ -164,7 +166,8 @@ def test_refresh_discovers_ex4_and_preserves_community_state(tmp_db_path, monkey
     assert conn.execute('SELECT count FROM command_usage_daily').fetchone()[0] == 7
     assert [tuple(r) for r in conn.execute('SELECT * FROM arena_fight_notes ORDER BY fight_key')] == notes_before
     assert conn.execute("SELECT COUNT(*) FROM enemies_fts WHERE enemies_fts MATCH 'Captain'").fetchone()[0] == 1
-    assert conn.execute('SELECT COUNT(*) FROM raw_snapshots').fetchone()[0] == 6
+    assert conn.execute('SELECT COUNT(*) FROM raw_snapshots').fetchone()[0] == 8
+    assert conn.execute("SELECT COUNT(*) FROM raw_snapshots WHERE kind='accessories'").fetchone()[0] == 2
     assert enemy_embeds.build_enemy_embed(conn, enemy_id, 'EX10').title.endswith('EX 10')
     assert check_rank_coverage(conn, enemy_payload(('EX3', 'EX4', 'EX10')))[0]
     conn.execute("UPDATE enemy_member_stats SET stat_value='123' WHERE stat_name='HP'")

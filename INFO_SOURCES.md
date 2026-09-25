@@ -245,6 +245,47 @@ Seeded guide pages:
   Skill Potency). Those live in `damage/full_calc.py` and the prose
   spec in `buff_debuff/`.
 
+## Accessory source — community accessory tier list
+
+- **URL**: <https://docs.google.com/spreadsheets/d/1UNvKQ-lHNPCcSrFl51SceM4cV2MoXihhm8iQ-mj7K20/edit?gid=245647410>
+- **Spreadsheet ID**: `1UNvKQ-lHNPCcSrFl51SceM4cV2MoXihhm8iQ-mj7K20`.
+- **Tier List gid**: `245647410`; Criteria gid `0` is explanatory, not an import input.
+- **Access**: public through the existing Google Sheets v4 API key.
+- **Verified baseline**: 669 rows, 551 verified descriptions, 102 stat-only
+  items and 16 unverified descriptions on 2026-09-25. Counts may grow.
+
+The importer resolves columns by header and uses `accessory_id` as stable
+identity. Keep IDs unchanged when sorting, renaming or editing rows. Source
+row links are rebuilt at refresh. The original `Name`, `Rank`, `Explanation`,
+`Gacha 5* A4?` and exchange columns retain their meanings. `exact_effect_text`
+is verbatim game text; `Explanation` is tier commentary and is never indexed
+as an effect. `stats_text`, `in_game_name`, optional `character`,
+`equip_restriction`, `verification_status`, `verified_on`, `tier_status` and
+`audit_notes` supply display metadata. `equip_restriction` means an actual
+equip restriction, not a conditional bonus or the character whose A4 it is.
+
+Optional `is_a4` accepts `Yes`, `No`, or `Unverified`, covering free and low-star
+A4s as well as gacha 5-star A4s. Without it, only a gacha A4 `Yes` establishes
+general A4 status; `No` does not prove the item is not an A4. Owner is optional.
+Proposed source corrections are reviewed and applied online separately.
+
+Required headers: `Name`, `Rank`, `Explanation`, `accessory_id`,
+`exact_effect_text`, `verification_status`. Empty imports, duplicate/missing
+IDs, missing names, unknown verification states and contradictory text/status
+or A4 flags abort the sync before replacement. `verified_text` requires text;
+`verified_no_effect` and `not_verified` require blank effect text. Unknown
+ranks become Unrated with a warning. Other optional values remain unknown.
+
+Accessories participate in the full refresh transaction and retain a gzipped
+`raw_snapshots` entry with kind `accessories`. Only the three sheet-derived
+tables (`accessories`, `accessories_fts`, `accessory_effects`) are replaced.
+The bot uses SQLite for name autocomplete, FTS5 text search and deterministic
+positive-effect categories. Phrase aliases map damage cap/limit wording to
+one search concept; ordinary passive percentage limits are excluded.
+
+Validate with `python -m verify.check_accessories` after an isolated live sync.
+Deploying on an existing volume requires one `/refresh` to populate this source.
+
 ## Git remote
 
 - Repo: <https://github.com/douglas125/cotc-info-bot>
