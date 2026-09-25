@@ -243,6 +243,10 @@ in another pipeline's.
 - Enemy side: `enemies_fts`, `enemy_weaknesses`, `enemy_member_stats`,
   `enemy_forms`, `enemies`
 - Pet side: `pets_fts`, `pets`
+- Accessory side: `accessories_fts`, `accessory_effects`, `accessories`, replaced
+  transactionally by `db.accessories.replace`. IDs are stable source IDs and
+  owner is optional. `/accessory info` shows verbatim effects and tier comments;
+  `/accessory search` indexes verified effects only, excluding tier commentary.
 
 **Preserved across refreshes** (must NOT be added to ANY wipe loop):
 

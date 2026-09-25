@@ -30,13 +30,35 @@ the result with SQLite FTS5, and lets you ask Discord:
 | `/character name:<auto>` | anyone | Full kit, A4 accessories, profile, affinities. Section dropdown swaps among kit / equipment / profile. EX/EX2 variants resolve via prefix↔suffix swap and an alias map. |
 | `/enemy name:<auto>` | anyone | Stats grid, per-position break shields, weakness labels for one encounter. Rank dropdown swaps among the available ranks (Rank 1–3 / EX1–3 for ranked enemies; single-rank for NPCs). |
 | `/pet name:<auto>` | anyone | Single-screen embed: ability text, Max Boost, Turn Preparation (base / Lv10), Turn Cooldown (base / Lv5), the eight fixed stats, and the obtain string. Ambiguous English names (e.g. two "White Rabbit" entries) are disambiguated in the autocomplete via a short source hint. |
+| `/accessory info name:<auto>` | anyone | Item name, tier, A4 status and optional owner, verbatim description, tier justification, stats, and exclusive equip restrictions. |
+| `/accessory search [text] [effect] [tier] [a4] [gacha_a4] [exchange]` | anyone | Search verified effects (e.g. `effect:Damage cap up`) or text. Filters combine with AND; paginated results open full item details. |
 | `/search role weapon rarity weakness text` | anyone | Top-10 results. All five parameters are optional, all use live-DB autocomplete. `text` is FTS over skills, equipment, and names. |
-| `/refresh` | admin | Re-syncs character, enemy, and pet spreadsheets in one transaction. Refuses if a refresh is already in flight. |
+| `/refresh` | admin | Re-syncs character, enemy, pet, and accessory spreadsheets in one transaction. Refuses if a refresh is already in flight. |
 | `/feedback text:<≤2000>` | anyone | Logs a correction or inconsistency report. Rate-limited to 3 submissions / 60 s per user (persisted in SQLite, survives restarts). Reply is ephemeral. |
 | `/feedback_list [limit:1-25]` | admin | Ephemeral embed of the newest feedback rows plus a per-day `/character` and `/enemy` usage breakdown for the last 10 days. |
 | `/feedback_clear confirm:bool` | admin | Deletes all feedback rows. No-op unless `confirm:true`. |
 
 Admin gating is by Discord user ID — see `BOT_ADMIN_USER_IDS` below.
+
+### Accessory source and coverage
+
+Accessories come from the online public sheet documented in `INFO_SOURCES.md`.
+After deploying this feature to an existing database, run `/refresh` once;
+startup does not automatically refresh an already populated mirror.
+No Google requests run during accessory lookups.
+
+`/accessory search text:damage cap up` recognizes Damage Limit / Dmg. Limit
+wording. Named effect filters use verified game descriptions, never tier
+commentary. Items without verified descriptions remain findable by name.
+Conditions and recipients remain in the verbatim description; matching an
+effect does not imply it is unconditional or benefits the wearer.
+
+`a4` covers any Awakening IV accessory, whereas `gacha_a4` follows the sheet's
+gacha 5-star flag. Until the optional `is_a4` source column is populated,
+non-gacha A4 status remains Unverified. A missing owner is allowed. The
+`exchange` filter means **eventually** obtainable, not necessarily available
+today. Exclusive restrictions come from `equip_restriction`; conditional job
+bonuses do not imply exclusivity.
 
 ### Dormant features
 

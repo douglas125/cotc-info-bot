@@ -413,6 +413,8 @@ def _record_command_usage(conn: sqlite3.Connection, command_name: str) -> None:
 
 def register(tree: app_commands.CommandTree) -> None:
     """Attach all bot commands to the given tree."""
+    from bot.accessory_commands import register as register_accessories
+    register_accessories(tree)
 
     @tree.command(name="character", description="Show full kit, affinities, and accessories for a CotC unit.")
     @app_commands.describe(name="Start typing a character name to see suggestions.")
@@ -609,6 +611,8 @@ def register(tree: app_commands.CommandTree) -> None:
             notes.append(f"enemies_unmatched={len(unmatched)}")
         if pet_warnings:
             notes.append(f"pet_warnings={len(pet_warnings)}")
+        if summary.get("accessory_warnings"):
+            notes.append(f"accessory_warnings={len(summary['accessory_warnings'])}")
         if summary.get("enemy_warnings"):
             notes.append(f"enemy_warnings={len(summary['enemy_warnings'])}")
         notes_suffix = (" · " + " · ".join(notes)) if notes else ""
@@ -619,7 +623,8 @@ def register(tree: app_commands.CommandTree) -> None:
             f"unique_effects={summary.get('unique_effects', '?')} · "
             f"enemies={summary.get('enemies', '?')} · "
             f"enemy_forms={summary.get('enemy_forms', '?')} · "
-            f"pets={summary.get('pets', '?')}{notes_suffix}",
+            f"pets={summary.get('pets', '?')} · "
+            f"accessories={summary.get('accessories', '?')}{notes_suffix}",
             ephemeral=True,
         )
 

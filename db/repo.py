@@ -66,6 +66,7 @@ def bootstrap(conn: sqlite3.Connection) -> None:
     _migrate_skills_columns(conn)
     _migrate_sync_runs_enemy_counts(conn)
     _migrate_sync_runs_pets_count(conn)
+    _ensure_columns(conn, "sync_runs", (("accessories_count", "INTEGER"),))
     _migrate_character_forms_alignment(conn)
     seed_arena_fight_notes(conn)
 
@@ -198,16 +199,17 @@ def finish_sync_run(
     enemies_count: int | None = None,
     enemy_forms_count: int | None = None,
     pets_count: int | None = None,
+    accessories_count: int | None = None,
 ) -> None:
     conn.execute(
         "UPDATE sync_runs "
         "SET finished_at = ?, status = ?, error = ?, "
         "    forms_count = ?, skills_count = ?, "
         "    enemies_count = ?, enemy_forms_count = ?, "
-        "    pets_count = ? "
+        "    pets_count = ?, accessories_count = ? "
         "WHERE id = ?",
         (_now_iso(), status, error, forms_count, skills_count,
-         enemies_count, enemy_forms_count, pets_count, run_id),
+         enemies_count, enemy_forms_count, pets_count, accessories_count, run_id),
     )
 
 
@@ -757,7 +759,7 @@ def counts(conn: sqlite3.Connection) -> dict[str, int]:
     for tbl in ("characters", "character_forms", "skills", "equipment",
                 "equipment_stats", "unique_effects", "character_affinities",
                 "enemies", "enemy_forms", "enemy_member_stats", "enemy_weaknesses",
-                "pets"):
+                "pets", "accessories"):
         out[tbl] = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
     return out
 

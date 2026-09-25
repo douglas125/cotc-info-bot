@@ -53,6 +53,9 @@ def enemy_payload(ranks=("EX3",), members=("Captain",), *, hp=None, canonical="N
 
 def fetch_with_enemies(character_payload):
     def fetch(api_key, spreadsheet_id=None):
+        if spreadsheet_id == config.ACCESSORIES_SPREADSHEET_ID:
+            from tests.accessory_fixtures import accessory_payload
+            return accessory_payload()
         if spreadsheet_id == config.ENEMIES_SPREADSHEET_ID:
             return enemy_payload()
         return character_payload

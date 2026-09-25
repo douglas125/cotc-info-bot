@@ -132,6 +132,39 @@ CREATE TABLE IF NOT EXISTS sync_runs (
     enemy_forms_count INTEGER
 );
 
+-- Sheet-derived accessory catalog; replaced transactionally on /refresh.
+-- Stable source IDs survive sorting and keep autocomplete selections valid.
+CREATE TABLE IF NOT EXISTS accessories (
+    accessory_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    tier TEXT NOT NULL,
+    comments TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    stats TEXT NOT NULL DEFAULT '',
+    in_game_name TEXT NOT NULL DEFAULT '',
+    owner TEXT NOT NULL DEFAULT '',
+    restriction TEXT NOT NULL DEFAULT '',
+    verification TEXT NOT NULL,
+    verified_on TEXT NOT NULL DEFAULT '',
+    tier_status TEXT NOT NULL DEFAULT '',
+    audit_notes TEXT NOT NULL DEFAULT '',
+    is_a4 TEXT NOT NULL,
+    gacha_a4 TEXT NOT NULL,
+    "exchange" TEXT NOT NULL,
+    source_row INTEGER NOT NULL,
+    sync_run_id INTEGER NOT NULL REFERENCES sync_runs(id)
+);
+CREATE TABLE IF NOT EXISTS accessory_effects (
+    accessory_id TEXT NOT NULL REFERENCES accessories(accessory_id) ON DELETE CASCADE,
+    effect TEXT NOT NULL,
+    excerpt TEXT NOT NULL,
+    PRIMARY KEY (accessory_id, effect)
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS accessories_fts USING fts5(
+    accessory_id UNINDEXED, names, description, stats, owner_restriction, effects,
+    tokenize = 'unicode61 remove_diacritics 2'
+);
+
 -- One row per (sync run, source kind); payload is gzipped JSON of the Sheets
 -- API response for that sheet. `kind` distinguishes the two pipelines so a
 -- single /refresh produces two snapshots under one run.
