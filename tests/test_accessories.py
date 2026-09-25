@@ -65,6 +65,19 @@ def test_optional_a4_fallback_and_unknown_tier():
     assert any('is_a4' in w for w in warnings)
 
 
+@pytest.mark.parametrize('flag,exchange,gacha,expected', [
+    ('', 'N/A', 'No', 'No'),
+    ('Unverified', 'N/A', 'No', 'No'),
+    ('Yes', 'N/A', 'No', 'Yes'),  # Audited non-gacha A4 overrides exchange eligibility.
+    ('Unverified', 'N/A', 'Yes', 'Yes'),
+    ('Unverified', 'No', 'No', 'Unverified'),
+    ('Unverified', '', 'No', 'Unverified'),
+])
+def test_a4_exchange_na_fallback(flag, exchange, gacha, expected):
+    rows, _ = parse_accessories(accessory_payload([item(is_a4=flag, exchange=exchange, gacha_a4=gacha)]))
+    assert rows[0]['is_a4'] == expected
+
+
 @pytest.mark.parametrize('text,expected', [
     ('Raise Dmg. Limit by 50,000.', {'damage_cap'}),
     ('When switching: Raise Elem. Atk. of Paired Allies by 15% and their Dmg. Limit by 25,000 (turns: 1).', {'damage_cap'}),

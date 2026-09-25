@@ -57,8 +57,13 @@ def parse_accessories(payload):
                 item[field] = 'Unverified'
         if item['is_a4'] not in ('Yes', 'No', 'Unverified', ''):
             raise ValueError(f'Accessory row {row_num}: invalid is_a4')
-        if not item['is_a4']:
-            item['is_a4'] = 'Yes' if item['gacha_a4'] == 'Yes' else 'Unverified'
+        if item['is_a4'] in ('', 'Unverified'):
+            if item['gacha_a4'] == 'Yes':
+                item['is_a4'] = 'Yes'
+            elif item['exchange'] == 'N/A':
+                item['is_a4'] = 'No'
+            else:
+                item['is_a4'] = 'Unverified'
         if item['gacha_a4'] == 'Yes' and item['is_a4'] == 'No':
             raise ValueError(f'Accessory row {row_num}: contradictory A4 flags')
         item['source_row'] = row_num
@@ -66,7 +71,7 @@ def parse_accessories(payload):
     if not result:
         raise ValueError('Accessory import is empty')
     if 'is_a4' not in headers:
-        warnings.append('is_a4 column missing; non-gacha A4 status remains unverified')
+        warnings.append('is_a4 column missing; using gacha A4 and exchange N/A evidence where available')
     pending = sum(x['verification'] == 'not_verified' for x in result)
     if pending:
         warnings.append(f'{pending} accessories lack verified effect descriptions')
