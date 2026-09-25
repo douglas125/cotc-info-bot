@@ -265,8 +265,11 @@ as an effect. `stats_text`, `in_game_name`, optional `character`,
 equip restriction, not a conditional bonus or the character whose A4 it is.
 
 Optional `is_a4` accepts `Yes`, `No`, or `Unverified`, covering free and low-star
-A4s as well as gacha 5-star A4s. Without it, only a gacha A4 `Yes` establishes
-general A4 status; `No` does not prove the item is not an A4. Owner is optional.
+A4s as well as gacha 5-star A4s. A gacha A4 `Yes` establishes general A4
+status; gacha `No` does not prove the item is not an A4. Exchange `N/A`
+resolves blank/Unverified A4 status to `No`, after the positive gacha flag.
+Explicit audited `is_a4=Yes` takes priority, including confirmed non-gacha A4s
+whose exchange column also says `N/A`. Owner is optional.
 Proposed source corrections are reviewed and applied online separately.
 
 Required headers: `Name`, `Rank`, `Explanation`, `accessory_id`,

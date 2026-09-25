@@ -55,7 +55,9 @@ effect does not imply it is unconditional or benefits the wearer.
 
 `a4` covers any Awakening IV accessory, whereas `gacha_a4` follows the sheet's
 gacha 5-star flag. Until the optional `is_a4` source column is populated,
-non-gacha A4 status remains Unverified. A missing owner is allowed. The
+the gacha flag establishes A4 status and exchange `N/A` establishes non-A4
+status for otherwise unknown items. Explicit audited A4 status takes priority:
+some confirmed non-gacha A4s also have exchange `N/A`. A missing owner is allowed. The
 `exchange` filter means **eventually** obtainable, not necessarily available
 today. Exclusive restrictions come from `equip_restriction`; conditional job
 bonuses do not imply exclusivity.
