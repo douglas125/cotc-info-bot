@@ -25,7 +25,8 @@ def enemy_payload(ranks=("EX3",), members=("Captain",), *, hp=None, canonical="N
     tabs = {t.gid: sheet(t.gid, t.name, []) for t in config.ENEMIES_TABS}
     for key, gid in config.ENEMY_DATA_TAB_GIDS.items():
         tabs[gid] = sheet(gid, {"Osterra": "Orsterra Data", "Solistia": "Solistia Data",
-                               "NPCs": "120 NPCs Data", "NPCs140": "140 NPCs Data"}[key], [])
+                               "NPCs": "120 NPCs Data", "NPCs140": "140 NPCs Data",
+                               "Seven Heroes": "Seven Heroes Data"}[key], [])
     data = [[cell(), cell("Internal encounter"), cell("Shields"), cell("HP"), cell("Speed")]]
     starts = []
     for pos, name in enumerate(members):

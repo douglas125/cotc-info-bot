@@ -153,6 +153,7 @@ class EnemyTabSpec:
     name: str
     category: str           # display label, e.g. 'Lvl 1' or '120 NPCs'
     region: str | None      # 'Osterra' | 'Solistia' | None
+    data_key: str | None = None  # Separate catalog for non-geographical categories.
 
 
 # GIDs and metadata discovered via verify/probe_enemies.py. Each Lvl-N tab
@@ -163,6 +164,8 @@ ENEMIES_TABS: list[EnemyTabSpec] = [
     EnemyTabSpec(462109912,  "Lvl 25",           "Lvl 25",           "Osterra"),
     EnemyTabSpec(1105319828, "Lvl 50",           "Lvl 50",           "Osterra"),
     EnemyTabSpec(2066203872, "Lvl 75",           "Lvl 75",           "Osterra"),
+    EnemyTabSpec(601882043, "(SPOILERS) Lvl 75", "(SPOILERS) Lvl 75", "Osterra"),
+    EnemyTabSpec(116895487, "Seven Heroes", "Seven Heroes", None, "Seven Heroes"),
     EnemyTabSpec(1544805455, "Solistia Lvl 1",   "Solistia Lvl 1",   "Solistia"),
     EnemyTabSpec(795720982,  "Solistia Lvl 25",  "Solistia Lvl 25",  "Solistia"),
     EnemyTabSpec(1229169620, "Solistia Lvl 50",  "Solistia Lvl 50",  "Solistia"),
@@ -178,6 +181,7 @@ ENEMY_DATA_TAB_GIDS: dict[str, int] = {
     "Solistia": 761197564,   # 'Solistia Data'
     "NPCs":     1230510791,  # '120 NPCs Data'
     "NPCs140":  493800596,   # '140 NPCs Data'
+    "Seven Heroes": 959055652,
 }
 
 # Display tabs whose blocks should be treated as NPCs (single-rank, no dropdown).
@@ -301,6 +305,7 @@ def rarity_from_color(hex_color: str | None) -> str | None:
 #
 # Add new entries here when verify/check.py reports unmatched live blocks.
 NAME_ALIASES: dict[str, str] = {
+    "Molu":     "Mooloo",     # Global Unique Kits spelling vs Index.
     # role-tab spelling : Index spelling. Keys are bare base names; the
     # variant-aware helpers below reattach EX/EX2 markers automatically,
     # so do NOT add EX-prefixed keys here.
@@ -365,7 +370,7 @@ def _split_variant(name: str) -> tuple[str, str, str]:
     """
     if not name:
         return ("", "", "")
-    n = name.strip()
+    n = character_match_name(name)
     low = n.lower()
     for marker in ("ex2", "ex"):
         if low.startswith(marker + " "):
@@ -376,6 +381,11 @@ def _split_variant(name: str) -> tuple[str, str, str]:
 
 
 _ALIAS_LOOKUP_CI: dict[str, str] = {k.casefold(): v for k, v in NAME_ALIASES.items()}
+
+
+def character_match_name(name: str) -> str:
+    """Remove the source's Global-kit annotation for matching, not display."""
+    return name.strip().removesuffix("⚔️").removesuffix("⚔").rstrip()
 
 
 def _alias_for_bare(bare: str) -> str | None:
@@ -396,7 +406,7 @@ def canonicalize_name(name: str) -> str:
     prefix, bare, suffix = _split_variant(name)
     aliased_bare = _alias_for_bare(bare)
     if aliased_bare is None:
-        return name
+        return character_match_name(name)
     if prefix:
         return f"{prefix} {aliased_bare}"
     if suffix:
@@ -416,6 +426,7 @@ def canonical_name_keys(name: str) -> list[str]:
     if not name:
         return []
     out: list[str] = [name]
+    out.append(character_match_name(name))
     prefix, bare, suffix = _split_variant(name)
     aliased_bare = _alias_for_bare(bare)
     bares = [bare] if aliased_bare is None else [bare, aliased_bare]

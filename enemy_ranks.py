@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 Rank = str
-RANK_PATTERN = re.compile(r"^\s*(rank\s*[123]|ex\s*[1-9]\d*)\s*$", re.IGNORECASE)
+RANK_PATTERN = re.compile(r"^\s*(rank\s*[123]|ex\s*[1-9]\d*|difficulty\s*[1-9]\d*)\s*$", re.IGNORECASE)
 
 
 def normalize_rank(value: str) -> Rank | None:
@@ -13,6 +13,8 @@ def normalize_rank(value: str) -> Rank | None:
     if not RANK_PATTERN.fullmatch(value):
         return None
     compact = re.sub(r"\s+", "", value).lower()
+    if compact.startswith("difficulty"):
+        return "Difficulty" + compact[10:]
     return ("EX" + compact[2:]) if compact.startswith("ex") else ("Rank" + compact[4:])
 
 
@@ -25,6 +27,8 @@ def rank_order(rank: Rank) -> int:
         return int(normalized[4:])
     if normalized and normalized.startswith("EX"):
         return 3 + int(normalized[2:])
+    if normalized and normalized.startswith("Difficulty"):
+        return int(normalized[10:])
     return 99
 
 
@@ -34,6 +38,8 @@ def rank_label(rank: Rank) -> str:
         return "EX " + normalized[2:]
     if normalized and normalized.startswith("Rank"):
         return "Rank " + normalized[4:]
+    if normalized and normalized.startswith("Difficulty"):
+        return "Difficulty " + normalized[10:]
     return rank
 
 

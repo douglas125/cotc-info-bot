@@ -464,7 +464,7 @@ def check_sea_kit_precedence(payload: dict, conn) -> list[tuple[bool, str]]:
     Matching is exact + NAME_ALIASES only. Levenshtein fuzzy isn't used here
     because the SEA tab spans all roles (no role/band scoping to constrain
     the search), so fuzzy produces false positives like 'Molu' → 'Lolo'.
-    Unmatched SEA names (e.g. 'Molu', 'Tithi') are reported as a warning —
+    Unmatched SEA names are reported as a warning —
     they're typically SEA-only characters with no Index entry yet.
     """
     out: list[tuple[bool, str]] = []
@@ -490,6 +490,8 @@ def check_sea_kit_precedence(payload: dict, conn) -> list[tuple[bool, str]]:
     canon_set = {r[0] for r in conn.execute(
         "SELECT canonical_name FROM characters"
     )}
+    canon_by_key = {key.casefold(): name for name in canon_set
+                    for key in canonical_name_keys(name)}
 
     matched = 0
     alias_used: list[tuple[str, str]] = []
@@ -497,13 +499,10 @@ def check_sea_kit_precedence(payload: dict, conn) -> list[tuple[bool, str]]:
     for block in blocks:
         name = block.display_name
         target: str | None = None
-        if name in canon_set:
-            target = name
-        else:
-            canon = canonicalize_name(name)
-            if canon != name and canon in canon_set:
-                target = canon
-                alias_used.append((name, canon))
+        target = next((canon_by_key[k.casefold()] for k in canonical_name_keys(name)
+                       if k.casefold() in canon_by_key), None)
+        if target is not None and target != name:
+            alias_used.append((name, target))
         if target is None:
             unmatched.append(name)
             continue
@@ -547,7 +546,7 @@ def check_sea_kit_precedence(payload: dict, conn) -> list[tuple[bool, str]]:
         "SELECT c.base_role, c.base_weapon "
         "FROM characters c "
         "JOIN character_forms cf ON cf.character_id = c.id "
-        "WHERE cf.display_name = 'Lynette EX' AND cf.server = 'sea' "
+        "WHERE cf.display_name IN ('Lynette EX', 'Lynette EX ⚔️') "
         "LIMIT 1"
     ).fetchone()
     lynette_ok = (
@@ -556,7 +555,7 @@ def check_sea_kit_precedence(payload: dict, conn) -> list[tuple[bool, str]]:
         and lynette_ex["base_weapon"] == "dagger"
     )
     got = dict(lynette_ex) if lynette_ex else None
-    out.append((lynette_ok, f"Lynette EX SEA role/weapon: {got}"))
+    out.append((lynette_ok, f"Lynette EX role/weapon: {got}"))
     return out
 
 
@@ -623,10 +622,11 @@ def check_spot_characters(payload: dict, conn) -> list[tuple[bool, str]]:
     # Use canonical (Index) names — the runner attaches role-tab data to these.
     targets = ["Fiore", "Lionel", "Therion", "Cyrus", "EX Cyrus", "H'aanit",
                "Tressa", "Clauser", "Lynette EX"]
+    by_key = {key.casefold(): row for row in conn.execute('SELECT id, canonical_name FROM characters')
+              for key in canonical_name_keys(row['canonical_name'])}
     for name in targets:
-        ch = conn.execute(
-            "SELECT id FROM characters WHERE canonical_name = ?", (name,)
-        ).fetchone()
+        ch = next((by_key[k.casefold()] for k in canonical_name_keys(name)
+                   if k.casefold() in by_key), None)
         if not ch:
             out.append((False, f"spot-character '{name}': not in DB"))
             continue
@@ -763,7 +763,8 @@ def check_unique_effects(payload: dict, conn) -> list[tuple[bool, str]]:
         "FROM character_forms cf JOIN characters c ON c.id = cf.character_id"
     ).fetchall()
     for form in forms:
-        block = sea_blocks_by_name.get(form["display_name"])
+        keys = canonical_name_keys(form["display_name"])
+        block = next((sea_blocks_by_name[k] for k in keys if k in sea_blocks_by_name), None)
         if block is None:
             entry = SimpleNamespace(
                 canonical_name=form["display_name"],
@@ -772,7 +773,7 @@ def check_unique_effects(payload: dict, conn) -> list[tuple[bool, str]]:
             )
             block = _select_block_for(
                 entry,
-                blocks_by_name.get(form["display_name"], []),
+                next((blocks_by_name[k] for k in keys if k in blocks_by_name), []),
                 blocks_by_tab,
             )
         if block is None:
@@ -894,15 +895,67 @@ def check_character_base_stats(conn) -> list[tuple[bool, str]]:
         "SELECT COUNT(DISTINCT form_id) FROM character_stats WHERE level = 120"
     ).fetchone()[0]
     pct = (100.0 * with_lv120 / total) if total else 0.0
-    # Threshold is intentionally below the live ~73% baseline. SEA/GL Unique
-    # Kits takes precedence over role-tab data for ~60 characters, and that
-    # SEA path doesn't carry the stats grid yet (documented follow-up).
-    # 70% gates against parser regression on the role-tab path, which is the
-    # only place stats are read today.
+    # Keep a broad smoke-test floor; exact source-available stats (including
+    # Global kits and image-labelled grids) are checked separately below.
     out.append((pct >= 70.0,
                 f"Lv120 stats coverage: {with_lv120}/{total} ({pct:.0f}%) "
                 f"forms have at least one Lv120 stat row"))
     return out
+
+
+def check_source_form_coverage(payload: dict, conn) -> list[tuple[bool, str]]:
+    """Compare every selected source kit/stats grid; detect alias duplicates."""
+    from sync.parsers import parse_index, INDEX_GID
+    from sync.runner import _select_block_for
+    from config import _split_variant
+
+    role_blocks = {}
+    by_name = defaultdict(list)
+    for tab in ROLE_TABS:
+        sheet = sheet_by_gid(payload, tab.gid)
+        role_blocks[tab.gid] = parse_role_tab(sheet, gid=tab.gid) if sheet else []
+        for block in role_blocks[tab.gid]:
+            for key in canonical_name_keys(block.display_name):
+                by_name[key].append((tab.gid, block))
+    sea_sheet = sheet_by_gid(payload, SEA_GID)
+    sea_blocks = parse_sea_kits(sea_sheet) if sea_sheet else []
+    sea = {key: block for block in reversed(sea_blocks)
+           for key in canonical_name_keys(block.display_name)}
+    mismatches, warnings = [], []
+    entries = parse_index(sheet_by_gid(payload, INDEX_GID))
+    for entry in entries:
+        keys = canonical_name_keys(entry.canonical_name)
+        block = next((sea[k] for k in keys if k in sea), None)
+        if block is None:
+            candidates = next((by_name[k] for k in keys if k in by_name), [])
+            block = _select_block_for(entry, candidates, role_blocks)
+        form = conn.execute("SELECT id FROM character_forms WHERE display_name=? AND server='global'",
+                            (entry.canonical_name,)).fetchone()
+        if block is None or form is None:
+            mismatches.append((entry.canonical_name, 'missing source block/form'))
+            continue
+        warnings.extend((block.display_name, w) for w in block.warnings)
+        actual = {(r['level'], r['stat_name'], r['stat_value'], r['stat_order'])
+                  for r in repo.get_stats(conn, form['id'])}
+        expected = {(r['level'], r['stat_name'], r['stat_value'], r['stat_order']) for r in block.stats}
+        if actual != expected:
+            mismatches.append((entry.canonical_name, 'stats differ'))
+        actual_skills = [dict(r) for r in repo.get_skills(conn, form['id'])]
+        expected_skills = [{k: row.get(k) for k in actual_skills[0] if k not in {'id', 'form_id'}}
+                           for row in block.skills] if actual_skills else []
+        actual_skills = [{k: v for k, v in row.items() if k not in {'id', 'form_id'}} for row in actual_skills]
+        if len(actual_skills) != len(block.skills) or actual_skills != expected_skills:
+            mismatches.append((entry.canonical_name, 'kit differs or is empty'))
+    identities = defaultdict(list)
+    for row in conn.execute('SELECT cf.display_name, cf.rarity, c.base_role FROM character_forms cf '
+                            'JOIN characters c ON c.id=cf.character_id'):
+        canonical = canonicalize_name(row['display_name'])
+        prefix, bare, suffix = _split_variant(canonical)
+        identities[(row['base_role'], row['rarity'], (prefix or suffix).casefold(), bare.casefold())].append(row['display_name'])
+    duplicates = [names for names in identities.values() if len(names) > 1]
+    return [(bool(entries) and not mismatches, f'Index source kits/stats: {len(entries)} checked; mismatches={mismatches[:5]}'),
+            (not warnings, f'selected stat-grid warnings: {warnings[:5]}'),
+            (not duplicates, f'alias/annotation duplicate forms: {duplicates[:5]}')]
 
 
 # --- runner -----------------------------------------------------------------
@@ -928,6 +981,7 @@ def run_all() -> int:
         ("A4 accessory stats",       check_a4_accessory_stats(conn)),
         ("Unique Effects glossary",  check_unique_effects(payload, conn)),
         ("Character base stats",     check_character_base_stats(conn)),
+        ("Source form coverage",     check_source_form_coverage(payload, conn)),
     ]
 
     total = 0

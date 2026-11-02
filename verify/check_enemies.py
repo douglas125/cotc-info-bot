@@ -12,7 +12,8 @@ import json
 from config import ENEMIES_SPREADSHEET_ID, ENEMIES_TABS, ENEMY_DATA_TAB_GIDS, ENEMY_NPC_DATA_KEYS, force_utf8_console
 from db import repo
 from enemy_ranks import normalize_rank, rank_order
-from sync.enemy_parsers import parse_all, parse_data_tab, parse_npc_data_tab, validate_source
+from sync.enemy_parsers import (parse_all, parse_data_tab, parse_npc_data_tab,
+                               parse_difficulty_data_tab, source_inventory_warnings, validate_source)
 from sync.fetch import sheet_by_gid
 
 
@@ -20,6 +21,9 @@ def check_tab_inventory(payload):
     if payload.get('spreadsheetId') != ENEMIES_SPREADSHEET_ID:
         return False, 'snapshot is from a different enemy source; run sync first'
     validate_source(payload, ENEMY_DATA_TAB_GIDS)
+    warnings = source_inventory_warnings(payload, ENEMY_DATA_TAB_GIDS)
+    if warnings:
+        return False, '; '.join(warnings)
     return True, f'all {len(ENEMIES_TABS)} display + {len(ENEMY_DATA_TAB_GIDS)} data tabs present'
 
 
@@ -27,7 +31,9 @@ def check_data_tab_encounter_counts(payload):
     counts = {}
     for key, gid in ENEMY_DATA_TAB_GIDS.items():
         sheet = sheet_by_gid(payload, gid)
-        parse = parse_npc_data_tab(sheet) if key in ENEMY_NPC_DATA_KEYS.values() else parse_data_tab(sheet, key)
+        parse = (parse_npc_data_tab(sheet) if key in ENEMY_NPC_DATA_KEYS.values() else
+                 parse_difficulty_data_tab(sheet, key) if key == 'Seven Heroes' else
+                 parse_data_tab(sheet, key))
         counts[key] = len(parse)
     return all(counts.values()), f'data catalogs parsed: {counts}'
 

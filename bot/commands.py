@@ -615,6 +615,10 @@ def register(tree: app_commands.CommandTree) -> None:
             notes.append(f"accessory_warnings={len(summary['accessory_warnings'])}")
         if summary.get("enemy_warnings"):
             notes.append(f"enemy_warnings={len(summary['enemy_warnings'])}")
+        if summary.get("sprite_warnings"):
+            notes.append(f"sprite_warnings={len(summary['sprite_warnings'])} (sprites incomplete; see logs)")
+        if summary.get("character_warnings"):
+            notes.append(f"character_warnings={len(summary['character_warnings'])}")
         notes_suffix = (" · " + " · ".join(notes)) if notes else ""
         await interaction.followup.send(
             f"Sync OK. forms={summary.get('character_forms', '?')} · "

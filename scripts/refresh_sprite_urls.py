@@ -61,6 +61,13 @@ USER_AGENT = "cotc-info-bot sprite-grabber (one-off, https://github.com/douglas1
 # spells differently from the Index. These are intentionally reviewed instead
 # of inferred: a wrong thumbnail is harder to notice than a missing one.
 SPRITE_FILE_OVERRIDES: dict[str, str] = {
+    "EX Primrose": "Primrose_EX_Apothecary_Sprite.png",
+    "EX2 Primrose": "Primrose_EX_Cleric_Sprite.png",
+    "EX Bargello": "Bargello_EX_Dancer_Sprite.png",
+    "EX2 Bargello": "Bargello_EX_Merchant_Sprite.png",
+    "EX Rondo": "Rondo_EX_Scholar_Sprite.png",
+    "EX2 Rondo": "Rondo_EX_Thief_Sprite.png",
+    "EX Sonia": "Sonia_EX_Sprite.png",
     "EX Auguste": "Auguste_EX_Sprite.png",
     "EX Rinyuu": "Rinyuu_EX_Apothecary_Sprite.png",
     "EX2 Rinyuu": "Rinyuu_EX_Dancer_Sprite.png",
@@ -292,7 +299,8 @@ def normalize_url(raw: str) -> str:
 
 def build_db_index(canonical_names: Iterable[str]) -> dict[str, str]:
     """Casefolded canonical_name → original canonical_name."""
-    return {name.casefold(): name for name in canonical_names if name}
+    return {key.casefold(): name for name in canonical_names if name
+            for key in canonical_name_keys(name)}
 
 
 def reconcile(wiki_name: str, db_index: dict[str, str]) -> str | None:
