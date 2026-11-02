@@ -37,6 +37,7 @@ from config import (
     ENEMY_NPC_TAB_GIDS,
     ENEMY_NPC_DATA_KEYS,
     ENEMY_SKIP_TABS,
+    ENEMY_MEMBER_MIN_DIFFICULTY,
 )
 from enemy_ranks import RANK_PATTERN, normalize_rank, rank_order
 from sync.fetch import iter_rows, sheet_by_gid
@@ -168,6 +169,13 @@ class ParsedEnemy:
     # weaknesses_by_position[i] = ['Sword', ...] — same for every rank since
     # the display tab encodes one weakness set per encounter, not per rank.
     weaknesses_by_position: list[list[str]] = field(default_factory=list)
+    excluded_member_positions: dict[str, set[int]] = field(default_factory=dict)
+
+    def weaknesses_for_rank(self, rank: str) -> list[list[str]]:
+        """Hide only explicitly absent members; preserve other source rows."""
+        excluded = self.excluded_member_positions.get(rank, set())
+        return [labels if pos not in excluded else []
+                for pos, labels in enumerate(self.weaknesses_by_position)]
 
 
 # --- data tab parsing -------------------------------------------------------
@@ -938,19 +946,29 @@ def _positive_hp(value: str) -> bool:
     return _is_stat_value(value) and int(_integer_text(value).replace(",", "")) > 0
 
 
-def _member_stats(members: list[MemberRanks], name: str, result: ParseResult) -> dict[str, list[dict[str, Any]]]:
+def _member_present(member: MemberRanks, name: str, rank: str, data_key: str | None) -> bool:
+    if not rank.startswith("Difficulty"):
+        return True
+    minimum = ENEMY_MEMBER_MIN_DIFFICULTY.get((data_key, name, member.member_name), 1)
+    return int(rank[10:]) >= minimum
+
+
+def _member_stats(members: list[MemberRanks], name: str, result: ParseResult,
+                  *, data_key: str | None = None) -> dict[str, list[dict[str, Any]]]:
     """Only publish ranks with usable HP for every encounter member."""
     ranks = sorted({rank for member in members for rank in member.rank_stats}, key=rank_order)
     out = {}
     for rank in ranks:
-        values = [member.rank_stats.get(rank, {}) for member in members]
+        active = [(pos, member) for pos, member in enumerate(members)
+                  if _member_present(member, name, rank, data_key)]
+        values = [member.rank_stats.get(rank, {}) for _, member in active]
         if not any(any(stats.values()) for stats in values):
             continue  # An entirely blank future rank is a normal placeholder.
         if not all(_positive_hp(stats.get("HP", "")) for stats in values):
             result.warnings.append(f"{name} {rank}: incomplete member HP; rank omitted")
             continue
         stat_rows = []
-        for position, (member, stats) in enumerate(zip(members, values)):
+        for (position, member), stats in zip(active, values):
             for stat, value in stats.items():
                 if not value:
                     continue
@@ -1068,7 +1086,7 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseRe
                     else:
                         result.unmatched.append((block.display_name, spec.name))
                         continue
-            rank_stats = _member_stats(members, block.display_name, result)
+            rank_stats = _member_stats(members, block.display_name, result, data_key=data_key)
             if not rank_stats:
                 result.warnings.append(f"{block.display_name}: no usable ranks yet; encounter omitted")
                 continue
@@ -1078,5 +1096,10 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseRe
                 source_row=block.source_row, name_color_hex=block.name_color_hex,
                 hyperlink_url=block.hyperlink_url, is_npc=block.is_npc,
                 rank_stats=rank_stats, weaknesses_by_position=block.weaknesses_by_position,
+                excluded_member_positions={
+                    rank: {pos for pos, member in enumerate(members)
+                           if not _member_present(member, block.display_name, rank, data_key)}
+                    for rank in rank_stats
+                },
             ))
     return result

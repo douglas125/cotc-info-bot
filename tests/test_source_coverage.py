@@ -107,15 +107,44 @@ def _heroes_payload():
     return payload
 
 
-def test_heroes_difficulties_preserve_members_and_do_not_infer_blank_puppet():
+def test_bokhohn_difficulty_two_has_only_bokhohn():
     result = enemies.parse_all(_heroes_payload(), config.ENEMY_DATA_TAB_GIDS)
     hero = next(e for e in result.enemies if e.category == 'Seven Heroes')
     assert result.unmatched == []
-    assert list(hero.rank_stats) == ['Difficulty4', 'Difficulty5']
+    assert list(hero.rank_stats) == ['Difficulty2', 'Difficulty4', 'Difficulty5']
+    assert [(r['member_name'], r['stat_value']) for r in hero.rank_stats['Difficulty2'] if r['stat_name'] == 'HP'] == [
+        ('Bokhohn', '100')]
     assert [(r['member_name'], r['stat_value']) for r in hero.rank_stats['Difficulty5'] if r['stat_name'] == 'HP'] == [
         ('Bokhohn', '300'), ('Large Puppet', '500')]
     assert hero.weaknesses_by_position == [['Bow'], ['Sword']]
-    assert any('Difficulty2: incomplete member HP' in w for w in result.warnings)
+    assert hero.weaknesses_for_rank('Difficulty2') == [['Bow'], []]
+    assert result.warnings == []
+
+
+def test_bokhohn_difficulty_one_has_no_puppet_even_if_placeholder_stats_exist():
+    members = [enemies.MemberRanks('Bokhohn', {'Difficulty1': {'HP': '100'}}),
+               enemies.MemberRanks('Large Puppet', {'Difficulty1': {'HP': '999'}})]
+    result = enemies.ParseResult()
+    rows = enemies._member_stats(members, 'Bokhohn', result, data_key='Seven Heroes')['Difficulty1']
+    assert [(r['position'], r['member_name']) for r in rows] == [(0, 'Bokhohn')]
+
+
+def test_unrelated_fights_keep_extra_source_weakness_rows():
+    payload = enemy_payload(canonical='Gonska the Clown')
+    rows = iter_rows(sheet_by_gid(payload, config.ENEMIES_TABS[0].gid))
+    rows[7][8] = cell(formula='=Spear')
+    rows[8][8] = cell(formula='=Fire')
+    enemy, = enemies.parse_all(payload, config.ENEMY_DATA_TAB_GIDS).enemies
+    assert enemy.weaknesses_for_rank('EX3') == [['Sword'], ['Spear'], ['Fire']]
+
+
+@pytest.mark.parametrize('name,data_key', [('Other fight', 'Seven Heroes'), ('Bokhohn', 'Osterra')])
+def test_bokhohn_exception_does_not_hide_missing_members_elsewhere(name, data_key):
+    members = [enemies.MemberRanks('Bokhohn', {'Difficulty2': {'HP': '100'}}),
+               enemies.MemberRanks('Large Puppet', {'Difficulty2': {}})]
+    result = enemies.ParseResult()
+    assert enemies._member_stats(members, name, result, data_key=data_key) == {}
+    assert any('incomplete member HP' in warning for warning in result.warnings)
 
 
 def test_invalid_difficulty_catalog_rolls_back_existing_mirror(tmp_db_path, monkeypatch, offline_sprite_refresh):
@@ -146,14 +175,17 @@ def test_difficulty_dropdown_and_embed_use_highest_available(tmp_db_path, monkey
     conn = repo.connect(tmp_db_path)
     enemy_id = conn.execute("SELECT id FROM enemies WHERE canonical_name='Bokhohn'").fetchone()[0]
     ranks = enemy_embeds.available_ranks(conn, enemy_id)
-    assert ranks == ['Difficulty5', 'Difficulty4']
+    assert ranks == ['Difficulty5', 'Difficulty4', 'Difficulty2']
     assert enemy_embeds.default_rank(ranks) == 'Difficulty5'
     assert enemy_embeds.build_enemy_embed(conn, enemy_id, 'Difficulty4').title.endswith('Difficulty 4')
     assert rank_order('Difficulty10') > rank_order('Difficulty5')
     assert rank_label('Difficulty5') == 'Difficulty 5'
+    lower = repo.get_enemy_form_by_rank(conn, enemy_id, 'Difficulty2')
+    assert {r['member_name'] for r in repo.get_enemy_member_stats(conn, lower['id'])} == {'Bokhohn'}
+    assert {r['position'] for r in repo.get_enemy_weaknesses(conn, lower['id'])} == {0}
     async def labels():
         view = EnemyView(enemy_id, ranks, 'Difficulty5')
-        assert [o.label for o in view.children[0].options] == ['Difficulty 5', 'Difficulty 4']
+        assert [o.label for o in view.children[0].options] == ['Difficulty 5', 'Difficulty 4', 'Difficulty 2']
         view.stop()
     asyncio.run(labels())
     conn.close()

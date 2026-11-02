@@ -395,3 +395,21 @@ def test_wiki_names_resolve_annotated_index_labels():
     index = scraper.build_db_index(['Lynette EX ⚔️', 'Mooloo'])
     assert scraper.reconcile('Lynette EX', index) == 'Lynette EX ⚔️'
     assert scraper.reconcile('Molu', index) == 'Mooloo'
+
+
+@pytest.mark.parametrize('canonical', ['Primrose EX', 'EX Primrose ⚔️'])
+def test_curated_sprites_follow_actual_index_word_order(tmp_db_path, monkeypatch, canonical):
+    filenames = ['Primrose_EX_Apothecary_Sprite.png', 'Primrose_EX_Cleric_Sprite.png']
+    html = '<table>' + ''.join(
+        '<tr><td><img src="%s"></td><td><a>Primrose EX</a></td></tr>' % _cdn(filename)
+        for filename in filenames
+    ) + '</table>'
+    monkeypatch.setattr(scraper, 'fetch_wiki_html', lambda: html)
+    monkeypatch.setattr(scraper, 'fetch_wiki_file_urls', lambda titles: {t: _cdn(t) for t in titles})
+    conn = repo.connect(tmp_db_path)
+    repo.upsert_character(conn, canonical, 'apothecary', 'axe')
+    summary = scraper.refresh_sprite_urls(conn)
+    assert summary['missing'] == []
+    assert [(r['canonical_name'], r['sprite_url']) for r in conn.execute('SELECT * FROM character_sprites')] == [
+        (canonical, _cdn(filenames[0]))]
+    conn.close()

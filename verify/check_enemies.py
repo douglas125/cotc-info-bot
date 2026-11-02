@@ -65,7 +65,7 @@ def check_rank_coverage(conn, payload):
                      for r in repo.get_enemy_member_stats(conn, form['id'])}
             if wanted != found:
                 return False, f'{identity} {rank}: member stats differ from source'
-            wanted_weak = {(pos, slot, label) for pos, labels in enumerate(enemy.weaknesses_by_position)
+            wanted_weak = {(pos, slot, label) for pos, labels in enumerate(enemy.weaknesses_for_rank(rank))
                            for slot, label in enumerate(labels)}
             found_weak = {(r['position'], r['slot_order'], r['weakness_label'])
                           for r in repo.get_enemy_weaknesses(conn, form['id'])}

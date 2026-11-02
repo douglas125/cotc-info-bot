@@ -346,11 +346,15 @@ def refresh_sprite_urls(conn) -> dict:
     ]
     db_index = build_db_index(db_canonicals)
 
-    applicable_overrides = {
-        canonical: file_title
-        for canonical, file_title in SPRITE_FILE_OVERRIDES.items()
-        if canonical.casefold() in db_index
-    }
+    applicable_overrides: dict[str, str] = {}
+    for name, file_title in SPRITE_FILE_OVERRIDES.items():
+        canonical = db_index.get(name.casefold())
+        if canonical is None:
+            continue
+        previous = applicable_overrides.get(canonical)
+        if previous is not None and previous != file_title:
+            raise RuntimeError(f"conflicting curated sprite files for {canonical!r}")
+        applicable_overrides[canonical] = file_title
     override_urls = fetch_wiki_file_urls(applicable_overrides.values())
 
     page_urls: dict[str, str] = {}

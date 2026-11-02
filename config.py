@@ -188,6 +188,12 @@ ENEMY_DATA_TAB_GIDS: dict[str, int] = {
 ENEMY_NPC_DATA_KEYS: dict[int, str] = {2117870435: "NPCs", 1358661359: "NPCs140"}
 ENEMY_NPC_TAB_GIDS: frozenset[int] = frozenset(ENEMY_NPC_DATA_KEYS)
 
+# User-confirmed encounter composition (2026-11-02): Bokhohn fights alone
+# through Difficulty 2. Missing HP for any other member remains an error/warning.
+ENEMY_MEMBER_MIN_DIFFICULTY: dict[tuple[str, str, str], int] = {
+    ("Seven Heroes", "Bokhohn", "Large Puppet"): 3,
+}
+
 
 # Seed Story Content — sibling pet spreadsheet.
 PETS_SPREADSHEET_ID = "1pApYNOrKWliMn_25Fs23Lhc8wlSDwutxCYJzyufSwUY"

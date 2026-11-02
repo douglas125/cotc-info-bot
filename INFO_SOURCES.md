@@ -149,9 +149,10 @@ When an encounter combines data references and manually entered members,
 only its usable displayed rank is imported, with a warning. At migration,
 Aelfric and its manually entered pillar use this fallback. Inline shields
 are included, and stats for other ranks are never inferred from the display.
-Bokhohn Difficulty 2 is currently omitted with a warning because the referenced
-Large Puppet row has no HP; the importer does not assume that means an absent
-member. Its complete Difficulty 4/5 forms are available.
+Bokhohn fights alone at Difficulty 2 and below (user-confirmed on 2026-11-02).
+The reviewed `ENEMY_MEMBER_MIN_DIFFICULTY` rule excludes Large Puppet from
+those forms, including its weakness row. At higher difficulties the puppet's
+HP must be available; other missing member stats continue to produce warnings.
 
 Weakness icons are named-range formulas (`=Sword`, `=Wind`, etc.), including
 conditional wave formulas; they are readable through the API. `Polearm`
@@ -173,7 +174,7 @@ Missing required tabs or an empty enemy import abort the transaction. Refresh
 reports newly detected, unclassified enemy data/display tabs; the verifier fails
 their inventory check so source additions cannot silently escape an audit.
 The 2026-11-02 isolated baseline contains 292 character forms (all with kits
-and sprites), 138 enemy encounters / 820 forms, 68 pets and 687 accessories.
+and sprites), 138 enemy encounters / 821 forms, 68 pets and 687 accessories.
 These counts describe that snapshot rather than fixed import requirements.
 Refresh preserves feedback, usage counters, fight notes, and sync history. After the
 approved deployment, run one `/refresh` (or the existing sync CLI on the deployed
