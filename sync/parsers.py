@@ -264,6 +264,7 @@ class FormBlock:
     splash_art_url: str | None = None
     self_buffs_text: str | None = None
     affinities: list[tuple[str, str | None, str | None]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 _WEAPON_PATTERNS = {
@@ -356,6 +357,36 @@ _KNOWN_STAT_NAMES = frozenset({
 _BASE_STAT_NAMES = frozenset({
     "HP", "SP", "ATK", "DEF", "MAG", "MDEF", "ACC", "SPD", "CRIT", "EVA",
 })
+
+# Confirmed in 255 formula-labelled blocks. Inserted image labels are absent
+# from the Sheets API, so only this complete, bounded template can substitute.
+_BASE_STAT_TEMPLATE = ("HP", "SP", "ATK", "DEF", "MAG", "MDEF", "CRIT", "SPD")
+
+
+def _has_base_stat_template(
+    rows: list[list[dict[str, Any]]], header_row: int,
+    icon_col: int, value_cols: list[int],
+) -> bool:
+    end = header_row + 1 + len(_BASE_STAT_TEMPLATE)
+    if end >= len(rows) or icon_col >= len(rows[end]):
+        return False
+    if _cell_text(rows[end][icon_col]).strip().casefold() != "resists":
+        return False
+    for offset, expected in enumerate(_BASE_STAT_TEMPLATE, 1):
+        row = rows[header_row + offset]
+        if icon_col >= len(row):
+            return False
+        icon = row[icon_col]
+        if _formula(icon) or _cell_text(icon).strip():
+            if _formula_stat_name(icon, _BASE_STAT_NAMES) != expected:
+                return False
+        if not any(col < len(row) and _cell_int(row[col]) is not None for col in value_cols):
+            return False
+        # A nonblank nonnumeric value is not a stat-grid placeholder.
+        if any(col < len(row) and _cell_text(row[col]).strip()
+               and _cell_int(row[col]) is None for col in value_cols):
+            return False
+    return True
 
 
 def _formula_stat_name(
@@ -791,6 +822,8 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
             block.alignment = cand or None
 
         icon_col = max(0, lv100_col - 1)
+        value_cols = [lv100_col] + ([lv120_col] if lv120_col is not None else [])
+        template = _has_base_stat_template(block_rows, lv100_row, icon_col, value_cols)
         order = 0
         seen_stat_keys: set[tuple[int, str]] = set()
         for ridx in range(lv100_row + 1, min(lv100_row + 1 + 12, len(block_rows))):
@@ -798,7 +831,15 @@ def _parse_block(block_rows: list[list[dict[str, Any]]], *, gid: int,
             if icon_col >= len(r):
                 break
             name = _formula_stat_name(r[icon_col], _BASE_STAT_NAMES)
+            offset = ridx - lv100_row - 1
+            if name is None and template and offset < len(_BASE_STAT_TEMPLATE):
+                name = _BASE_STAT_TEMPLATE[offset]
             if not name:
+                if (not template and offset < len(_BASE_STAT_TEMPLATE)
+                        and any(c < len(r) and _cell_int(r[c]) is not None for c in value_cols)):
+                    warning = "Unlabelled base stats do not match the bounded eight-row template"
+                    if warning not in block.warnings:
+                        block.warnings.append(warning)
                 # Tolerate one blank spacer; any non-blank non-stat ends the block.
                 if _cell_text(r[icon_col]).strip():
                     break

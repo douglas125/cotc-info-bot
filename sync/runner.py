@@ -1,6 +1,7 @@
 """Orchestrates fetch + parse + persist as a single sync run."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections import defaultdict
 from typing import Any, Callable
@@ -34,6 +35,8 @@ from sync.parsers import (
 from sync.pet_parsers import parse_pets
 from sync.accessory_parsers import parse_accessories
 from db import accessories as accessory_repo
+
+logger = logging.getLogger(__name__)
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -135,6 +138,14 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             for key in canonical_name_keys(b.display_name):
                 sea_blocks_by_name.setdefault(key, b)
         progress(f"  Parsed {len(sea_blocks)} SEA/GL kit blocks.")
+        character_warnings = [
+            f"{b.display_name} (gid={b.sheet_gid}, row={b.source_row + 1}): {warning}"
+            for blocks in [*blocks_by_tab.values(), sea_blocks] for b in blocks
+            for warning in b.warnings
+        ]
+        for warning in character_warnings:
+            logger.warning("%s", warning)
+            progress(f"  WARN: {warning}")
 
         progress("Writing into SQLite (transactional)...")
         with repo.transaction(conn):
@@ -158,13 +169,16 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                     name_color_hex=entry.color_hex,
                     hyperlink_url=entry.hyperlink_url,
                 )
-                index_name_keys.add(entry.canonical_name.lower())
+                entry_keys = canonical_name_keys(entry.canonical_name)
+                index_name_keys.update(k.casefold() for k in entry_keys)
                 # SEA/GL Unique Kits takes precedence: if the character has a
                 # block in that tab, use it instead of the role-tab block.
                 # Otherwise fall back to the role-tab block (rarity-band aware).
-                block = sea_blocks_by_name.get(entry.canonical_name)
+                block = next((sea_blocks_by_name[k] for k in entry_keys
+                              if k in sea_blocks_by_name), None)
                 if block is None:
-                    candidates = blocks_by_name.get(entry.canonical_name, [])
+                    candidates = next((blocks_by_name[k] for k in entry_keys
+                                       if k in blocks_by_name), [])
                     block = _select_block_for(entry, candidates, blocks_by_tab)
                 if block is not None:
                     _persist_block(conn, form_id, block)
@@ -177,9 +191,8 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
             # SEA-only EX variants (e.g. "Lynette EX") that the Index hasn't
             # caught up with — without this pass they'd be silently dropped.
             for block in sea_blocks:
-                key = block.display_name.lower()
                 if any(
-                    k.lower() in index_name_keys
+                    k.casefold() in index_name_keys
                     for k in canonical_name_keys(block.display_name)
                 ):
                     continue
@@ -200,7 +213,7 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                     source_row=block.source_row,
                 )
                 _persist_block(conn, form_id, block)
-                index_name_keys.add(key)
+                index_name_keys.update(k.casefold() for k in canonical_name_keys(block.display_name))
 
             # Third pass: EX/EX2 forms that exist as complete role-tab blocks
             # before the Index catches up. The role tab itself is authoritative
@@ -211,9 +224,8 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                     block_key = (block.sheet_gid, block.source_row, block.display_name)
                     if block_key in used_role_blocks:
                         continue
-                    key = block.display_name.lower()
                     if any(
-                        k.lower() in index_name_keys
+                        k.casefold() in index_name_keys
                         for k in canonical_name_keys(block.display_name)
                     ):
                         continue
@@ -235,7 +247,7 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                         source_row=block.source_row,
                     )
                     _persist_block(conn, form_id, block)
-                    index_name_keys.add(key)
+                    index_name_keys.update(k.casefold() for k in canonical_name_keys(block.display_name))
 
             progress("Rebuilding character FTS index...")
             repo.rebuild_fts(conn)
@@ -275,7 +287,7 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                     )
                     repo.insert_enemy_member_stats(conn, form_id, stat_rows)
                     repo.insert_enemy_weaknesses(
-                        conn, form_id, enemy.weaknesses_by_position,
+                        conn, form_id, enemy.weaknesses_for_rank(rank_key),
                     )
 
             progress("Rebuilding enemy FTS index...")
@@ -301,11 +313,14 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
         # Non-fatal post-step OUTSIDE the main transaction so the HTTP
         # call doesn't hold a SQLite write lock — a wiki outage can't
         # abort an otherwise-good sync.
+        sprite_warnings: list[str] = []
         try:
             from scripts.refresh_sprite_urls import refresh_sprite_urls
             sprite_summary = refresh_sprite_urls(conn)
             unmatched = len(sprite_summary["unmatched"])
             missing = len(sprite_summary["missing"])
+            if missing:
+                sprite_warnings.append("Sprites missing: " + ", ".join(sprite_summary["missing"]))
             notes = []
             if unmatched:
                 notes.append(f"{unmatched} unmatched wiki rows")
@@ -319,7 +334,10 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                 f"{sprite_summary['overrides']} curated){note}"
             )
         except Exception as exc:
-            progress(f"WARN: sprite refresh skipped: {exc}")
+            sprite_warnings.append(f"Sprite refresh skipped: {exc}")
+        for warning in sprite_warnings:
+            logger.warning("%s", warning)
+            progress(f"WARN: {warning}")
 
         c = repo.counts(conn)
         repo.finish_sync_run(
@@ -341,6 +359,8 @@ def run_sync(api_key: str, *, progress: ProgressCB = _noop) -> dict[str, Any]:
                 "enemy_warnings": list(enemy_parse.warnings),
                 "pet_warnings": list(pet_warnings),
                 "accessory_warnings": list(accessory_warnings),
+                "sprite_warnings": sprite_warnings,
+                "character_warnings": character_warnings,
                 **c}
 
     except Exception as exc:
@@ -452,11 +472,11 @@ def _select_block_for(entry, candidates, blocks_by_tab):
 
 
 def _variant_kind_for(name: str) -> str:
+    prefix, _, suffix = _split_variant(name)
+    marker = (prefix or suffix).lower()
+    if marker:
+        return marker
     n = name.lower().strip()
-    if n.startswith("ex2 ") or n.endswith(" ex2"):
-        return "ex2"
-    if n.startswith("ex ") or n.endswith(" ex"):
-        return "ex"
     if "saint of" in n or "(alt)" in n:
         return "alt"
     return "base"

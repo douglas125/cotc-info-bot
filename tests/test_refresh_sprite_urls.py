@@ -363,3 +363,53 @@ def test_auguste_ex_file_override_covers_missing_wiki_index_row(tmp_db_path, mon
     assert summary['missing'] == []
     assert conn.execute("SELECT sprite_url FROM character_sprites WHERE canonical_name='EX Auguste'").fetchone()[0] == _cdn('Auguste_EX_Sprite.png')
     conn.close()
+
+
+def test_reviewed_ex_jobs_resolve_new_wiki_collisions(tmp_db_path, monkeypatch):
+    jobs = {
+        'EX Primrose': ('apothecary', 'Primrose_EX_Apothecary_Sprite.png'),
+        'EX2 Primrose': ('cleric', 'Primrose_EX_Cleric_Sprite.png'),
+        'EX Bargello': ('dancer', 'Bargello_EX_Dancer_Sprite.png'),
+        'EX2 Bargello': ('merchant', 'Bargello_EX_Merchant_Sprite.png'),
+        'EX Rondo': ('scholar', 'Rondo_EX_Scholar_Sprite.png'),
+        'EX2 Rondo': ('thief', 'Rondo_EX_Thief_Sprite.png'),
+        'EX Sonia': ('apothecary', 'Sonia_EX_Sprite.png'),
+    }
+    html = '<table>' + ''.join(
+        '<tr><td><img src="%s"></td><td><a>%s EX</a></td></tr>' % (_cdn(filename), name.split()[-1])
+        for name, (_, filename) in jobs.items() if name != 'EX Sonia'
+    ) + '</table>'
+    monkeypatch.setattr(scraper, 'fetch_wiki_html', lambda: html)
+    monkeypatch.setattr(scraper, 'fetch_wiki_file_urls', lambda titles: {t: _cdn(t) for t in titles})
+    conn = repo.connect(tmp_db_path)
+    for name, (role, _) in jobs.items():
+        repo.upsert_character(conn, name, role, None)
+    summary = scraper.refresh_sprite_urls(conn)
+    assert summary['missing'] == []
+    rows = {r['canonical_name']: r['sprite_url'] for r in conn.execute('SELECT * FROM character_sprites')}
+    assert rows == {name: _cdn(filename) for name, (_, filename) in jobs.items()}
+    conn.close()
+
+
+def test_wiki_names_resolve_annotated_index_labels():
+    index = scraper.build_db_index(['Lynette EX ⚔️', 'Mooloo'])
+    assert scraper.reconcile('Lynette EX', index) == 'Lynette EX ⚔️'
+    assert scraper.reconcile('Molu', index) == 'Mooloo'
+
+
+@pytest.mark.parametrize('canonical', ['Primrose EX', 'EX Primrose ⚔️'])
+def test_curated_sprites_follow_actual_index_word_order(tmp_db_path, monkeypatch, canonical):
+    filenames = ['Primrose_EX_Apothecary_Sprite.png', 'Primrose_EX_Cleric_Sprite.png']
+    html = '<table>' + ''.join(
+        '<tr><td><img src="%s"></td><td><a>Primrose EX</a></td></tr>' % _cdn(filename)
+        for filename in filenames
+    ) + '</table>'
+    monkeypatch.setattr(scraper, 'fetch_wiki_html', lambda: html)
+    monkeypatch.setattr(scraper, 'fetch_wiki_file_urls', lambda titles: {t: _cdn(t) for t in titles})
+    conn = repo.connect(tmp_db_path)
+    repo.upsert_character(conn, canonical, 'apothecary', 'axe')
+    summary = scraper.refresh_sprite_urls(conn)
+    assert summary['missing'] == []
+    assert [(r['canonical_name'], r['sprite_url']) for r in conn.execute('SELECT * FROM character_sprites')] == [
+        (canonical, _cdn(filenames[0]))]
+    conn.close()

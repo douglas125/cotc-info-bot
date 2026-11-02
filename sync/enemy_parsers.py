@@ -36,6 +36,8 @@ from config import (
     ENEMY_NAME_ALIASES,
     ENEMY_NPC_TAB_GIDS,
     ENEMY_NPC_DATA_KEYS,
+    ENEMY_SKIP_TABS,
+    ENEMY_MEMBER_MIN_DIFFICULTY,
 )
 from enemy_ranks import RANK_PATTERN, normalize_rank, rank_order
 from sync.fetch import iter_rows, sheet_by_gid
@@ -167,6 +169,13 @@ class ParsedEnemy:
     # weaknesses_by_position[i] = ['Sword', ...] — same for every rank since
     # the display tab encodes one weakness set per encounter, not per rank.
     weaknesses_by_position: list[list[str]] = field(default_factory=list)
+    excluded_member_positions: dict[str, set[int]] = field(default_factory=dict)
+
+    def weaknesses_for_rank(self, rank: str) -> list[list[str]]:
+        """Hide only explicitly absent members; preserve other source rows."""
+        excluded = self.excluded_member_positions.get(rank, set())
+        return [labels if pos not in excluded else []
+                for pos, labels in enumerate(self.weaknesses_by_position)]
 
 
 # --- data tab parsing -------------------------------------------------------
@@ -297,6 +306,62 @@ def parse_npc_data_tab(sheet: dict[str, Any]) -> dict[str, NpcStat]:
         if stats:
             out[name] = NpcStat(npc_name=name, stats=stats)
     return out
+
+
+def parse_difficulty_data_tab(sheet: dict[str, Any], region: str) -> dict[str, EncounterData]:
+    """Read the Seven Heroes flat member catalog, retaining blank future stats."""
+    rows = iter_rows(sheet)
+    header = next(((ri, ci) for ri, row in enumerate(rows)
+                   for ci, cell in enumerate(row) if _cell_text(cell) == "Difficulty"), None)
+    if header is None:
+        return {}
+    header_row, rank_col = header
+    labels: list[str] = []
+    for cell in rows[header_row][rank_col + 1:]:
+        label = _cell_text(cell)
+        if label not in _STAT_HEADER_LABELS:
+            break
+        labels.append(label)
+    if not labels or rank_col == 0:
+        return {}
+    out: dict[str, EncounterData] = {}
+    member: MemberRanks | None = None
+    for ri in range(header_row + 1, len(rows)):
+        row = rows[ri]
+        rank = normalize_rank(_cell_text(row[rank_col])) if rank_col < len(row) else None
+        if rank is None or not rank.startswith("Difficulty"):
+            member = None
+            continue
+        name = _cell_text(row[rank_col - 1])
+        if name:
+            if name in out:
+                raise ValueError(f"Duplicate difficulty catalog member: {name}")
+            member = MemberRanks(name, source_start_row=ri, rank_col=rank_col)
+            out[name] = EncounterData(name, region, [member])
+        if member is None:
+            raise ValueError(f"Difficulty catalog row {ri + 1} has no member name")
+        if rank in member.rank_stats:
+            raise ValueError(f"Duplicate difficulty: {member.member_name} {rank}")
+        member.source_end_row = ri
+        member.rank_stats[rank] = {
+            label: _cell_text(row[rank_col + 1 + i])
+            for i, label in enumerate(labels)
+            if rank_col + 1 + i < len(row) and _cell_text(row[rank_col + 1 + i])
+        }
+    return out
+
+
+def source_inventory_warnings(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> list[str]:
+    """Notice new data/display tabs instead of silently ignoring source growth."""
+    known = {t.gid for t in ENEMIES_TABS} | set(data_tab_gids.values())
+    warnings = []
+    for sheet in payload.get("sheets", []):
+        props = sheet["properties"]
+        if props["sheetId"] in known or props["title"] in ENEMY_SKIP_TABS:
+            continue
+        if props["title"].endswith(" Data") or _detect_display_blocks(iter_rows(sheet)):
+            warnings.append(f"Unclassified enemy source tab: {props['title']} (gid={props['sheetId']})")
+    return warnings
 
 
 # --- display tab parsing ----------------------------------------------------
@@ -527,6 +592,32 @@ def _data_reference(formula: str) -> tuple[str, int, int] | None:
             int(match['row']) - 1, col - 1)
 
 
+def _resolved_member_formula(formula: str, rows: list[list[dict[str, Any]]]) -> str:
+    """Resolve only the source's INDIRECT("'tab'!"&CONCAT($A8,"8")) shape.
+
+    The local cell must contain column letters and the result must be a single
+    sheet-qualified A1 reference. No expression or external reference is run.
+    """
+    selected = _selected_formula(formula, rows)
+    match = re.fullmatch(
+        r'=INDIRECT\("([^"]+)"\s*&\s*CONCAT\((\$?[A-Z]+\$?[1-9]\d*),\s*"([1-9]\d*)"\)\)',
+        selected, re.I,
+    )
+    if match is None:
+        return selected
+    local = _data_reference("Local!" + match[2])
+    if local is None:
+        return selected
+    _, ri, ci = local
+    if ri >= len(rows) or ci >= len(rows[ri]):
+        return selected
+    column = _cell_text(rows[ri][ci]).strip()
+    if not re.fullmatch(r'[A-Z]{1,3}', column, re.I):
+        return selected
+    resolved = "=" + match[1] + column.upper() + match[3]
+    return resolved if _data_reference(resolved) else selected
+
+
 def _member_columns(rows: list[list[dict[str, Any]]], name_row: int, name_col: int) -> list[int]:
     """Find consecutive HP columns, including formulas whose values are not ready."""
     if name_row + 4 >= len(rows):
@@ -535,7 +626,7 @@ def _member_columns(rows: list[list[dict[str, Any]]], name_row: int, name_col: i
 
     def is_member(col: int) -> bool:
         cell = row[col]
-        formula = _selected_formula(_formula(cell), rows)
+        formula = _resolved_member_formula(_formula(cell), rows)
         return _is_hp_value(_cell_text(cell)) or _data_reference(formula) is not None
 
     first = next((c for c in range(name_col, min(name_col + 4, len(row))) if is_member(c)), None)
@@ -715,7 +806,7 @@ def parse_display_tab(sheet: dict[str, Any], spec: EnemyTabSpec) -> list[Display
             inline_stats=inline_stats,
             weaknesses_by_position=weaknesses,
             member_names_by_position=member_names,
-            member_formulas=[_selected_formula(_formula(rows[name_row + 4][c]), rows)
+            member_formulas=[_resolved_member_formula(_formula(rows[name_row + 4][c]), rows)
                              for c in _member_columns(rows, name_row, name_col)],
         ))
     return out
@@ -855,19 +946,29 @@ def _positive_hp(value: str) -> bool:
     return _is_stat_value(value) and int(_integer_text(value).replace(",", "")) > 0
 
 
-def _member_stats(members: list[MemberRanks], name: str, result: ParseResult) -> dict[str, list[dict[str, Any]]]:
+def _member_present(member: MemberRanks, name: str, rank: str, data_key: str | None) -> bool:
+    if not rank.startswith("Difficulty"):
+        return True
+    minimum = ENEMY_MEMBER_MIN_DIFFICULTY.get((data_key, name, member.member_name), 1)
+    return int(rank[10:]) >= minimum
+
+
+def _member_stats(members: list[MemberRanks], name: str, result: ParseResult,
+                  *, data_key: str | None = None) -> dict[str, list[dict[str, Any]]]:
     """Only publish ranks with usable HP for every encounter member."""
     ranks = sorted({rank for member in members for rank in member.rank_stats}, key=rank_order)
     out = {}
     for rank in ranks:
-        values = [member.rank_stats.get(rank, {}) for member in members]
+        active = [(pos, member) for pos, member in enumerate(members)
+                  if _member_present(member, name, rank, data_key)]
+        values = [member.rank_stats.get(rank, {}) for _, member in active]
         if not any(any(stats.values()) for stats in values):
             continue  # An entirely blank future rank is a normal placeholder.
         if not all(_positive_hp(stats.get("HP", "")) for stats in values):
             result.warnings.append(f"{name} {rank}: incomplete member HP; rank omitted")
             continue
         stat_rows = []
-        for position, (member, stats) in enumerate(zip(members, values)):
+        for (position, member), stats in zip(active, values):
             for stat, value in stats.items():
                 if not value:
                     continue
@@ -909,7 +1010,8 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseRe
         if region in npc_data_keys:
             npc_catalogs[region] = parse_npc_data_tab(sheet)
             continue
-        encounters = parse_data_tab(sheet, region)
+        encounters = (parse_difficulty_data_tab(sheet, region) if region == "Seven Heroes"
+                      else parse_data_tab(sheet, region))
         encounters_by_region[region] = encounters
         for encounter in encounters.values():
             for member in encounter.members:
@@ -917,12 +1019,13 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseRe
                     members_by_source[(gid, row, member.rank_col)] = member
     region_indexes = {region: _build_name_index(list(encounters))
                       for region, encounters in encounters_by_region.items()}
-    result = ParseResult()
+    result = ParseResult(warnings=source_inventory_warnings(payload, data_tab_gids))
     for spec in ENEMIES_TABS:
         sheet = sheet_by_gid(payload, spec.gid)
         if sheet is None:
             continue
         for block in parse_display_tab(sheet, spec):
+            data_key = spec.data_key or spec.region
             members = []
             if block.is_npc:
                 data_key = ENEMY_NPC_DATA_KEYS[spec.gid]
@@ -966,7 +1069,7 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseRe
                         target = sheets_by_title.get(ref[0]) if ref else None
                         gid = target['properties']['sheetId'] if target else None
                         member = members_by_source.get((gid, ref[1], ref[2])) if ref else None
-                        if gid != data_tab_gids.get(block.region) or member is None:
+                        if gid != data_tab_gids.get(data_key) or member is None:
                             result.unmatched.append((block.display_name, spec.name))
                             result.warnings.append(f"{block.display_name}: unresolved member data reference")
                             break
@@ -974,16 +1077,16 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseRe
                     if len(members) != len(refs):
                         continue
                 else:
-                    index = region_indexes.get(block.region)
+                    index = region_indexes.get(data_key)
                     key = reconcile_display_to_data(block.display_name, index) if index else None
                     if key is not None:
-                        members = encounters_by_region[block.region][key].members
+                        members = encounters_by_region[data_key][key].members
                     elif _try_inline_fallback(block, result):
                         continue
                     else:
                         result.unmatched.append((block.display_name, spec.name))
                         continue
-            rank_stats = _member_stats(members, block.display_name, result)
+            rank_stats = _member_stats(members, block.display_name, result, data_key=data_key)
             if not rank_stats:
                 result.warnings.append(f"{block.display_name}: no usable ranks yet; encounter omitted")
                 continue
@@ -993,5 +1096,10 @@ def parse_all(payload: dict[str, Any], data_tab_gids: dict[str, int]) -> ParseRe
                 source_row=block.source_row, name_color_hex=block.name_color_hex,
                 hyperlink_url=block.hyperlink_url, is_npc=block.is_npc,
                 rank_stats=rank_stats, weaknesses_by_position=block.weaknesses_by_position,
+                excluded_member_positions={
+                    rank: {pos for pos, member in enumerate(members)
+                           if not _member_present(member, block.display_name, rank, data_key)}
+                    for rank in rank_stats
+                },
             ))
     return result

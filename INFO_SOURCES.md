@@ -13,7 +13,7 @@ Canonical references for everything this project depends on.
   to anchor cells. That is fast to *read* but painful to filter or
   cross-reference inside Sheets.
 
-### Tab inventory (19 tabs)
+### Tab inventory (26 tabs observed on 2026-11-02; 19 configured reference/input tabs)
 
 - 1 × master `Characters Index` (canonical roster)
 - 1 × `Release History`
@@ -21,7 +21,10 @@ Canonical references for everything this project depends on.
 - 8 × ⭐5 role tabs (one per role)
 - 8 × 3✯ & 4✯ role tabs (one per role)
 
-The full `gid → tab-name` map lives in `config.py::TABS`. Tabs are referenced
+The configured `gid → tab-name` map lives in `config.py::TABS`. Additional tabs
+include a second release history, JP improvement schedule, icon sheet, roadmaps,
+general-pool list, layout template and unit name ranges. These are references,
+not additional character-kit inputs. Tabs are referenced
 by `gid` everywhere because tab names contain ⭐ and ✯ unicode characters that
 don't survive cleanly in shell pipelines or SQL string literals.
 
@@ -59,6 +62,23 @@ The wiki likewise labels both variants `Rinyuu EX`. Reviewed sprite overrides
 use `Rinyuu_EX_Apothecary_Sprite.png` for EX and
 `Rinyuu_EX_Dancer_Sprite.png` for EX2, verified through the wiki file API.
 
+The Index's trailing `⚔️` marks Global kits; retain it in display names but
+ignore it when matching kits, EX markers and sprites. Global `Molu` maps to
+Index `Mooloo`. Matching these entries prevents empty Index kits and duplicate
+supplemental forms for Phenn, Lynette EX, Levina EX and Mooloo.
+
+Some Lv100/Lv120 stat labels are inserted images and therefore absent from the
+API. A fallback accepts only the complete eight-row HP/SP/ATK/DEF/MAG/MDEF/CRIT/SPD
+template bounded by a level header and `Resists` footer, with numeric values
+and no conflicting labels. This order was confirmed across 255 labelled source
+blocks. Ambiguous layouts generate character warnings; blank levels stay blank.
+
+Reviewed sprite overrides distinguish Primrose EX (apothecary) / EX2 (cleric),
+Bargello EX (dancer) / EX2 (merchant), and Rondo EX (scholar) / EX2 (thief).
+Sonia EX uses `Sonia_EX_Sprite.png`. Curated PNGs are resolved through the wiki
+file API before any sprite writes. Sprite failures preserve existing mappings
+and appear in logs and the `/refresh` warning summary.
+
 ## Hyperlinks back to the source
 
 Every form's `hyperlink_url` (column on `character_forms`) points to a
@@ -78,15 +98,18 @@ a separate art source.
   `@silence_ark` for source corrections.
 - **Replaces**: `1Of4zz3rlV973Rt2kzHqoSWjiJmfhb77iMnAYofCT3Gs`.
 - **Coverage**: base ranks 1–3, available numbered EX ranks (including EX4
-  and EX5), and 120/140 NPC encounters. EX coverage grows as fights release.
+  and EX5), spoiler encounters, Seven Heroes difficulties, and 120/140 NPC
+  encounters. Coverage grows as fights release.
 
-### Tab inventory (17 tabs at migration)
+### Tab inventory (20 tabs verified on 2026-11-02)
 
 - `Guide`, `Template`, `Images`: non-data tabs, skipped.
 - Eight ranked display tabs: `Lvl 1/25/50/75` and `Solistia Lvl 1/25/50/75`.
+- `(SPOILERS) Lvl 75` (gid `601882043`): four additional Orsterra encounters.
+- `Seven Heroes` (gid `116895487`): seven individual heroes and their combined fight.
 - Two NPC display tabs: `120 NPCs` and `140 NPCs`.
-- Four hidden data tabs: `Orsterra Data` (source spelling), `Solistia Data`,
-  `120 NPCs Data`, and `140 NPCs Data`.
+- Five data tabs: `Orsterra Data` (source spelling), `Solistia Data`,
+  `120 NPCs Data`, `140 NPCs Data`, and `Seven Heroes Data` (gid `959055652`).
 
 Gids are authoritative in `config.ENEMIES_TABS` and `ENEMY_DATA_TAB_GIDS`.
 `Lvl 75` changed to gid `2066203872`; `140 NPCs` is `1358661359` and its
@@ -102,15 +125,23 @@ provide all populated ranks for each member. A refresh discovers new fights
 and EX ranks within these configured tabs without a per-fight code change.
 
 The shared `enemy_ranks` helpers normalize and numerically sort `Rank1`–`Rank3`
-and `EX<n>` for positive integers. Only ranks with positive numeric HP for
-every identified member are published. Blank future ranks are valid; partial
+and `EX<n>` / `Difficulty<n>` for positive integers. Discord displays the
+latter as “Difficulty n” in the existing rank dropdown. The flat Seven Heroes
+catalog retains each member's populated difficulties and uses display-to-data
+references to group members. Its `data_key` is separate from geographical
+region. Only ranks with positive numeric HP for every identified member are
+published. Blank future ranks are valid; partial
 ranks and invalid optional stats produce sync warnings. `/enemy` defaults
 to the highest available rank. No scheduled refresh is configured.
 
 Display-to-data references take precedence over name reconciliation. Ranked
 VLOOKUP ranges identify member blocks; direct NPC references identify catalog
 rows. Exact names, explicit `ENEMY_NAME_ALIASES`, and article-stripped matching
-remain fallbacks for blocks without references. The importer resolves simple
+remain fallbacks for blocks without references. The importer resolves NPC
+`INDIRECT("'140 NPCs Data'!"&CONCAT($A8,"8"))` references by reading the
+local column-letter cell and literal row number. Other INDIRECT expressions
+remain unresolved. This imports Otherworldly Traveler's Al and Soul of Protection
+members without guessing their stats. The importer resolves simple
 IF/IFS wave selectors using the current source selection; it does not add a
 wave selector to Discord or combine stats from different displayed waves.
 
@@ -118,6 +149,10 @@ When an encounter combines data references and manually entered members,
 only its usable displayed rank is imported, with a warning. At migration,
 Aelfric and its manually entered pillar use this fallback. Inline shields
 are included, and stats for other ranks are never inferred from the display.
+Bokhohn fights alone at Difficulty 2 and below (user-confirmed on 2026-11-02).
+The reviewed `ENEMY_MEMBER_MIN_DIFFICULTY` rule excludes Large Puppet from
+those forms, including its weakness row. At higher difficulties the puppet's
+HP must be available; other missing member stats continue to produce warnings.
 
 Weakness icons are named-range formulas (`=Sword`, `=Wind`, etc.), including
 conditional wave formulas; they are readable through the API. `Polearm`
@@ -136,7 +171,12 @@ exactly six ranks or a fixed count of EX4 encounters. Historical screenshot
 values remain in offline regression tests.
 
 Missing required tabs or an empty enemy import abort the transaction. Refresh
-preserves feedback, usage counters, fight notes, and sync history. After the
+reports newly detected, unclassified enemy data/display tabs; the verifier fails
+their inventory check so source additions cannot silently escape an audit.
+The 2026-11-02 isolated baseline contains 292 character forms (all with kits
+and sprites), 138 enemy encounters / 821 forms, 68 pets and 687 accessories.
+These counts describe that snapshot rather than fixed import requirements.
+Refresh preserves feedback, usage counters, fight notes, and sync history. After the
 approved deployment, run one `/refresh` (or the existing sync CLI on the deployed
 volume); an ordinary restart does not refresh an already populated database.
 

@@ -305,8 +305,8 @@ CREATE INDEX IF NOT EXISTS ix_enemies_search_key ON enemies(search_key);
 CREATE TABLE IF NOT EXISTS enemy_forms (
     id              INTEGER PRIMARY KEY,
     enemy_id        INTEGER NOT NULL REFERENCES enemies(id) ON DELETE CASCADE,
-    rank            TEXT NOT NULL,         -- 'Rank1'|'Rank2'|'Rank3'|'EX<n>'|'Default'
-    rank_order      INTEGER NOT NULL,      -- Rank n => n; EX n => 3+n; NPC Default => 0
+    rank            TEXT NOT NULL,         -- 'Rank1'|'Rank2'|'Rank3'|'EX<n>'|'Difficulty<n>'|'Default'
+    rank_order      INTEGER NOT NULL,      -- Rank/Difficulty n => n; EX n => 3+n; NPC Default => 0
     UNIQUE(enemy_id, rank)
 );
 CREATE INDEX IF NOT EXISTS ix_enemy_forms_enemy ON enemy_forms(enemy_id);

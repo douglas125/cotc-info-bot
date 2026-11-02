@@ -13,7 +13,7 @@ from config import (
 
 
 def test_tabs_inventory_count() -> None:
-    """Sheet has exactly 19 tabs as of this writing."""
+    """Nineteen configured reference/input tabs, not the whole workbook."""
     assert len(TABS) == 19
 
 
